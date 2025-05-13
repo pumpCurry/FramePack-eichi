@@ -745,6 +745,19 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 # history_latentsと呼ばれるキーが存在するか確認
                 if "history_latents" in tensor_dict:
                     uploaded_tensor = tensor_dict["history_latents"]
+
+                    # 削除するフレームサイズを計算
+                    uploaded_tensor_latent_size = uploaded_tensor.shape[2]
+                    trim_start_latent_size = tensor_trim_start_latents.value
+
+                    if uploaded_tensor_latent_size > trim_start_latent_size:
+                        # テンソルデータの先頭フレームを削除
+                        if trim_start_latent_size > 0:
+                            uploaded_tensor = uploaded_tensor[:, :, trim_start_latent_size:, :, :].clone()
+                            print(translate("アップロードされたテンソルデータの先頭フレームを削除しました。削除数: {0}/{1}").format(trim_start_latent_size, uploaded_tensor_latent_size))
+                    else:
+                        print(translate("警告: テンソルデータのフレーム数よりも、先頭フレーム削除数が大きく指定されているため、先頭フレーム削除は実施しません。"))
+
                     print(translate("テンソルデータ読み込み成功: shape={0}, dtype={1}").format(uploaded_tensor.shape, uploaded_tensor.dtype))
                     stream.output_queue.push(('progress', (None, translate('Tensor data loaded successfully!'), make_progress_bar_html(10, translate('Tensor data loaded successfully!')))))
                 else:
@@ -1428,6 +1441,17 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 callback=callback,
             )
 
+            if is_first_section:
+                # 末尾から削除するフレームサイズを計算
+                generated_latent_size = generated_latents.shape[2]
+                trim_end_latent_size = current_trim_end_latents.value
+                if generated_latent_size > trim_end_latent_size:
+                    if trim_end_latent_size > 0:
+                        generated_latents = generated_latents[:, :, :-trim_end_latent_size, :, :].clone()
+                        print(translate("生成されたデータの末尾フレームを削除しました。削除数: {0}/{1}").format(trim_end_latent_size, generated_latent_size))
+                else:
+                    print(translate("警告: 生成されたデータのフレーム数よりも、末尾フレーム削除数が大きく指定されているため、末尾フレーム削除は実施しません。"))
+
             if is_last_section:
                 generated_latents = torch.cat([start_latent.to(generated_latents), generated_latents], dim=2)
 
@@ -1575,8 +1599,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     current_pixels = vae_decode_cache(real_history_latents[:, :, :section_latent_frames], vae).cpu()
                 else:
                     current_pixels = vae_decode(real_history_latents[:, :, :section_latent_frames], vae).cpu()
+
+                if overlapped_frames > history_pixels.shape[2]:
+                    overlapped_frames = history_pixels.shape[2]
                 history_pixels = soft_append_bcthw(current_pixels, history_pixels, overlapped_frames)
-                
+
                 # 各セクションで生成された個々のフレームを静止画として保存
                 # 「全フレーム画像保存」または「最終セクションのみ全フレーム画像保存かつ最終セクション」が有効な場合
                 # 最終セクションかどうかを再判断
@@ -1749,9 +1776,6 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 except Exception as e:
                     print(translate("[WARN] セクション{0}最終フレーム画像保存時にエラー: {1}").format(i_section, e))
 
-            if not high_vram:
-                unload_complete_models()
-
             output_filename = os.path.join(outputs_folder, f'{job_id}_{total_generated_latent_frames}.mp4')
 
             save_bcthw_as_mp4(history_pixels, output_filename, fps=30, crf=mp4_crf)
@@ -1798,6 +1822,130 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                             print(translate("テンソルサイズの不一致のため、前方結合をスキップします"))
                             stream.output_queue.push(('progress', (None, translate("テンソルサイズの不一致のため、前方結合をスキップしました"), make_progress_bar_html(85, translate('互換性エラー')))))
                         else:
+                            # 生成データの末尾のフレームとテンソルデータの先頭のフレームを補間するフレームを追加する
+                            if use_interpolation_section:
+                                interpolation_latent_size = interpolation_latents.value
+                                if interpolation_latents.value > 0 and interpolation_latent_size > 0:
+                                    # パディング
+                                    interpolation_latent_padding_size = 0
+                                    # 生成データの末尾のフレーム
+                                    real_history_last_latent = real_history_latents[:, :, -1, :, :].clone()
+                                    # テンソルデータの先頭のフレーム
+                                    uploaded_tensor_first_latent = uploaded_tensor[:, :, 0, :, :].clone()
+
+                                    # 開始、終了画像を出力
+                                    # VAEキャッシュ設定に応じてデコード関数を切り替え
+                                    if use_vae_cache:
+                                        last_image = vae_decode_cache(real_history_last_latent.clone().unsqueeze(2), vae)
+                                    else:
+                                        last_image = vae_decode(real_history_last_latent.clone().unsqueeze(2), vae)
+                                    last_image = (last_image[0, :, 0] * 127.5 + 127.5).permute(1, 2, 0).cpu().numpy().clip(0, 255).astype(np.uint8)
+                                    # デコードした画像を保存
+                                    Image.fromarray(last_image).save(os.path.join(outputs_folder, f'{job_id}_interpolation_start.png'))
+                                    # VAEキャッシュ設定に応じてデコード関数を切り替え
+                                    if use_vae_cache:
+                                        first_image = vae_decode_cache(uploaded_tensor_first_latent.unsqueeze(2), vae)
+                                    else:
+                                        first_image = vae_decode(uploaded_tensor_first_latent.unsqueeze(2), vae)
+                                    first_image = (first_image[0, :, 0] * 127.5 + 127.5).permute(1, 2, 0).cpu().numpy().clip(0, 255).astype(np.uint8)
+                                    # デコードした画像を保存
+                                    Image.fromarray(first_image).save(os.path.join(outputs_folder, f'{job_id}_interpolation_end.png'))
+
+                                    def callback_interpolation(d):
+                                        preview = d['denoised']
+                                        preview = vae_decode_fake(preview)
+
+                                        preview = (preview * 255.0).detach().cpu().numpy().clip(0, 255).astype(np.uint8)
+                                        preview = einops.rearrange(preview, 'b c t h w -> (b h) (t w) c')
+
+                                        if stream.input_queue.top() == 'end':
+                                            stream.output_queue.push(('end', None))
+                                            raise KeyboardInterrupt('User ends the task.')
+
+                                        current_step = d['i'] + 1
+                                        percentage = int(100.0 * current_step / steps)
+                                        hint = translate('Sampling {0}/{1}').format(current_step, steps)
+                                        desc = "補間データを生成中です ..."
+                                        stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
+                                        return
+
+                                    uploaded_tensor_size = 1 + 2 + 16
+                                    if uploaded_tensor.shape[2] < uploaded_tensor_size:
+                                        # テンソルデータの足りない部分を補間
+                                        interpolation_uploaded_tensor = torch.nn.functional.interpolate(uploaded_tensor, size=(uploaded_tensor_size, uploaded_tensor.shape[3], uploaded_tensor.shape[4]), mode='nearest')
+                                    else:
+                                        interpolation_uploaded_tensor = uploaded_tensor
+
+                                    effective_window_size_2 = interpolation_latents.value
+
+                                    # 補間frames
+                                    interpolation_num_frames = int(effective_window_size_2 * 4 - 3)
+
+                                    # indexとclean_latent
+                                    indices_2 = torch.arange(0, sum([1, interpolation_latent_padding_size, effective_window_size_2, 1, 2, 16])).unsqueeze(0)
+                                    clean_latent_indices_pre_2, _, latent_indices_2, clean_latent_indices_post_2, clean_latent_2x_indices_2, clean_latent_4x_indices_2 = indices_2.split([1, interpolation_latent_padding_size, effective_window_size_2, 1, 2, 16], dim=1)
+                                    clean_latent_indices_2 = torch.cat([clean_latent_indices_pre_2, clean_latent_indices_post_2], dim=1)
+                                    clean_latents_post_2, clean_latents_2x_2, clean_latents_4x_2 = interpolation_uploaded_tensor[:, :, :1 + 2 + 16, :, :].split([1, 2, 16], dim=2)
+                                    clean_latents_2 = torch.cat([real_history_last_latent.unsqueeze(2), clean_latents_post_2[:, :, :1, :, :]], dim=2)
+
+                                    # 補間フレームを生成
+                                    generated_interpolation_latents = sample_hunyuan(
+                                        transformer=transformer,
+                                        sampler='unipc',
+                                        width=width,
+                                        height=height,
+                                        frames=interpolation_num_frames,
+                                        real_guidance_scale=cfg,
+                                        distilled_guidance_scale=gs,
+                                        guidance_rescale=rs,
+                                        # shift=3.0,
+                                        num_inference_steps=steps,
+                                        generator=rnd,
+                                        prompt_embeds=llama_vec,  # TODO:メインプロンプトを使用。補間用のプロンプトを入力できてもよいかも
+                                        prompt_embeds_mask=llama_attention_mask,  # TODO:メインプロンプトのマスクを使用。補間用のプロンプトを入力できてもよいかも
+                                        prompt_poolers=clip_l_pooler,  # TODO:メインプロンプトを使用。補間用のプロンプトを入力できてもよいかも
+                                        negative_prompt_embeds=llama_vec_n,
+                                        negative_prompt_embeds_mask=llama_attention_mask_n,
+                                        negative_prompt_poolers=clip_l_pooler_n,
+                                        device=gpu,
+                                        dtype=torch.bfloat16,
+                                        image_embeddings=image_encoder_last_hidden_state,
+                                        latent_indices=latent_indices_2,
+                                        clean_latents=clean_latents_2,
+                                        clean_latent_indices=clean_latent_indices_2,
+                                        clean_latents_2x=clean_latents_2x_2,
+                                        clean_latent_2x_indices=clean_latent_2x_indices_2,
+                                        clean_latents_4x=clean_latents_4x_2,
+                                        clean_latent_4x_indices=clean_latent_4x_indices_2,
+                                        callback=callback_interpolation,
+                                    )
+
+                                    # 補間された潜在変数を結合
+                                    device = real_history_latents.device
+                                    generated_interpolation_latents = generated_interpolation_latents.to(device)
+                                    uploaded_tensor = uploaded_tensor.to(device)
+                                    real_history_latents = torch.cat([real_history_latents, generated_interpolation_latents, uploaded_tensor], dim=2)
+
+                                    # VAEキャッシュ設定に応じてデコード関数を切り替え
+                                    if not high_vram:
+                                        load_model_as_complete(vae, target_device=gpu)
+                                    if use_vae_cache:
+                                        interpolation_pixels = vae_decode_cache(generated_interpolation_latents[:, :, :], vae).cpu()
+                                    else:
+                                        interpolation_pixels = vae_decode(generated_interpolation_latents[:, :, :], vae).cpu()
+
+                                    # overlapは小さめに固定
+                                    interpolation_overlapped_frames = 2
+                                    if interpolation_overlapped_frames > interpolation_pixels.shape[2]:
+                                        interpolation_overlapped_frames = interpolation_pixels.shape[2]
+
+                                    history_pixels = soft_append_bcthw(history_pixels, interpolation_pixels, interpolation_overlapped_frames)
+                                    print(translate("新規生成データの末尾、補間データ、テンソルデータの先頭のフレームを結合しました。"))
+
+                                    # 補間データをmp4にして出力
+                                    interpolation_output_filename = os.path.join(outputs_folder, f'{job_id}_interpolation.mp4')
+                                    save_bcthw_as_mp4(interpolation_pixels, interpolation_output_filename, fps=30, crf=mp4_crf)
+
                             # デバイスとデータ型を合わせる
                             processed_tensor = uploaded_tensor.clone()
                             if processed_tensor.device != real_history_latents.device:
@@ -2162,7 +2310,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                     sf.save_file(combined_tensor_dict, tensor_combined_path)
 
                                     print(translate("結合テンソルを保存しました: {path}").format(path=tensor_combined_path))
-                                    print(translate("結合テンソル情報: 合計{0}フレーム ({1}+{2}), {3:.2f} MB").format(frames, tensor_to_save.shape[2], uploaded_tensor.shape[2], size))
+                                    print(translate("結合テンソル情報: 合計{0}フレーム ({1}+{2}), {3:.2f} MB").format(combined_frames, tensor_to_save.shape[2], uploaded_tensor.shape[2], combined_size_mb))
                                     print(translate("=== テンソルデータ結合処理完了 ==="))
                                     stream.output_queue.push(('progress', (None, translate("テンソルデータ結合が保存されました: 合計{frames}フレーム").format(frames=combined_frames), make_progress_bar_html(100, translate('結合テンソル保存完了')))))
                             except Exception as e:
@@ -2191,7 +2339,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 if combined_output_filename is not None:
                     # テンソル結合が成功した場合のメッセージ
                     combined_filename_only = os.path.basename(combined_output_filename)
-                    completion_message = translate("すべてのセクション({sections}/{total_sections})が完了しました。テンソルデータとの後方結合も完了しました。結合ファイル名: {filename}\n全体の処理時間: {time}").format(sections=sections, total_sections=total_sections, filename=combined_filename_only, time=time_str)
+                    completion_message = translate("すべてのセクション({sections}/{total_sections})が完了しました。テンソルデータとの後方結合も完了しました。結合ファイル名: {filename}\n全体の処理時間: {time}").format(sections=total_sections, total_sections=total_sections, filename=combined_filename_only, time=time_str)
                     # 最終的な出力ファイルを結合したものに変更
                     output_filename = combined_output_filename
                 else:
@@ -2232,6 +2380,9 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         stream.output_queue.push(('progress', (None, final_message, make_progress_bar_html(100, translate('処理完了')))))
 
                 break
+
+            if not high_vram:
+                unload_complete_models()
     except:
         traceback.print_exc()
 
@@ -3051,12 +3202,95 @@ with block:
 
                 # テンソルデータ設定コンポーネント（初期状態では非表示）
                 with gr.Group(visible=False) as tensor_data_group:
+                    # テンソルデータファイルのアップロード
                     tensor_data_input = gr.File(
                         label=translate("テンソルデータアップロード (.safetensors) - 生成動画の後方(末尾)に結合されます"),
                         file_types=[".safetensors"]
                     )
 
                     gr.Markdown(translate("※ テンソルデータをアップロードすると通常の動画生成後に、その動画の後方（末尾）に結合されます。\n結合した動画は「元のファイル名_combined.mp4」として保存されます。\n※ テンソルデータの保存機能を有効にすると、生成とアップロードのテンソルを結合したデータも保存されます。\n※ テンソルデータの結合は別ツール `python eichi_utils/tensor_combiner.py --ui` でもできます。"))
+
+                    # チェックボックスで表示/非表示を切り替え
+                    use_interpolation_section = gr.Checkbox(
+                        label=translate("テンソルデータと生成動画のスムーズ結合機能を表示"),
+                        value=False,
+                        info=translate("チェックをオンにするとテンソルデータと新規に生成する動画をスムーズに結合する機能を表示します")
+                    )
+
+                    with gr.Group(visible=False) as interpolation_group:
+                        # テンソルデータと新規生成動画のスムージング結合のチェックボックス
+                        gr.Markdown(f"### " + translate("テンソルデータと生成動画のスムーズ結合機能"))
+
+                        # テンソルデータの先頭の削除フレーム数
+                        tensor_trim_start_latents = gr.Slider(
+                            label=translate("テンソルデータの先頭の削除フレーム数"),
+                            minimum=0,
+                            maximum=5,
+                            value=0,
+                            step=1,
+                            interactive=True,
+                            info=translate("テンソルデータの先頭から削除するフレーム数。テンソルデータの先頭部分にノイズがある場合に、設定してください。出力結果の品質を確認して調整してください。")
+                        )
+
+                        # 新規生成側の末尾の削除フレーム数
+                        current_trim_end_latents = gr.Slider(
+                            label=translate("新規生成側の末尾の削除フレーム数"),
+                            minimum=0,
+                            maximum=3,
+                            value=0,
+                            step=1,
+                            interactive=True,
+                            info=translate("新規で生成する動画の末尾から削除するフレーム数。0で大丈夫です。※新規生成部分の末尾はコントロールしやすいので、今のところ利用想定ケースがないです。")
+                        )
+
+                        # 補間フレーム数
+                        interpolation_latents = gr.Slider(
+                            label=translate("補間フレーム数"),
+                            minimum=0,
+                            maximum=12,
+                            value=0,
+                            step=1,
+                            interactive=True,
+                            info=translate("新規で生成する動画の末尾とテンソルデータの先頭をつなげるため、追加する補間フレーム数。6-9推奨。補間された動画は、動画長とは別に加算されます。※現状専用プロンプトはなく、メインプロンプトが使用されます。\n設定値と時間の目安：3（0.3秒）、6（0.7秒）、9（1.1秒）、12（1.5秒）")
+                        )
+
+                        def change_trim_start_latents(value):
+                            return value
+
+                        tensor_trim_start_latents.change(
+                            fn=change_trim_start_latents,
+                            inputs=[tensor_trim_start_latents],
+                            outputs=[]
+                        )
+
+                        def change_current_trim_end_latents(value):
+                            return value
+
+                        current_trim_end_latents.change(
+                            fn=change_current_trim_end_latents,
+                            inputs=[current_trim_end_latents],
+                            outputs=[]
+                        )
+
+                        def change_interpolation_latents(value):
+                            return value
+
+                        interpolation_latents.change(
+                            fn=change_interpolation_latents,
+                            inputs=[interpolation_latents],
+                            outputs=[]
+                        )
+
+                    # チェックボックスの状態によってテンソルデータと生成動画のスムーズ機能の表示/非表示を切り替える関数
+                    def toggle_interpolation_settings(use_interpolation):
+                        return gr.update(visible=use_interpolation)
+
+                    # チェックボックスの変更イベントに関数を紐づけ
+                    use_interpolation_section.change(
+                        fn=toggle_interpolation_settings,
+                        inputs=[use_interpolation_section],
+                        outputs=[interpolation_group]
+                    )
 
                 # チェックボックスの状態によってテンソルデータ設定の表示/非表示を切り替える関数
                 def toggle_tensor_data_settings(use_tensor):
