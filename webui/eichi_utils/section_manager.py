@@ -32,7 +32,8 @@ def process_uploaded_zipfile(file, max_keyframes):
             "section_prompts": ["" for _ in range(max_keyframes)],
             "section_images": [None for _ in range(max_keyframes)],
             "end_frame": None,
-            "start_frame": None
+            "start_frame": None,
+            "lora_settings": None
         }
 
     # 一時ディレクトリで処理
@@ -172,6 +173,11 @@ def process_uploaded_zipfile(file, max_keyframes):
     seed_from_yaml = prompt_data.get("SEED", -1)
     # print(f"[IMPORTANT] YAMLからデフォルトプロンプトを読み込み: '{default_prompt_from_yaml}'")
     # print(f"[IMPORTANT] YAMLからSEED値を読み込み: {seed_from_yaml}")
+    
+    # LoRA設定を取得（存在しない場合はNone）
+    lora_settings_from_yaml = prompt_data.get("lora_settings", None)
+    if lora_settings_from_yaml:
+        print(f"[IMPORTANT] YAMLからLoRA設定を読み込み: {lora_settings_from_yaml}")
 
     # image_filesからファイル名の先頭番号を抽出してマッピング
     image_file_map = {
@@ -204,7 +210,8 @@ def process_uploaded_zipfile(file, max_keyframes):
         "end_frame": end_frame_image_from_zip,
         "start_frame": start_frame_image_from_zip,
         "default_prompt": default_prompt_from_yaml,
-        "seed": seed_from_yaml
+        "seed": seed_from_yaml,
+        "lora_settings": lora_settings_from_yaml
     }
     
     # エンドフレームとスタートフレームの確認
@@ -288,13 +295,24 @@ def create_section_zipfile(section_settings, end_frame=None, start_frame=None, a
         # 追加情報がある場合は追加
         if additional_info:
             # デフォルトプロンプトの追加
-            if "default_prompt" in additional_info and additional_info["default_prompt"]:
-                print(f"デフォルトプロンプトを追加: {additional_info['default_prompt']}")
-                sections_yaml["default_prompt"] = additional_info["default_prompt"]
+            if "default_prompt" in additional_info:
+                print(f"[DEBUG-EXPORT] default_prompt値の詳細: '{additional_info['default_prompt']}' (型: {type(additional_info['default_prompt'])}, 長さ: {len(additional_info['default_prompt']) if isinstance(additional_info['default_prompt'], str) else 'N/A'})")
+                if additional_info["default_prompt"]:
+                    prompt_len = len(additional_info['default_prompt'])
+                    print(f"[DEBUG-EXPORT] デフォルトプロンプトを追加: '{additional_info['default_prompt'][:50]}...' (全長: {prompt_len})")
+                    sections_yaml["default_prompt"] = additional_info["default_prompt"]
+                else:
+                    print(f"[DEBUG-EXPORT] default_promptは空文字列またはFalsy値のため追加されません: 値='{additional_info['default_prompt']}'")
             
             # シード値を追加（デフォルトは -1 = ランダム）
             sections_yaml["SEED"] = additional_info.get("seed", -1)
-            print(f"シード値を追加: {sections_yaml['SEED']}")
+            # print(f"[DEBUG-EXPORT] シード値を追加: {sections_yaml['SEED']}")
+            # print(f"[DEBUG-EXPORT] additional_info全体: {additional_info}")
+            
+            # LoRA設定を追加（存在する場合）
+            if "lora_settings" in additional_info and additional_info["lora_settings"]:
+                # print(f"LoRA設定を追加: {additional_info['lora_settings']}")
+                sections_yaml["lora_settings"] = additional_info["lora_settings"]
         
         # 画像ファイルのコピー先ディレクトリ
         section_images_dir = os.path.join(temp_dir, "sections")
@@ -619,17 +637,24 @@ def upload_zipfile_handler(file, max_keyframes):
     # print(f"[IMPORTANT] start_frame ({start_frame_path}) を出力リストに追加します")
     gr_outputs.append(start_frame_path)
     
-    # デフォルトプロンプトとシード値も保持
-    default_prompt = section_info["default_prompt"]
-    seed_value = section_info["seed"]
-    # print(f"[IMPORTANT] デフォルトプロンプト ({default_prompt}) とシード値 ({seed_value}) をセクション情報に含めます")
+    # デフォルトプロンプトとシード値も追加
+    default_prompt = section_info.get("default_prompt", "")
+    seed_value = section_info.get("seed", None)
+    # print(f"[IMPORTANT] デフォルトプロンプト ({default_prompt}) とシード値 ({seed_value}) を出力リストに追加します")
     
-    # これらの値はリストのデータ内に含めるが、
-    # Gradioコンポーネントとして使用しない（グローバルスコープの問題を回避するため）
+    # 末尾にデフォルトプロンプトとシード値を追加
+    gr_outputs.append(default_prompt)
+    gr_outputs.append(seed_value)
+    
+    # LoRA設定を追加
+    lora_settings = section_info.get("lora_settings", None)
+    if lora_settings:
+        print(f"[IMPORTANT] LoRA設定 ({lora_settings}) を出力リストに追加します")
+    gr_outputs.append(lora_settings)
     
     # 出力リストの長さを確認（デバッグ）
     # print(f"[DEBUG] 出力リストの長さ: {len(gr_outputs)}")
-    # print(f"[DEBUG] 出力リストの最後の4項目: {gr_outputs[-4:]}")
+    # print(f"[DEBUG] 出力リストの最後の5項目: {gr_outputs[-5:]}")
     
     return gr_outputs
 
