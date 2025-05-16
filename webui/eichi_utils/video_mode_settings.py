@@ -229,6 +229,74 @@ VIDEO_MODE_SETTINGS = {
                 "1": [3, 5, 7, 9, 11, 13, 15, 17]      # キーフレーム1→奇数番号にコピー
             }
         }
+    },
+    "30秒": {
+        "frames": 900,                  # 30秒×30FPS
+        "sections": 28,                 # 必要セクション数（計算に基づく）
+        "display_seconds": 30,          # UI表示用秒数
+        "important_keyframes": [0, 1],  # 重要なキーフレームのインデックス（0=赤枠、1=青枠）
+        "keyframe_styles": {0: "red", 1: "blue"},  # キーフレームの枠線スタイル
+        "copy_patterns": {
+            MODE_TYPE_NORMAL: {
+                "0": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26],  # キーフレーム0→偶数番号にコピー
+                "1": [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]   # キーフレーム1→奇数番号にコピー
+            },
+            MODE_TYPE_LOOP: {
+                "0": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26],  # キーフレーム0→偶数番号にコピー
+                "1": [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27]   # キーフレーム1→奇数番号にコピー
+            }
+        }
+    },
+    "40秒": {
+        "frames": 1200,                 # 40秒×30FPS
+        "sections": 37,                 # 必要セクション数（計算に基づく）
+        "display_seconds": 40,          # UI表示用秒数
+        "important_keyframes": [0, 1],  # 重要なキーフレームのインデックス（0=赤枠、1=青枠）
+        "keyframe_styles": {0: "red", 1: "blue"},  # キーフレームの枠線スタイル
+        "copy_patterns": {
+            MODE_TYPE_NORMAL: {
+                "0": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36],  # キーフレーム0→偶数番号にコピー
+                "1": [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35]       # キーフレーム1→奇数番号にコピー
+            },
+            MODE_TYPE_LOOP: {
+                "0": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36],  # キーフレーム0→偶数番号にコピー
+                "1": [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35]       # キーフレーム1→奇数番号にコピー
+            }
+        }
+    },
+    "60秒": {
+        "frames": 1800,                 # 60秒×30FPS
+        "sections": 55,                 # 必要セクション数（計算に基づく）
+        "display_seconds": 60,          # UI表示用秒数
+        "important_keyframes": [0, 1],  # 重要なキーフレームのインデックス（0=赤枠、1=青枠）
+        "keyframe_styles": {0: "red", 1: "blue"},  # キーフレームの枠線スタイル
+        "copy_patterns": {
+            MODE_TYPE_NORMAL: {
+                "0": [i for i in range(2, 55, 2)],  # キーフレーム0→偶数番号にコピー
+                "1": [i for i in range(3, 55, 2)]   # キーフレーム1→奇数番号にコピー
+            },
+            MODE_TYPE_LOOP: {
+                "0": [i for i in range(2, 55, 2)],  # キーフレーム0→偶数番号にコピー
+                "1": [i for i in range(3, 55, 2)]   # キーフレーム1→奇数番号にコピー
+            }
+        }
+    },
+    "120秒": {
+        "frames": 3600,                 # 120秒×30FPS
+        "sections": 109,                # 必要セクション数（計算に基づく）
+        "display_seconds": 120,         # UI表示用秒数
+        "important_keyframes": [0, 1],  # 重要なキーフレームのインデックス（0=赤枠、1=青枠）
+        "keyframe_styles": {0: "red", 1: "blue"},  # キーフレームの枠線スタイル
+        "copy_patterns": {
+            MODE_TYPE_NORMAL: {
+                "0": [i for i in range(2, 109, 2)],  # キーフレーム0→偶数番号にコピー
+                "1": [i for i in range(3, 109, 2)]   # キーフレーム1→奇数番号にコピー
+            },
+            MODE_TYPE_LOOP: {
+                "0": [i for i in range(2, 109, 2)],  # キーフレーム0→偶数番号にコピー
+                "1": [i for i in range(3, 109, 2)]   # キーフレーム1→奇数番号にコピー
+            }
+        }
     }
 }
 
@@ -245,7 +313,7 @@ def get_video_modes():
     """利用可能なビデオモードのリストを取得"""
     # 現在の言語に合わせてミックス値を生成する
     modes = []
-    for key_suffix in ["1SEC", "2SEC", "3SEC", "4SEC", "6SEC", "8SEC", "10SEC", "12SEC", "16SEC", "20SEC"]:
+    for key_suffix in ["1SEC", "2SEC", "3SEC", "4SEC", "6SEC", "8SEC", "10SEC", "12SEC", "16SEC", "20SEC", "30SEC", "40SEC", "60SEC", "120SEC"]:
         internal_key = f"_KEY_VIDEO_LENGTH_{key_suffix}"
         translated_value = translate(internal_key)
         modes.append(translated_value)

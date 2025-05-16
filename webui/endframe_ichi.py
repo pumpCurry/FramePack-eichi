@@ -4711,6 +4711,34 @@ with block:
                 # モード変更時の処理もtotal_second_lengthコンポーネント定義後に行います
 
                 # 動画長変更時のセクション表示更新もtotal_second_lengthコンポーネント定義後に行います
+                
+                # フレームサイズに応じて動画長選択肢を更新する関数（修正版）
+                def update_length_choices_based_on_frame_size(frame_size_value, current_length_value):
+                    """フレームサイズに応じて動画長の選択肢を更新し、必要に応じて値も調整する"""
+                    from eichi_utils.video_mode_settings import get_video_modes
+                    
+                    all_modes = get_video_modes()
+                    
+                    # 「1秒 (33フレーム)」の場合はすべての選択肢を表示
+                    if frame_size_value == translate("1秒 (33フレーム)"):
+                        return gr.update(choices=all_modes, value=current_length_value)
+                    else:
+                        # 「0.5秒 (17フレーム)」の場合は30秒と40秒を除外
+                        # 翻訳されているため、後ろから2つを除外
+                        filtered_modes = all_modes[:-2]  # 30秒と40秒を除外
+                        
+                        # 現在選択されている動画長が30秒または40秒の場合、20秒に変更
+                        if current_length_value == translate("30秒") or current_length_value == translate("40秒"):
+                            return gr.update(choices=filtered_modes, value=translate("20秒"))
+                        else:
+                            return gr.update(choices=filtered_modes, value=current_length_value)
+                
+                # フレームサイズ変更時に動画長選択肢を更新
+                frame_size_radio.change(
+                    fn=update_length_choices_based_on_frame_size,
+                    inputs=[frame_size_radio, length_radio],
+                    outputs=[length_radio]
+                )
 
                 # 入力画像変更時の処理 - ループモード用に復活
                 # 通常モードでセクションにコピーする処理はコメント化したまま
