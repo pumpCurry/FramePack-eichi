@@ -35,18 +35,9 @@ def embed_metadata_to_png(image_path, metadata_dict):
         # パラメータを結合したテキストも作成（SD系との互換性のため）
         parameters_text = ""
 
+        # パラメータテキストの構築（個別キーは埋め込まない）
         for key, value in metadata_dict.items():
             if value is not None:
-                if isinstance(value, (dict, list)):
-                    # 辞書やリストの場合はJSON文字列に変換
-                    metadata.add_text(key, json.dumps(value))
-                    # print(translate("[DEBUG] JSON形式でメタデータ追加: {0}={1}").format(key, json.dumps(value)))
-                else:
-                    # その他の値は文字列に変換
-                    metadata.add_text(key, str(value))
-                    # print(translate("[DEBUG] 文字列形式でメタデータ追加: {0}={1}").format(key, value))
-
-                # パラメータテキストの構築
                 if key == PROMPT_KEY:
                     parameters_text += f"{value}\n"
                 elif key == SEED_KEY:
@@ -118,23 +109,41 @@ def extract_metadata_from_png(image_path_or_object):
                     # print(translate("[DEBUG] 文字列として解析: {0}={1}").format(key, value))
 
         # parametersキーからの抽出処理（SD系との互換性のため）
-        if PARAMETERS_KEY in metadata and isinstance(metadata[PARAMETERS_KEY], str):
-            params = metadata[PARAMETERS_KEY]
+        # 個別キーが無い場合でもparametersから抽出を試みる
+        if PARAMETERS_KEY in img.info:
+            params = img.info[PARAMETERS_KEY]
             # print(translate("[DEBUG] parameters形式のメタデータを処理: {0}").format(params))
 
-            # プロンプト抽出（最初の行がプロンプト）
-            if PROMPT_KEY not in metadata and "\n" in params:
-                first_line = params.split("\n")[0].strip()
-                if first_line and not first_line.startswith("Seed:") and not first_line.startswith("Section"):
-                    metadata[PROMPT_KEY] = first_line
-                    # print(translate("[DEBUG] parameters形式からプロンプトを抽出: {0}").format(first_line))
-
-            # Seed抽出
-            if SEED_KEY not in metadata and "Seed:" in params:
-                seed_parts = [p.strip() for p in params.split("Seed:")[1].split("\n")[0].split(",")]
-                if seed_parts[0].isdigit():
-                    metadata[SEED_KEY] = int(seed_parts[0])
-                    # print(translate("[DEBUG] parameters形式からSEEDを抽出: {0}").format(metadata[SEED_KEY]))
+            # 行に分割して処理
+            lines = params.split("\n")
+            
+            # プロンプト行を収集
+            prompt_lines = []
+            
+            # 全ての行を処理
+            for line in lines:
+                line_stripped = line.strip()
+                if line_stripped.startswith("Seed:"):
+                    seed_str = line_stripped.replace("Seed:", "").strip()
+                    if seed_str.isdigit():
+                        metadata[SEED_KEY] = int(seed_str)
+                elif line_stripped.startswith("Section Number:"):
+                    section_num_str = line_stripped.replace("Section Number:", "").strip()
+                    if section_num_str.isdigit():
+                        metadata[SECTION_NUMBER_KEY] = int(section_num_str)
+                elif line_stripped.startswith("Section Prompt:"):
+                    section_prompt = line_stripped.replace("Section Prompt:", "").strip()
+                    if section_prompt:
+                        metadata[SECTION_PROMPT_KEY] = section_prompt
+                else:
+                    # Seed: や Section: で始まらない行はプロンプトの一部
+                    if line.strip():  # 空行は除外
+                        prompt_lines.append(line.rstrip())
+            
+            # 複数行のプロンプトを結合
+            if prompt_lines:
+                metadata[PROMPT_KEY] = "\n".join(prompt_lines)
+                # print(translate("[DEBUG] プロンプト結合: {0}").format(metadata[PROMPT_KEY]))
 
         # print(translate("[DEBUG] 最終抽出メタデータ: {0}").format(metadata))
         return metadata

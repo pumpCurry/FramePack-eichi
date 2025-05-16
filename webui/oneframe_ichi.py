@@ -40,7 +40,7 @@ from PIL import Image
 import sys
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from eichi_utils.png_metadata import (
-    embed_metadata_to_png, extract_metadata_from_png, extract_metadata_from_numpy_array,
+    embed_metadata_to_png, extract_metadata_from_png,
     PROMPT_KEY, SEED_KEY, SECTION_PROMPT_KEY, SECTION_NUMBER_KEY
 )
 
@@ -1311,7 +1311,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 # メタデータを設定
                 metadata = {
                     PROMPT_KEY: prompt,
-                    SEED_KEY: str(seed)
+                    SEED_KEY: seed  # intとして保存
                 }
                 
                 # 画像として保存（メタデータ埋め込み）
@@ -1465,22 +1465,22 @@ def handle_open_folder_btn(folder_name):
     # 出力ディレクトリ入力欄とパス表示を更新
     return gr.update(value=folder_name), gr.update(value=folder_path)
     
-def update_from_image_metadata(image, should_copy):
+def update_from_image_metadata(image_path, should_copy):
     """画像からメタデータを抽出してプロンプトとシードを更新する関数
     
     Args:
-        image: 画像データ（numpy配列）
+        image_path: 画像ファイルパス
         should_copy: メタデータを複写するかどうかの指定
         
     Returns:
         tuple: (プロンプト更新データ, シード値更新データ)
     """
-    if not should_copy or image is None:
+    if not should_copy or image_path is None:
         return gr.update(), gr.update()
     
     try:
-        # NumPy配列からメタデータを抽出
-        metadata = extract_metadata_from_numpy_array(image)
+        # ファイルパスからメタデータを抽出
+        metadata = extract_metadata_from_png(image_path)
         
         if not metadata:
             print(translate("画像にメタデータが含まれていません"))
@@ -1509,9 +1509,9 @@ def update_from_image_metadata(image, should_copy):
         print(translate("メタデータ抽出エラー: {0}").format(e))
         return gr.update(), gr.update()
 
-def check_metadata_on_checkbox_change(should_copy, image):
+def check_metadata_on_checkbox_change(should_copy, image_path):
     """チェックボックスの状態が変更された時に画像からメタデータを抽出する関数"""
-    return update_from_image_metadata(image, should_copy)
+    return update_from_image_metadata(image_path, should_copy)
 
 def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache,
             lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_directory=None,
@@ -2026,7 +2026,7 @@ with block:
             # モードについての説明を画像枠の上に表示
             gr.Markdown(translate("**「1フレーム推論」モードでは、1枚の新しい未来の画像を生成します。**"))
             
-            input_image = gr.Image(sources='upload', type="numpy", label=translate("画像"), height=320)
+            input_image = gr.Image(sources='upload', type="filepath", label=translate("画像"), height=320)
             
             # 解像度設定（画像の直下に）
             resolution = gr.Dropdown(
