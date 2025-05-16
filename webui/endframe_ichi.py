@@ -3242,7 +3242,14 @@ with block:
             )
         with gr.Column(scale=1):
             # 設定から動的に選択肢を生成
-            length_radio = gr.Radio(choices=get_video_modes(), value=translate("1秒"), label=translate("動画長"), info=translate("キーフレーム画像のコピー範囲と動画の長さを設定"))
+            # endframeでは初期表示は1秒(33フレーム)なので40秒まで表示
+            all_modes = get_video_modes()
+            modes_up_to_40 = []
+            for mode in all_modes:
+                modes_up_to_40.append(mode)
+                if mode == translate("40秒"):
+                    break
+            length_radio = gr.Radio(choices=modes_up_to_40, value=translate("1秒"), label=translate("動画長"), info=translate("キーフレーム画像のコピー範囲と動画の長さを設定"))
 
     with gr.Row():
         with gr.Column():
@@ -4712,26 +4719,37 @@ with block:
 
                 # 動画長変更時のセクション表示更新もtotal_second_lengthコンポーネント定義後に行います
                 
-                # フレームサイズに応じて動画長選択肢を更新する関数（修正版）
+                # フレームサイズに応じて動画長選択肢を更新する関数
                 def update_length_choices_based_on_frame_size(frame_size_value, current_length_value):
                     """フレームサイズに応じて動画長の選択肢を更新し、必要に応じて値も調整する"""
                     from eichi_utils.video_mode_settings import get_video_modes
                     
                     all_modes = get_video_modes()
                     
-                    # 「1秒 (33フレーム)」の場合はすべての選択肢を表示
+                    # 「1秒 (33フレーム)」の場合は40秒まで表示
                     if frame_size_value == translate("1秒 (33フレーム)"):
-                        return gr.update(choices=all_modes, value=current_length_value)
+                        # 40秒までの選択肢を取得
+                        modes_up_to_40 = []
+                        for mode in all_modes:
+                            modes_up_to_40.append(mode)
+                            if mode == translate("40秒"):
+                                break
+                        return gr.update(choices=modes_up_to_40, value=current_length_value)
                     else:
-                        # 「0.5秒 (17フレーム)」の場合は30秒と40秒を除外
-                        # 翻訳されているため、後ろから2つを除外
-                        filtered_modes = all_modes[:-2]  # 30秒と40秒を除外
+                        # 「0.5秒 (17フレーム)」の場合は20秒まで表示
+                        modes_up_to_20 = []
+                        for mode in all_modes:
+                            modes_up_to_20.append(mode)
+                            if mode == translate("20秒"):
+                                break
                         
-                        # 現在選択されている動画長が30秒または40秒の場合、20秒に変更
-                        if current_length_value == translate("30秒") or current_length_value == translate("40秒"):
-                            return gr.update(choices=filtered_modes, value=translate("20秒"))
+                        # 現在選択されている動画長が20秒より大きい場合、20秒に変更
+                        # 40秒以上の値のリスト
+                        over_20_values = [translate("30秒"), translate("40秒"), translate("60秒"), translate("120秒")]
+                        if current_length_value in over_20_values:
+                            return gr.update(choices=modes_up_to_20, value=translate("20秒"))
                         else:
-                            return gr.update(choices=filtered_modes, value=current_length_value)
+                            return gr.update(choices=modes_up_to_20, value=current_length_value)
                 
                 # フレームサイズ変更時に動画長選択肢を更新
                 frame_size_radio.change(

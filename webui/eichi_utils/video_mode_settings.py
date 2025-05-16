@@ -266,35 +266,35 @@ VIDEO_MODE_SETTINGS = {
     },
     "60秒": {
         "frames": 1800,                 # 60秒×30FPS
-        "sections": 55,                 # 必要セクション数（計算に基づく）
+        "sections": 40,                 # 必要セクション数（計算に基づく）
         "display_seconds": 60,          # UI表示用秒数
         "important_keyframes": [0, 1],  # 重要なキーフレームのインデックス（0=赤枠、1=青枠）
         "keyframe_styles": {0: "red", 1: "blue"},  # キーフレームの枠線スタイル
         "copy_patterns": {
             MODE_TYPE_NORMAL: {
-                "0": [i for i in range(2, 55, 2)],  # キーフレーム0→偶数番号にコピー
-                "1": [i for i in range(3, 55, 2)]   # キーフレーム1→奇数番号にコピー
+                "0": [i for i in range(2, 40, 2)],  # キーフレーム0→偶数番号にコピー
+                "1": [i for i in range(3, 40, 2)]   # キーフレーム1→奇数番号にコピー
             },
             MODE_TYPE_LOOP: {
-                "0": [i for i in range(2, 55, 2)],  # キーフレーム0→偶数番号にコピー
-                "1": [i for i in range(3, 55, 2)]   # キーフレーム1→奇数番号にコピー
+                "0": [i for i in range(2, 40, 2)],  # キーフレーム0→偶数番号にコピー
+                "1": [i for i in range(3, 40, 2)]   # キーフレーム1→奇数番号にコピー
             }
         }
     },
     "120秒": {
         "frames": 3600,                 # 120秒×30FPS
-        "sections": 109,                # 必要セクション数（計算に基づく）
+        "sections": 40,                 # 必要セクション数（計算に基づく）
         "display_seconds": 120,         # UI表示用秒数
         "important_keyframes": [0, 1],  # 重要なキーフレームのインデックス（0=赤枠、1=青枠）
         "keyframe_styles": {0: "red", 1: "blue"},  # キーフレームの枠線スタイル
         "copy_patterns": {
             MODE_TYPE_NORMAL: {
-                "0": [i for i in range(2, 109, 2)],  # キーフレーム0→偶数番号にコピー
-                "1": [i for i in range(3, 109, 2)]   # キーフレーム1→奇数番号にコピー
+                "0": [i for i in range(2, 40, 2)],  # キーフレーム0→偶数番号にコピー
+                "1": [i for i in range(3, 40, 2)]   # キーフレーム1→奇数番号にコピー
             },
             MODE_TYPE_LOOP: {
-                "0": [i for i in range(2, 109, 2)],  # キーフレーム0→偶数番号にコピー
-                "1": [i for i in range(3, 109, 2)]   # キーフレーム1→奇数番号にコピー
+                "0": [i for i in range(2, 40, 2)],  # キーフレーム0→偶数番号にコピー
+                "1": [i for i in range(3, 40, 2)]   # キーフレーム1→奇数番号にコピー
             }
         }
     }
