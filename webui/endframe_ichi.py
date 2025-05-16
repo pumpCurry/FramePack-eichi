@@ -4841,9 +4841,18 @@ with block:
 
                 # アップロードファイルの内容を各セクション、end_frame、start_frameに反映する関数
                 # zipファイルアップロードハンドラを移動したモジュールを使用
-                def handle_upload_zipfile(file):
-                    # アップロードされたZIPファイルの内容を取得
-                    result = upload_zipfile_handler(file, max_keyframes)
+                def handle_upload_zipfile(file, current_video_length, current_frame_size, current_padding_mode, current_padding_value, current_resolution):
+                    # 現在の動画設定を辞書にまとめる
+                    current_video_settings = {
+                        "video_length": current_video_length,
+                        "frame_size": current_frame_size,
+                        "padding_mode": current_padding_mode,
+                        "padding_value": current_padding_value,
+                        "resolution": current_resolution
+                    }
+                    
+                    # アップロードされたZIPファイルの内容を取得（現在の動画設定を渡す）
+                    result = upload_zipfile_handler(file, max_keyframes, current_video_settings)
                     
                     # デバッグ用：LoRA設定が含まれているか確認
                     print(f"[DEBUG] upload result length: {len(result)}")
@@ -4878,14 +4887,32 @@ with block:
                                 # print(f"[WARNING] セクション{i}のプロンプト値が文字列ではありません: {prompt_value} (型: {type(prompt_value)})")
                     
                     # 共通プロンプトとSEED値の取得（エンドフレーム、スタートフレームの後に追加されている）
-                    if len(result) >= len(section_prompt_states) * 3 + 5:  # LoRA設定も含めて5つ追加
+                    # 動画設定が含まれる場合は、順序が変わるので注意
+                    has_video_settings = len(result) >= len(section_prompt_states) * 3 + 10  # 動画設定5つも含めて10つ追加
+                    
+                    if has_video_settings:
+                        # 順序: ... + end_frame + start_frame + prompt + seed + lora_settings + video_settings(5つ)
+                        default_prompt = result[-8]      # 末尾から8番目が共通プロンプト
+                        seed_value = result[-7]          # 末尾から7番目がSEED値
+                        lora_settings_data = result[-6]  # 末尾から6番目がLoRA設定
+                        
+                        # print(f"[DEBUG-UPLOAD] アップロードファイルから読み込んだdefault_prompt: '{default_prompt[:50]}...'")
+                        # print(f"[DEBUG-UPLOAD] アップロードファイルから読み込んだseed_value: {seed_value}")
+                        
+                        # エンドフレームとスタートフレームの正しい位置を計算
+                        end_frame_pos = len(result) - 10
+                        start_frame_pos = len(result) - 9
+                        
+                        # 共通プロンプトの更新のためのアップデートを作成
+                        prompt_update = gr.update(value=default_prompt) if default_prompt is not None else gr.update()
+                        
+                        # SEED値の更新のためのアップデートを作成
+                        seed_update = gr.update(value=seed_value) if seed_value is not None else gr.update()
+                    elif len(result) >= len(section_prompt_states) * 3 + 5:  # LoRA設定のみの場合
                         # 順序: ... + end_frame + start_frame + prompt + seed + lora_settings
                         default_prompt = result[-3]  # 末尾から3番目が共通プロンプト
                         seed_value = result[-2]      # 末尾から2番目がSEED値
                         lora_settings_data = result[-1]   # 末尾がLoRA設定
-                        
-                        # print(f"[DEBUG-UPLOAD] アップロードファイルから読み込んだdefault_prompt: '{default_prompt[:50]}...'")
-                        # print(f"[DEBUG-UPLOAD] アップロードファイルから読み込んだseed_value: {seed_value}")
                         
                         # エンドフレームとスタートフレームの正しい位置を計算
                         end_frame_pos = len(result) - 5
@@ -4896,9 +4923,6 @@ with block:
                         
                         # SEED値の更新のためのアップデートを作成
                         seed_update = gr.update(value=seed_value) if seed_value is not None else gr.update()
-                        
-                        # print(f"[DEBUG-UPLOAD] prompt_update: {prompt_update}")
-                        # print(f"[DEBUG-UPLOAD] seed_update: {seed_update}")
                     else:
                         # デフォルト値を維持
                         prompt_update = gr.update()
@@ -5123,6 +5147,14 @@ with block:
                         lora_scales_update       # lora_scales_text
                     ])
                     
+                    # 動画設定のアップデートを追加（最後の5つ）
+                    if has_video_settings:  # 動画設定が含まれている場合
+                        video_updates = result[-5:]  # 最後の5つが動画設定
+                        base_result.extend(video_updates)
+                    else:
+                        # デフォルト値を維持
+                        base_result.extend([gr.update(), gr.update(), gr.update(), gr.update(), gr.update()])
+                    
                     return base_result
 
                 # NOTE: 以下のZIPファイルアップロードイベント設定は、UIコンポーネント定義後に移動しました
@@ -5138,7 +5170,12 @@ with block:
                     lora_dropdown3_value,
                     lora_scales_text_value,
                     default_prompt_value,
-                    default_seed_value
+                    default_seed_value,
+                    video_length_value,
+                    frame_size_value,
+                    padding_mode_value,
+                    padding_value,
+                    resolution_value
                 ):
                     # print(f"[DEBUG-DOWNLOAD-CLICK] ダウンロードボタンがクリックされました")
                     # print(f"[DEBUG-DOWNLOAD-CLICK] default_prompt_value: '{default_prompt_value}' (型: {type(default_prompt_value)})")
@@ -5146,9 +5183,18 @@ with block:
                     # セクション設定情報を取得
                     section_settings = []
                     
-                    # 現在表示されているセクション数を取得
-                    current_sections_count = get_current_sections_count()
-                    # print(f"[INFO] 現在表示されているセクション数: {current_sections_count}")
+                    # 動画長に基づいてセクション数を計算
+                    from eichi_utils.video_mode_settings import get_video_seconds
+                    seconds = get_video_seconds(video_length_value)
+                    latent_window_size = 4.5 if frame_size_value == translate("0.5秒 (17フレーム)") else 9
+                    frame_count = latent_window_size * 4 - 3
+                    total_frames = int(seconds * 30)
+                    expected_sections = int(max(round(total_frames / frame_count), 1))
+                    
+                    # 実際にダウンロードするセクション数は、期待されるセクション数と最大キーフレーム数の小さい方
+                    current_sections_count = min(expected_sections, max_keyframes)
+                    print(f"[INFO] 動画長{video_length_value}に必要なセクション数: {expected_sections}")
+                    print(f"[INFO] ダウンロードするセクション数: {current_sections_count}")
                     
                     # State変数の値をデバッグ出力
                     # print(f"[INFO] State変数: end_frame_state = {end_frame_state_value}")
@@ -5347,6 +5393,26 @@ with block:
                         additional_info["lora_settings"] = lora_settings
                         print(f"[INFO] LoRA設定を追加: {lora_settings}")
                     
+                    # 動画設定を準備
+                    video_settings = {
+                        "video_length": video_length_value,
+                        "frame_size": frame_size_value,
+                        "padding_mode": padding_mode_value,
+                        "padding_value": padding_value,
+                        "resolution": resolution_value
+                    }
+                    
+                    # 期待されるセクション数を計算
+                    from eichi_utils.video_mode_settings import get_video_seconds
+                    seconds = get_video_seconds(video_length_value)
+                    latent_window_size = 4.5 if frame_size_value == translate("0.5秒 (17フレーム)") else 9
+                    frame_count = latent_window_size * 4 - 3
+                    total_frames = int(seconds * 30)
+                    expected_sections = int(max(round(total_frames / frame_count), 1))
+                    video_settings["expected_sections"] = expected_sections
+                    
+                    print(f"[INFO] 動画設定を追加: {video_settings}")
+                    
                     # zipファイルを生成（input_imageをstart_frameとして扱う）
                     # プロンプトのデバッグ出力
                     # for i, row in enumerate(section_settings):
@@ -5364,6 +5430,9 @@ with block:
                     
                     # print(f"[INFO] ダウンロードに使用するエンドフレーム: {end_frame_value}")
                     # print(f"[INFO] ダウンロードに使用する開始フレーム: {input_image_value}")
+                    
+                    # 動画設定をadditional_infoに追加
+                    additional_info["video_settings"] = video_settings
                     
                     zip_path = download_zipfile_handler(section_settings, end_frame_value, input_image_value, additional_info)
                     # print(f"生成されたZIPパス: {zip_path}")
@@ -5465,7 +5534,12 @@ with block:
                     lora_dropdown3,
                     lora_scales_text,
                     prompt,  # 直接プロンプトコンポーネントを使用
-                    seed    # 直接シードコンポーネントを使用
+                    seed,   # 直接シードコンポーネントを使用
+                    length_radio,  # 動画長設定
+                    frame_size_radio,  # フレームサイズ設定
+                    use_all_padding,  # パディングモード設定
+                    all_padding_value,  # パディング値
+                    resolution  # 解像度設定
                 ],  # State変数とLoRA設定を入力として受け取る
                 outputs=[download_file],
                 queue=False  # キューを無効にして即座に実行
@@ -5644,11 +5718,17 @@ with block:
             gr_outputs.append(lora_dropdown2)
             gr_outputs.append(lora_dropdown3)
             gr_outputs.append(lora_scales_text)
+            # 動画設定を追加
+            gr_outputs.append(length_radio)
+            gr_outputs.append(frame_size_radio)
+            gr_outputs.append(use_all_padding)
+            gr_outputs.append(all_padding_value)
+            gr_outputs.append(resolution)
             
             # ZIPファイルアップロード時のイベント設定
             upload_zipfile.change(
                 fn=handle_upload_zipfile, 
-                inputs=[upload_zipfile], 
+                inputs=[upload_zipfile, length_radio, frame_size_radio, use_all_padding, all_padding_value, resolution], 
                 outputs=gr_outputs
             )
             

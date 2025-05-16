@@ -8,6 +8,7 @@ import time
 import shutil
 from datetime import datetime
 import tempfile
+import gradio as gr
 
 from locales.i18n import translate
 
@@ -178,6 +179,11 @@ def process_uploaded_zipfile(file, max_keyframes):
     lora_settings_from_yaml = prompt_data.get("lora_settings", None)
     if lora_settings_from_yaml:
         print(f"[IMPORTANT] YAMLからLoRA設定を読み込み: {lora_settings_from_yaml}")
+    
+    # 動画設定を取得（存在しない場合はNone）
+    video_settings_from_yaml = prompt_data.get("video_settings", None)
+    if video_settings_from_yaml:
+        print(f"[IMPORTANT] YAMLから動画設定を読み込み: {video_settings_from_yaml}")
 
     # image_filesからファイル名の先頭番号を抽出してマッピング
     image_file_map = {
@@ -211,7 +217,8 @@ def process_uploaded_zipfile(file, max_keyframes):
         "start_frame": start_frame_image_from_zip,
         "default_prompt": default_prompt_from_yaml,
         "seed": seed_from_yaml,
-        "lora_settings": lora_settings_from_yaml
+        "lora_settings": lora_settings_from_yaml,
+        "video_settings": video_settings_from_yaml
     }
     
     # エンドフレームとスタートフレームの確認
@@ -313,6 +320,11 @@ def create_section_zipfile(section_settings, end_frame=None, start_frame=None, a
             if "lora_settings" in additional_info and additional_info["lora_settings"]:
                 # print(f"LoRA設定を追加: {additional_info['lora_settings']}")
                 sections_yaml["lora_settings"] = additional_info["lora_settings"]
+        
+        # 動画設定を追加（存在する場合）
+        if "video_settings" in additional_info and additional_info["video_settings"]:
+            print(f"[DEBUG-EXPORT] 動画設定を追加: {additional_info['video_settings']}")
+            sections_yaml["video_settings"] = additional_info["video_settings"]
         
         # 画像ファイルのコピー先ディレクトリ
         section_images_dir = os.path.join(temp_dir, "sections")
@@ -586,13 +598,14 @@ def create_section_zipfile(section_settings, end_frame=None, start_frame=None, a
         # 一時ディレクトリを削除（後始末）
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-def upload_zipfile_handler(file, max_keyframes):
+def upload_zipfile_handler(file, max_keyframes, current_video_settings=None):
     """
     zipファイルアップロード時のハンドラ関数
 
     Args:
         file: アップロードされたzipファイル
         max_keyframes: キーフレームの最大数
+        current_video_settings: 現在の動画設定（辞書型）
 
     Returns:
         list: Gradio用の出力リスト
@@ -652,9 +665,78 @@ def upload_zipfile_handler(file, max_keyframes):
         print(f"[IMPORTANT] LoRA設定 ({lora_settings}) を出力リストに追加します")
     gr_outputs.append(lora_settings)
     
+    # 動画設定を取得（出力リストには含めない）
+    video_settings = section_info.get("video_settings", None)
+    if video_settings:
+        print(f"[IMPORTANT] 動画設定を読み込みました: {video_settings}")
+    
+    # 現在の動画設定と比較して警告を追加
+    video_settings_warnings = []
+    if video_settings and current_video_settings:
+        # 期待されるセクション数を計算して比較
+        from eichi_utils.video_mode_settings import get_video_seconds
+        
+        uploaded_length = video_settings.get("video_length")
+        current_length = current_video_settings.get("video_length")
+        uploaded_frame_size = video_settings.get("frame_size")
+        current_frame_size = current_video_settings.get("frame_size")
+        
+        if uploaded_length and current_length and uploaded_length != current_length:
+            video_settings_warnings.append(f"動画長が異なります: アップロード={uploaded_length}, 現在={current_length}")
+        
+        if uploaded_frame_size and current_frame_size and uploaded_frame_size != current_frame_size:
+            video_settings_warnings.append(f"フレームサイズが異なります: アップロード={uploaded_frame_size}, 現在={current_frame_size}")
+        
+        # パディングモードの比較
+        uploaded_padding = video_settings.get("padding_mode")
+        current_padding = current_video_settings.get("padding_mode")
+        if uploaded_padding is not None and current_padding is not None and uploaded_padding != current_padding:
+            video_settings_warnings.append(f"パディングモードが異なります: アップロード={uploaded_padding}, 現在={current_padding}")
+        
+        # パディング値の比較
+        uploaded_padding_value = video_settings.get("padding_value")
+        current_padding_value = current_video_settings.get("padding_value")
+        if uploaded_padding_value is not None and current_padding_value is not None and uploaded_padding_value != current_padding_value:
+            video_settings_warnings.append(f"パディング値が異なります: アップロード={uploaded_padding_value}, 現在={current_padding_value}")
+        
+        # 解像度の比較
+        uploaded_resolution = video_settings.get("resolution")
+        current_resolution = current_video_settings.get("resolution")
+        if uploaded_resolution is not None and current_resolution is not None and uploaded_resolution != current_resolution:
+            video_settings_warnings.append(f"解像度が異なります: アップロード={uploaded_resolution}, 現在={current_resolution}")
+        
+        # セクション数の計算と比較
+        if uploaded_length and uploaded_frame_size:
+            seconds = get_video_seconds(uploaded_length)
+            latent_window_size = 4.5 if uploaded_frame_size == translate("0.5秒 (17フレーム)") else 9
+            frame_count = latent_window_size * 4 - 3
+            total_frames = int(seconds * 30)
+            expected_sections = int(max(round(total_frames / frame_count), 1))
+            
+            uploaded_sections = video_settings.get("expected_sections", expected_sections)
+            if uploaded_sections != expected_sections:
+                video_settings_warnings.append(f"セクション数が異なります: アップロード={uploaded_sections}, 計算値={expected_sections}")
+    
+    if video_settings_warnings:
+        warning_text = "Warning: 以下の動画設定が現在の設定と異なります:\n" + "\n".join(video_settings_warnings)
+        gr.Warning(warning_text)
+        print(f"[WARNING] {warning_text}")
+    
     # 出力リストの長さを確認（デバッグ）
     # print(f"[DEBUG] 出力リストの長さ: {len(gr_outputs)}")
     # print(f"[DEBUG] 出力リストの最後の5項目: {gr_outputs[-5:]}")
+    
+    # 動画設定を出力リストに追加（UIへの反映用）
+    if video_settings:
+        # 動画設定をUIに反映するための更新を作成
+        gr_outputs.append(gr.update(value=video_settings.get("video_length")))   # length_radio
+        gr_outputs.append(gr.update(value=video_settings.get("frame_size")))    # frame_size_radio
+        gr_outputs.append(gr.update(value=video_settings.get("padding_mode")))  # use_all_padding
+        gr_outputs.append(gr.update(value=video_settings.get("padding_value")))  # all_padding_value
+        gr_outputs.append(gr.update(value=video_settings.get("resolution")))    # resolution
+    else:
+        # デフォルト値を維持
+        gr_outputs.extend([gr.update(), gr.update(), gr.update(), gr.update(), gr.update()])
     
     return gr_outputs
 
