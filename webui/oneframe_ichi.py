@@ -686,6 +686,31 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
         # テキストエンコーディング
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Text encoding ...'))))
         
+        # イメージキューでカスタムプロンプトを使用しているかどうかを確認
+        using_custom_prompt = False
+        current_prompt = prompt  # デフォルトは共通プロンプト
+
+        if queue_enabled and queue_type == "image" and batch_index is not None and batch_index > 0:
+            if batch_index - 1 < len(image_queue_files):
+                queue_img_path = image_queue_files[batch_index - 1]
+                img_basename = os.path.splitext(queue_img_path)[0]
+                txt_path = f"{img_basename}.txt"
+                if os.path.exists(txt_path):
+                    try:
+                        # テキストファイルからカスタムプロンプトを読み込む
+                        with open(txt_path, 'r', encoding='utf-8') as f:
+                            custom_prompt = f.read().strip()
+                        
+                        # カスタムプロンプトを設定
+                        current_prompt = custom_prompt
+                        
+                        img_name = os.path.basename(queue_img_path)
+                        using_custom_prompt = True
+                        print(translate("[カスタムプロンプト情報] イメージキュー画像「{0}」の専用プロンプトを使用しています").format(img_name))
+                    except Exception as e:
+                        print(translate("[エラー] カスタムプロンプトファイルの読み込みに失敗しました: {0}").format(e))
+                        using_custom_prompt = False  # エラーが発生した場合は共通プロンプトを使用
+
         # キャッシュの使用判断
         global cached_prompt, cached_n_prompt, cached_llama_vec, cached_llama_vec_n
         global cached_clip_l_pooler, cached_clip_l_pooler_n, cached_llama_attention_mask, cached_llama_attention_mask_n
@@ -728,8 +753,30 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     load_model_as_complete(text_encoder_2, target_device=gpu)
                 
                 # テキストエンコーディング実行
+                # 実際に使用されるプロンプトを必ず表示
+                full_prompt = prompt  # 実際に使用するプロンプト
+                prompt_source = "共通プロンプト" # プロンプトの種類
+
+                # プロンプトソースの判定
+                if queue_enabled and queue_type == "prompt" and batch_index is not None:
+                    # プロンプトキューの場合
+                    prompt_source = "プロンプトキュー"
+                    print(translate("\nプロンプトキューからのプロンプトをエンコードしています..."))
+                    print(translate("[DEBUG] プロンプトキュー使用: queue_enabled={0}, queue_type={1}, batch_index={2}").format(queue_enabled, queue_type, batch_index))
+                elif using_custom_prompt:
+                    # イメージキューのカスタムプロンプトの場合
+                    full_prompt = current_prompt  # カスタムプロンプトを使用
+                    prompt_source = "カスタムプロンプト"
+                    print(translate("\nカスタムプロンプトをエンコードしています..."))
+                else:
+                    # 通常の共通プロンプトの場合
+                    print(translate("\n共通プロンプトをエンコードしています..."))
+                
+                # プロンプトの内容とソースを表示
+                print(translate("プロンプトソース: {0}").format(prompt_source))
+                print(translate("プロンプト全文: {0}").format(full_prompt))
                 print(translate("\nプロンプトをエンコードしています..."))
-                llama_vec, clip_l_pooler = encode_prompt_conds(prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
+                llama_vec, clip_l_pooler = encode_prompt_conds(full_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
                 
                 if cfg == 1:
                     llama_vec_n, clip_l_pooler_n = torch.zeros_like(llama_vec), torch.zeros_like(clip_l_pooler)
@@ -1741,6 +1788,21 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         image_filename = os.path.basename(current_image)
                         print(f"◆ イメージキュー実行中: バッチ {batch_index+1}/{batch_count} の画像「{image_filename}」")
                         print(f"  └ 画像ファイルパス: {current_image}")
+                        
+                        # 同名のテキストファイルがあるか確認し、あれば内容をプロンプトとして使用
+                        img_basename = os.path.splitext(current_image)[0]
+                        txt_path = f"{img_basename}.txt"
+                        if os.path.exists(txt_path):
+                            try:
+                                with open(txt_path, 'r', encoding='utf-8') as f:
+                                    custom_prompt = f.read().strip()
+                                if custom_prompt:
+                                    print(translate("イメージキュー: 画像「{0}」用のテキストファイルを読み込みました").format(image_filename))
+                                    print(translate("カスタムプロンプト: {0}").format(custom_prompt[:50] + "..." if len(custom_prompt) > 50 else custom_prompt))
+                                    # カスタムプロンプトを設定（current_promptを上書き）
+                                    current_prompt = custom_prompt
+                            except Exception as e:
+                                print(translate("イメージキュー: テキストファイル読み込みエラー: {0}").format(e))
                     else:
                         # 画像数が足りない場合は入力画像に戻る
                         print(f"◆ イメージキュー実行中: バッチ {batch_index+1}/{batch_count} は画像数を超えているため入力画像を使用")

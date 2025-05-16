@@ -378,8 +378,26 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     # 画像ファイルがある場合はそれを使用（batch_index-1の理由は1回目は入力画像を使うため）
                     queue_index = batch_index - 1
                     img_path = image_queue_files[queue_index]
-                    print(f"イメージキュー: {batch_index}回目の実行、画像ファイル使用: {os.path.basename(img_path)} (インデックス: {queue_index})")
+                    img_name = os.path.basename(img_path)
+                    print(f"イメージキュー: {batch_index}回目の実行、画像ファイル使用: {img_name} (インデックス: {queue_index})")
                     current_image = img_path
+                    
+                    # 同名のテキストファイルがあるか確認し、あれば内容をプロンプトとして使用
+                    img_basename = os.path.splitext(img_path)[0]
+                    txt_path = f"{img_basename}.txt"
+                    if os.path.exists(txt_path):
+                        try:
+                            with open(txt_path, 'r', encoding='utf-8') as f:
+                                custom_prompt = f.read().strip()
+                            if custom_prompt:
+                                print(translate("イメージキュー: 画像「{0}」用のテキストファイルを読み込みました").format(img_name))
+                                print(translate("カスタムプロンプト: {0}").format(custom_prompt[:50] + "..." if len(custom_prompt) > 50 else custom_prompt))
+                                # カスタムプロンプトを設定（current_promptを上書き）
+                                current_prompt = custom_prompt
+                        except Exception as e:
+                            print(translate("イメージキュー: テキストファイル読み込みエラー: {0}").format(e))
+                    else:
+                        print(translate("イメージキュー: 画像「{0}」用のテキストファイルはありません").format(img_name))
                 else:
                     # 画像ファイルが足りない場合は入力画像に戻る
                     print(f"イメージキュー: 画像ファイルが足りないため入力画像を再使用")
@@ -660,12 +678,41 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         print(translate("[ERROR] セクションプロンプト処理エラー: {0}").format(e))
 
             # 共通プロンプトを使用
-            # プロンプトキューを使用している場合は、その情報も表示
-            global current_prompt
-            if 'current_prompt' in globals() and current_prompt != prompt:
+            # プロンプトの情報を表示
+            global current_prompt, queue_enabled, queue_type, image_queue_files
+            
+            # イメージキューでカスタムプロンプトを使用しているかどうかを確認
+            using_custom_prompt = False
+            if queue_enabled and queue_type == "image" and batch_index > 0:
+                if batch_index - 1 < len(image_queue_files):
+                    queue_img_path = image_queue_files[batch_index - 1]
+                    img_basename = os.path.splitext(queue_img_path)[0]
+                    txt_path = f"{img_basename}.txt"
+                    if os.path.exists(txt_path):
+                        img_name = os.path.basename(queue_img_path)
+                        using_custom_prompt = True
+            
+            # 実際に使用するプロンプトを表示するための変数
+            actual_prompt = prompt
+            prompt_source = "共通プロンプト"
+            
+            if using_custom_prompt:
+                # イメージキューのカスタムプロンプトを使用している場合
+                print(translate("[section_prompt] セクション{0}はイメージキュー画像「{1}」の専用プロンプトを使用します").format(i_section, img_name))
+                actual_prompt = current_prompt
+                prompt_source = "カスタムプロンプト(イメージキュー)"
+            elif 'current_prompt' in globals() and current_prompt != prompt:
+                # プロンプトキューを使用している場合
                 print(translate("[section_prompt] セクション{0}は共通プロンプトを使用します（プロンプトキュー: {1}...）").format(i_section, current_prompt[:30]))
+                actual_prompt = current_prompt
+                prompt_source = "カスタムプロンプト(プロンプトキュー)"
             else:
+                # 通常の共通プロンプトを使用している場合
                 print(translate("[section_prompt] セクション{0}は共通プロンプトを使用します").format(i_section))
+            
+            # 実際に使用するプロンプトの内容を表示
+            print(translate("[プロンプト情報] ソース: {0}").format(prompt_source))
+            print(translate("[プロンプト情報] 内容: {0}").format(actual_prompt))
             return llama_vec, clip_l_pooler, llama_attention_mask
 
 
@@ -2940,6 +2987,23 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     img_name = os.path.basename(img_path)
                     print(translate("イメージキュー: バッチ{0}に画像「{1}」を設定 (インデックス: {2})").format(batch_index + 1, img_name, queue_index))
                     current_input_image = img_path
+                    
+                    # 同名のテキストファイルがあるか確認し、あれば内容をプロンプトとして使用
+                    img_basename = os.path.splitext(img_path)[0]
+                    txt_path = f"{img_basename}.txt"
+                    if os.path.exists(txt_path):
+                        try:
+                            with open(txt_path, 'r', encoding='utf-8') as f:
+                                custom_prompt = f.read().strip()
+                            if custom_prompt:
+                                print(translate("イメージキュー: 画像「{0}」用のテキストファイルを読み込みました").format(img_name))
+                                print(translate("カスタムプロンプト: {0}").format(custom_prompt[:50] + "..." if len(custom_prompt) > 50 else custom_prompt))
+                                # カスタムプロンプトを設定（current_promptを上書き）
+                                current_prompt = custom_prompt
+                        except Exception as e:
+                            print(translate("イメージキュー: テキストファイル読み込みエラー: {0}").format(e))
+                    else:
+                        print(translate("イメージキュー: 画像「{0}」用のテキストファイルはありません").format(img_name))
                 else:
                     print(translate("イメージキュー: 画像が足りないため入力画像を再使用"))
             else:
@@ -3349,7 +3413,7 @@ with block:
 
                 # イメージキュー用グループ
                 with gr.Group(visible=False) as image_queue_group:
-                    gr.Markdown(translate("※ 1回目はImage画像を使用し、2回目以降は入力フォルダの画像ファイルを名前順に使用します。\n※ バッチ回数が全画像数を超える場合、残りはImage画像で処理されます。\n※ バッチ処理回数が1でもキュー回数が優先されます。"))
+                    gr.Markdown(translate("※ 1回目はImage画像を使用し、2回目以降は入力フォルダの画像ファイルを名前順に使用します。\n※ 画像と同名のテキストファイル（例：image1.jpg → image1.txt）があれば、その内容を自動的にプロンプトとして使用します。\n※ バッチ回数が全画像数を超える場合、残りはImage画像で処理されます。\n※ バッチ処理回数が1でもキュー回数が優先されます。"))
 
                     # 入力フォルダ設定
                     with gr.Row():
