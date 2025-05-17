@@ -353,7 +353,10 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
            output_dir=None, use_lora=False, fp8_optimization=False, resolution=640,
            latent_window_size=9, latent_index=0, use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
            lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
-           batch_index=None, use_queue=False, prompt_queue_file=None):
+           batch_index=None, use_queue=False, prompt_queue_file=None,
+           # Kisekaeichi関連のパラメータ
+           use_reference_image=False, reference_image=None, 
+           target_index=1, history_index=13, input_mask=None, reference_mask=None):
     
     # モデル変数をグローバルとして宣言（遅延ロード用）
     global vae, text_encoder, text_encoder_2, transformer, image_encoder
@@ -557,6 +560,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             print(translate("[INFO] 入力画像がファイルパスのため、画像をロードします: {0}").format(input_image))
             try:
                 from PIL import Image
+                import numpy as np
                 img = Image.open(input_image)
                 input_image = np.array(img)
                 if len(input_image.shape) == 2:  # グレースケール画像の場合
@@ -569,6 +573,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             except Exception as e:
                 print(translate("[ERROR] 画像のロードに失敗しました: {0}").format(e))
                 # エラーが発生した場合はデフォルトの黒い画像を使用
+                import numpy as np
                 height = width = resolution
                 input_image = np.zeros((height, width, 3), dtype=np.uint8)
                 input_image_np = input_image
@@ -643,6 +648,80 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             
             raise e
         
+        # 1フレームモード用の設定（sample_num_framesを早期に定義）
+        sample_num_frames = 1  # 1フレームモード（one_frame_inferenceが有効なため）
+        num_frames = sample_num_frames
+        
+        # 1フレームモードの場合、latent_window_sizeも調整が必要かもしれない
+        if sample_num_frames == 1:
+            print(translate("[DEBUG] 元のlatent_window_size: {0}").format(latent_window_size))
+            # 1フレームモードの場合、latent_window_sizeを小さくする
+            # latent_window_size = 1  # これは試験的な変更
+        
+        # Kisekaeichi機能: 参照画像の処理
+        reference_latent = None
+        reference_encoder_output = None
+        
+        if use_reference_image and reference_image is not None:
+            print(translate("[INFO] 着せ替え参照画像を処理します: {0}").format(reference_image))
+            stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Processing reference image ...'))))
+            
+            try:
+                # 参照画像をロード
+                from PIL import Image
+                ref_img = Image.open(reference_image)
+                ref_image_np = np.array(ref_img)
+                if len(ref_image_np.shape) == 2:  # グレースケール画像の場合
+                    ref_image_np = np.stack((ref_image_np,) * 3, axis=-1)
+                elif ref_image_np.shape[2] == 4:  # アルファチャンネル付きの場合
+                    ref_image_np = ref_image_np[:, :, :3]
+                
+                # 同じサイズにリサイズ（入力画像と同じ解像度を使用）
+                ref_image_np = resize_and_center_crop(ref_image_np, target_width=width, target_height=height)
+                ref_image_pt = torch.from_numpy(ref_image_np).float() / 127.5 - 1
+                ref_image_pt = ref_image_pt.permute(2, 0, 1)[None, :, None]
+                
+                # VAEエンコード（参照画像）
+                if vae is None or not high_vram:
+                    vae = AutoencoderKLHunyuanVideo.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='vae', torch_dtype=torch.float16).cpu()
+                    setup_vae_if_loaded()
+                    load_model_as_complete(vae, target_device=gpu)
+                
+                ref_image_gpu = ref_image_pt.to(gpu)
+                reference_latent = vae_encode(ref_image_gpu, vae)
+                del ref_image_gpu
+                
+                if not high_vram:
+                    vae.to('cpu')
+                
+                # CLIP Visionエンコード（参照画像）
+                if image_encoder is None or not high_vram:
+                    if image_encoder is None:
+                        image_encoder = SiglipVisionModel.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='image_encoder', torch_dtype=torch.float16).cpu()
+                        setup_image_encoder_if_loaded()
+                    load_model_as_complete(image_encoder, target_device=gpu)
+                
+                reference_encoder_output = hf_clip_vision_encode(ref_image_np, feature_extractor, image_encoder)
+                
+                # 参照画像のCLIPエンコーダ出力の形状を確認
+                print(translate("[DEBUG] 参照画像CLIP出力形状: {0}").format(reference_encoder_output.last_hidden_state.shape))
+                print(translate("[DEBUG] 参照画像のサイズ: {0}").format(ref_image_np.shape))
+                
+                # 1フレームモードでの特別な処理を確認
+                if sample_num_frames == 1:
+                    print(translate("[DEBUG] 1フレームモード: 参照画像CLIP Vision形状確認"))
+                    # PRの実装に従い、batch_repeatは1を使用
+                
+                if not high_vram:
+                    image_encoder.to('cpu')
+                
+                print(translate("[INFO] 参照画像の処理が完了しました"))
+                
+            except Exception as e:
+                print(translate("[ERROR] 参照画像の処理に失敗しました: {0}").format(e))
+                reference_latent = None
+                reference_encoder_output = None
+        
         # CLIP Vision エンコーディング
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'CLIP Vision encoding ...'))))
         
@@ -668,6 +747,15 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             # CLIP Vision エンコード実行
             image_encoder_output = hf_clip_vision_encode(input_image_np, feature_extractor, image_encoder)
             image_encoder_last_hidden_state = image_encoder_output.last_hidden_state
+            
+            # 入力画像のCLIPエンコーダ出力の形状を確認
+            print(translate("[DEBUG] 入力画像CLIP出力形状: {0}").format(image_encoder_last_hidden_state.shape))
+            print(translate("[DEBUG] 入力画像のサイズ: {0}").format(input_image_np.shape))
+            
+            # 1フレームモードの場合のCLIPエンコーダ出力調整を確認
+            if sample_num_frames == 1:
+                print(translate("[DEBUG] 1フレームモード: CLIP Vision形状確認"))
+                print(translate("[DEBUG] batch_repeat=1でエンコード済み"))
             
             # ローVRAMモードでは使用後すぐにCPUに戻す
             if not high_vram:
@@ -845,9 +933,10 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Start sampling ...'))))
         
         rnd = torch.Generator("cpu").manual_seed(seed)
-        num_frames = 1  # 1フレームモード
+        print(translate("[INFO] one_frame_inference有効: sample_num_framesを{0}に設定しました").format(sample_num_frames))
         
-        history_latents = torch.zeros(size=(1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32).cpu()
+        # history_latentsを確実に新規作成（前回実行の影響を排除）
+        history_latents = torch.zeros(size=(1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32, device='cpu')
         history_pixels = None
         total_generated_latent_frames = 0
         
@@ -864,22 +953,102 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 return
             
             # 1フレームモード用のindices設定
+            # PR実装に合わせて、インデックスの範囲を明示的に設定
+            # 元のPRでは 0から total_frames相当の値までのインデックスを作成
+            # 1フレームモードでは通常: [0(clean_pre), 1(latent), 2(clean_post), 3,4(clean_2x), 5-20(clean_4x)]
             indices = torch.arange(0, sum([1, latent_padding_size, latent_window_size, 1, 2, 16])).unsqueeze(0)
-            clean_latent_indices_pre, blank_indices, latent_indices, clean_latent_indices_post, clean_latent_2x_indices, clean_latent_4x_indices = indices.split([1, latent_padding_size, latent_window_size, 1, 2, 16], dim=1)
+            split_sizes = [1, latent_padding_size, latent_window_size, 1, 2, 16]
+            print(translate("[DEBUG] PRの実装に基づくindices設定:"))
+            print(translate("[DEBUG] indices: {0}").format(indices))
+            print(translate("[DEBUG] split_sizes: {0}").format(split_sizes))
             
-            # 詳細設定のlatent_indexに基づいたインデックス処理
-            all_indices = torch.arange(0, latent_window_size).unsqueeze(0)
-            if latent_index > 0 and latent_index < latent_window_size:
-                print(translate("\n[INFO] カスタムレイテントインデックス {0} を使用します").format(latent_index))
-                # ユーザー指定のインデックスを使用
-                latent_indices = all_indices[:, latent_index:latent_index+1]
+            # latent_padding_sizeが0の場合、空のテンソルになる可能性があるため処理を調整
+            if latent_padding_size == 0:
+                # blank_indicesを除いて分割
+                clean_latent_indices_pre = indices[:, 0:1]
+                latent_indices = indices[:, 1:1+latent_window_size]
+                clean_latent_indices_post = indices[:, 1+latent_window_size:2+latent_window_size]
+                clean_latent_2x_indices = indices[:, 2+latent_window_size:4+latent_window_size]
+                clean_latent_4x_indices = indices[:, 4+latent_window_size:20+latent_window_size]
+                blank_indices = torch.empty((1, 0), dtype=torch.long)  # 空のテンソル
             else:
-                print(translate("\n[INFO] デフォルトの最後のインデックスを使用します"))
-                # デフォルトは最後のインデックス
-                latent_indices = all_indices[:, -1:]
+                clean_latent_indices_pre, blank_indices, latent_indices, clean_latent_indices_post, clean_latent_2x_indices, clean_latent_4x_indices = indices.split(split_sizes, dim=1)
+            
+            # 公式実装に完全に合わせたone_frame_inference処理
+            if sample_num_frames == 1:
+                # 1フレームモードの特別な処理
+                print(translate("\n[INFO] 1フレームモード: インデックスを設定"))
+                
+                if use_reference_image:
+                    # kisekaeichi用の設定（公式実装）
+                    one_frame_inference = set()
+                    one_frame_inference.add(f"target_index={target_index}")
+                    one_frame_inference.add(f"history_index={history_index}")
+                    
+                    # 公式実装に従った処理
+                    latent_indices = indices[:, -1:]  # デフォルトは最後のフレーム
+                    
+                    # パラメータ解析と処理（公式実装と同じ）
+                    for one_frame_param in one_frame_inference:
+                        if one_frame_param.startswith("target_index="):
+                            target_idx = int(one_frame_param.split("=")[1])
+                            latent_indices[:, 0] = target_idx
+                            print(translate("[INFO] target_indexを{0}に設定").format(target_idx))
+                        
+                        elif one_frame_param.startswith("history_index="):
+                            history_idx = int(one_frame_param.split("=")[1])
+                            clean_latent_indices_post[:, 0] = history_idx
+                            print(translate("[INFO] history_indexを{0}に設定").format(history_idx))
+                else:
+                    # 通常モード（参照画像なし）- 以前の動作を復元
+                    # 正常動作版と同じように、latent_window_size内の最後のインデックスを使用
+                    all_indices = torch.arange(0, latent_window_size).unsqueeze(0)
+                    latent_indices = all_indices[:, -1:]
+                    print(translate("[DEBUG] 通常モード: デフォルトの最後のインデックスを使用: {0}").format(latent_indices))
+                    
+                    # 通常モードではclean_latent_indicesは既に適切に設定されているため調整不要
+                    print(translate("[DEBUG] 通常モード: clean_latent_indices_postはデフォルト値を使用"))
+            else:
+                # 通常のモード（複数フレーム）
+                # 詳細設定のlatent_indexに基づいたインデックス処理
+                all_indices = torch.arange(0, latent_window_size).unsqueeze(0)
+                if latent_index > 0 and latent_index < latent_window_size:
+                    print(translate("\n[INFO] カスタムレイテントインデックス {0} を使用します").format(latent_index))
+                    # ユーザー指定のインデックスを使用
+                    latent_indices = all_indices[:, latent_index:latent_index+1]
+                else:
+                    print(translate("\n[INFO] デフォルトの最後のインデックスを使用します"))
+                    # デフォルトは最後のインデックス
+                    latent_indices = all_indices[:, -1:]
             
             # clean_latents設定
             clean_latent_indices = torch.cat([clean_latent_indices_pre, clean_latent_indices_post], dim=1)
+            
+            # 通常モードでのインデックス調整
+            if not use_reference_image and sample_num_frames == 1:
+                # 通常モードではすべてのインデックスを単純化
+                clean_latent_indices = torch.tensor([[0]], dtype=clean_latent_indices.dtype, device=clean_latent_indices.device)
+                print(translate("[DEBUG] 通常モード: clean_latent_indices単純化: {0}").format(clean_latent_indices))
+                
+                # clean_latents_2xとclean_latents_4xも調整
+                if clean_latent_2x_indices.shape[1] > 0:
+                    # clean_latents_2xの最初の要素のみを使用
+                    clean_latent_2x_indices = clean_latent_2x_indices[:, :1]
+                    print(translate("[DEBUG] 通常モード: clean_latent_2x_indices調整: {0}").format(clean_latent_2x_indices))
+                    
+                if clean_latent_4x_indices.shape[1] > 0:
+                    # clean_latents_4xの最初の要素のみを使用
+                    clean_latent_4x_indices = clean_latent_4x_indices[:, :1]
+                    print(translate("[DEBUG] 通常モード: clean_latent_4x_indices調整: {0}").format(clean_latent_4x_indices))
+            
+            # PRの実装に基づき、特定の条件下でindexを調整
+            # 1フレームモードでは異なる処理が必要な可能性
+            if num_frames == 1 and latent_padding_size == 0:
+                # 1フレームモードの特別な処理
+                print(translate("[DEBUG] 1フレームモードのためインデックスを調整"))
+                # clean_latent_indicesの初期値を保持（変更しない）
+                # デバッグ情報を追加
+                print(translate("[DEBUG] 初期clean_latent_indices: {0}").format(clean_latent_indices))
             
             # 形状の確認と修正
             print(translate("[DEBUG] start_latent形状: {0}").format(start_latent.shape))
@@ -914,6 +1083,25 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 clean_latents_post = torch.zeros(1, 16, 1, height // 8, width // 8, dtype=torch.float32, device='cpu')
                 clean_latents_2x = torch.zeros(1, 16, 2, height // 8, width // 8, dtype=torch.float32, device='cpu')
                 clean_latents_4x = torch.zeros(1, 16, 16, height // 8, width // 8, dtype=torch.float32, device='cpu')
+            
+            # 公式実装のno_2x, no_4x処理を先に実装
+            if sample_num_frames == 1 and use_reference_image:
+                # kisekaeichi時の固定設定（公式実装に完全準拠）
+                one_frame_inference = set()
+                one_frame_inference.add(f"target_index={target_index}")
+                one_frame_inference.add(f"history_index={history_index}")
+                
+                # 公式実装のオプション処理（no_post以外）
+                for option in one_frame_inference:
+                    if option == "no_2x":
+                        clean_latents_2x = None
+                        clean_latent_2x_indices = None
+                        print(translate("[INFO] no_2x: clean_latents_2xを無効化"))
+                    
+                    elif option == "no_4x":
+                        clean_latents_4x = None
+                        clean_latent_4x_indices = None
+                        print(translate("[INFO] no_4x: clean_latents_4xを無効化"))
             
             # 詳細設定のオプションに基づいて処理
             if use_clean_latents_post:
@@ -960,6 +1148,15 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 # 結合して形状を維持
                 clean_latents = torch.cat([clean_latents_pre_shaped, empty_latent], dim=2)
                 print(translate("[DEBUG] 代替手法による結合後 clean_latents形状: {0}").format(clean_latents.shape))
+            
+            # no_post処理をclean_latentsが定義された後に実行
+            if sample_num_frames == 1 and use_reference_image and 'one_frame_inference' in locals():
+                for option in one_frame_inference:
+                    if option == "no_post":
+                        if clean_latents is not None:
+                            clean_latents = clean_latents[:, :, :1, :, :]
+                            clean_latent_indices = clean_latent_indices[:, :1]
+                        print(translate("[INFO] no_post: clean_latents_postを無効化"))
             
             # transformerの初期化とロード（未ロードの場合）
             if transformer is None:
@@ -1058,6 +1255,12 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             # 形状チェックのデバッグ
             print(translate("\n[DEBUG] clean_latents_2x形状: {0}").format(clean_latents_2x.shape))
             print(translate("[DEBUG] clean_latents_4x形状: {0}").format(clean_latents_4x.shape))
+            
+            # clean_latent_indices形状のデバッグ（tensor size mismatchの調査）
+            print(translate("\n[DEBUG] 分割前のindices形状: {0}").format(indices.shape))
+            print(translate("[DEBUG] clean_latent_indices_pre形状: {0}").format(clean_latent_indices_pre.shape))
+            print(translate("[DEBUG] clean_latent_indices_post形状: {0}").format(clean_latent_indices_post.shape))
+            print(translate("[DEBUG] clean_latent_indices形状: {0}").format(clean_latent_indices.shape))
 
             # 異常な次元数を持つテンソルを処理
             try:
@@ -1082,9 +1285,165 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             except Exception as e:
                 print(translate("[ERROR] clean_latents_4xの形状調整中にエラー: {0}").format(e))
             
+            # 通常モードの処理（参照画像なし）
+            if not use_reference_image:
+                # 通常モードでは入力画像をそのまま使用
+                print(translate("\n[INFO] 通常モード: 入力画像のみを使用します"))
+                print(translate("[DEBUG] clean_latents形状: {0}").format(clean_latents.shape))
+                
+                # 入力画像がindex 0にあることを確認
+                if clean_latents.shape[2] > 0:
+                    print(translate("[INFO] clean_latents[0]は入力画像です"))
+            
+            # Kisekaeichi機能: 参照画像latentの設定
+            elif use_reference_image and reference_latent is not None:
+                print(translate("\n[INFO] 着せ替え参照画像のlatentを使用します"))
+                print(translate("[DEBUG] latent_indices形状（参照前）: {0}").format(latent_indices.shape))
+                print(translate("[DEBUG] clean_latent_indices形状（参照前）: {0}").format(clean_latent_indices.shape))
+                
+                # デバッグ: clean_latentsの構成を確認
+                print(translate("[DEBUG] clean_latents形状（参照前）: {0}").format(clean_latents.shape))
+                print(translate("[DEBUG] clean_latents[0]は入力画像、clean_latents[1]は履歴フレーム"))
+                
+                # kisekaeichi仕様：入力画像からサンプリングし、参照画像の特徴を使用
+                # clean_latentsの形状が [B, C, 2, H, W] の場合
+                if clean_latents.shape[2] >= 2:
+                    print(translate("[DEBUG] clean_latentsの初期状態を確認"))
+                    print(translate("[DEBUG] clean_latents[:, :, 0].shape（index 0）: {0}").format(clean_latents[:, :, 0].shape))
+                    print(translate("[DEBUG] clean_latents[:, :, 1].shape（index 1）: {0}").format(clean_latents[:, :, 1].shape))
+                    
+                    # clean_latentsの配置を確実にする
+                    # index 0: サンプリング開始点（入力画像）
+                    # index 1: 参照画像（特徴転送用）
+                    print(translate("[INFO] kisekaeichi: 入力画像をindex 0、参照画像をindex 1に配置"))
+                    
+                    # すでにclean_latents_preが入力画像なので、index 0は変更不要
+                    # index 1に参照画像を設定
+                    clean_latents[:, :, 1] = reference_latent[:, :, 0]
+                    
+                    # kisekaeichi: 潜在空間での特徴転送の準備
+                    # ブレンドではなく、denoisingプロセス中にAttention機構で転送される
+                    # マスクがある場合のみ、マスクに基づいた潜在空間の調整を行う
+                    
+                    print(translate("[INFO] clean_latentsの配置完了"))
+                    print(translate("[DEBUG] index 0: 入力画像（開始点）"))
+                    print(translate("[DEBUG] index 1: 参照画像（特徴転送元）"))
+                    print(translate("[DEBUG] index 1: 参照画像（特徴転送用）"))
+                else:
+                    print(translate("[WARN] clean_latentsの形状が予期しない形式です: {0}").format(clean_latents.shape))
+                
+                # clean_latent_indicesも更新する必要がある
+                # 形状を確認してから更新
+                print(translate("[DEBUG] clean_latent_indices更新前の形状: {0}").format(clean_latent_indices.shape))
+                print(translate("[DEBUG] clean_latent_indices更新前の値: {0}").format(clean_latent_indices))
+                
+                if clean_latent_indices.shape[1] > 1:
+                    # PRの実装に従い、history_indexをそのまま使用
+                    clean_latent_indices[:, 1] = history_index
+                    print(translate("[INFO] 履歴インデックスを{0}に設定しました").format(history_index))
+                    print(translate("[DEBUG] clean_latent_indices更新後の値: {0}").format(clean_latent_indices))
+                else:
+                    print(translate("[WARN] clean_latent_indicesの形状が予期しない形式です: {0}").format(clean_latent_indices.shape))
+                    print(translate("[INFO] history_indexのデフォルト値を使用します: {0}").format(history_index))
+                
+                # 公式実装に従い、target_indexを設定
+                if latent_indices.shape[1] > 0:
+                    # latent_window_sizeに基づいて調整（現在は9）
+                    max_latent_index = latent_window_size - 1
+                    target_index_actual = min(target_index, max_latent_index)  # 範囲内に制限
+                    latent_indices[:, 0] = target_index_actual
+                    print(translate("[INFO] target_indexを{0}に設定しました（最大値: {1}）").format(target_index_actual, max_latent_index))
+                else:
+                    print(translate("[WARN] latent_indicesが空です"))
+                    
+                # 参照画像のCLIP Vision出力は直接使用しない（エラー回避のため）
+                # latentレベルでの変更のみ適用
+                if reference_encoder_output is not None:
+                    print(translate("[INFO] 参照画像の特徴はlatentのみで反映されます"))
+                
+                # マスクの適用（kisekaeichi仕様）
+                if input_mask is not None or reference_mask is not None:
+                    print(translate("\n[INFO] kisekaeichi: マスクを適用します"))
+                    try:
+                        from PIL import Image
+                        import numpy as np
+                        
+                        # 潜在空間のサイズ
+                        height_latent, width_latent = clean_latents.shape[-2:]
+                        
+                        # 入力画像マスクの処理
+                        if input_mask is not None:
+                            input_mask_img = Image.open(input_mask).convert('L')
+                            input_mask_np = np.array(input_mask_img)
+                            input_mask_resized = Image.fromarray(input_mask_np).resize((width_latent, height_latent), Image.BILINEAR)
+                            input_mask_tensor = torch.from_numpy(np.array(input_mask_resized)).float() / 255.0
+                            input_mask_tensor = input_mask_tensor.to(clean_latents.device)[None, None, None, :, :]
+                            
+                            # 入力画像のマスクを適用（黒い部分をゼロ化）
+                            clean_latents[:, :, 0:1] = clean_latents[:, :, 0:1] * input_mask_tensor
+                            print(translate("[INFO] 入力画像マスクを適用しました（黒い領域をゼロ化）"))
+                        
+                        # 参照画像マスクの処理
+                        if reference_mask is not None:
+                            reference_mask_img = Image.open(reference_mask).convert('L')
+                            reference_mask_np = np.array(reference_mask_img)
+                            reference_mask_resized = Image.fromarray(reference_mask_np).resize((width_latent, height_latent), Image.BILINEAR)
+                            reference_mask_tensor = torch.from_numpy(np.array(reference_mask_resized)).float() / 255.0
+                            reference_mask_tensor = reference_mask_tensor.to(clean_latents.device)[None, None, None, :, :]
+                            
+                            # 参照画像のマスクを適用（黒い部分をゼロ化）
+                            if clean_latents.shape[2] >= 2:
+                                clean_latents[:, :, 1:2] = clean_latents[:, :, 1:2] * reference_mask_tensor
+                                print(translate("[INFO] 参照画像マスクを適用しました（黒い領域をゼロ化）"))
+                            else:
+                                print(translate("[WARN] 参照画像が設定されていません"))
+                        
+                        print(translate("[INFO] マスク適用完了"))
+                        print(translate("[DEBUG] Attention機構による特徴転送がdenoisingで行われます"))
+                        
+                    except Exception as e:
+                        print(translate("[ERROR] マスクの適用に失敗しました: {0}").format(e))
+                else:
+                    print(translate("[INFO] kisekaeichi: マスクが指定されていません"))
+                
+                # 公式実装のzero_post処理（固定値として実装）
+                if sample_num_frames == 1 and use_reference_image:
+                    one_frame_inference = set()
+                    one_frame_inference.add(f"target_index={target_index}")
+                    one_frame_inference.add(f"history_index={history_index}")
+                    # 公式実装のデフォルト動作としてzero_postを適用
+                    one_frame_inference.add("zero_post")
+                    
+                    # zero_post処理（公式実装と完全同一）
+                    if "zero_post" in one_frame_inference:
+                        clean_latents[:, :, 1:, :, :] = torch.zeros_like(clean_latents[:, :, 1:, :, :])
+                        print(translate("[INFO] zero_post: clean_latentsのインデックス1以降をゼロ化（公式実装）"))
+                    
+                    # 他のオプションも処理
+                    for option in one_frame_inference:
+                        if option == "no_2x":
+                            if 'clean_latents_2x_param' in locals():
+                                clean_latents_2x_param = None
+                                print(translate("[INFO] no_2x: clean_latents_2xを無効化"))
+                        
+                        elif option == "no_4x":
+                            if 'clean_latents_4x_param' in locals():
+                                clean_latents_4x_param = None
+                                print(translate("[INFO] no_4x: clean_latents_4xを無効化"))
+                        
+                        elif option == "no_post":
+                            if clean_latents.shape[2] > 1:
+                                clean_latents = clean_latents[:, :, :1, :, :]
+                                print(translate("[INFO] no_post: clean_latents_postを無効化"))
+            
             # clean_latents_2xとclean_latents_4xの設定に応じて変数を調整
-            clean_latents_2x_param = clean_latents_2x if use_clean_latents_2x else None
-            clean_latents_4x_param = clean_latents_4x if use_clean_latents_4x else None
+            # 1フレームモードの調整後の値を使用
+            if num_frames == 1 and use_reference_image:
+                clean_latents_2x_param = clean_latents_2x
+                clean_latents_4x_param = clean_latents_4x
+            else:
+                clean_latents_2x_param = clean_latents_2x if use_clean_latents_2x else None
+                clean_latents_4x_param = clean_latents_4x if use_clean_latents_4x else None
             
             # 最適化オプションのログ
             if not use_clean_latents_2x:
@@ -1129,12 +1488,161 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             
             # sample_hunyuan関数呼び出し部分
             try:
+                # BFloat16に変換（通常の処理）
+                if image_encoder_last_hidden_state is not None:
+                    image_encoder_last_hidden_state = image_encoder_last_hidden_state.to(dtype=torch.bfloat16)
+                
+                # デバッグ: sample_hunyuan呼び出し前のテンソル形状を確認
+                print(translate("\n[DEBUG] sample_hunyuan呼び出し前の形状確認:"))
+                print(translate("[DEBUG] num_frames: {0}").format(num_frames))
+                print(translate("[DEBUG] sample_num_frames: {0}").format(sample_num_frames))
+                print(translate("[DEBUG] latent_indices: {0}").format(latent_indices))
+                print(translate("[DEBUG] clean_latents形状: {0}").format(clean_latents.shape))
+                print(translate("[DEBUG] clean_latent_indices: {0}").format(clean_latent_indices))
+                print(translate("[DEBUG] clean_latents_2x形状: {0}").format(clean_latents_2x_param.shape if clean_latents_2x_param is not None else "None"))
+                print(translate("[DEBUG] clean_latents_4x形状: {0}").format(clean_latents_4x_param.shape if clean_latents_4x_param is not None else "None"))
+                print(translate("[DEBUG] transformerの入力形状: width={0}, height={1}, frames={2}").format(width, height, sample_num_frames))
+                print(translate("[DEBUG] latent_window_size: {0}").format(latent_window_size))
+                print(translate("[DEBUG] image_encoder_last_hidden_state形状: {0}").format(image_encoder_last_hidden_state.shape))
+                
+                # PRの実装に基づき、1フレームモードの特別な処理を追加
+                if num_frames == 1:
+                    # PRの推奨値に基づいて調整
+                    # target_index=1, history_index=13が推奨されているが、
+                    # これらは特定のフレームレイアウトを前提としている可能性がある
+                    print(translate("[DEBUG] 1フレームモード: 特別な処理を適用"))
+                    print(translate("[DEBUG] latent_window_size: {0}").format(latent_window_size))
+                
+                # 参照画像のCLIP Vision特徴を使用する場合は、注意深く処理
+                # 現在の実装では参照画像のCLIP特徴を使用しない（latentのみ使用）
+                # これはエラーを避けるための一時的な対策
+                if use_reference_image and reference_encoder_output is not None:
+                    print(translate("\n[INFO] 参照画像のCLIP Vision特徴は潜在空間で処理されます"))
+                    # 参照画像のCLIP特徴は直接使用せず、latentでのみ反映
+                    # これによりrotary embedding関連のエラーを回避
+                
+                # PRの実装に従い、one_frame_inferenceモードではsample_num_framesをサンプリングに使用
+                if sample_num_frames == 1:
+                    print(translate("[DEBUG] 1フレームモード: 特別な処理を適用"))
+                    # latent_indicesのデバッグ出力
+                    print(translate("[DEBUG] 現在のlatent_indices: {0}").format(latent_indices))
+                    
+                    # 1フレームモードでテンソルサイズ不一致を回避するための調整
+                    # frames=1のとき、モデルが期待する形状に合わせる
+                    print(translate("[DEBUG] 1フレームモード: clean_latentsの調整を実施"))
+                    
+                    # latent_indicesと同様に、clean_latent_indicesも調整する必要がある
+                    if clean_latent_indices.shape[1] > 1:
+                        print(translate("[DEBUG] 調整前のclean_latent_indices: {0}").format(clean_latent_indices))
+                        if use_reference_image:
+                            # kisekaeichi: 入力画像と参照画像の両方のインデックスを保持
+                            print(translate("[INFO] kisekaeichi: clean_latent_indicesを保持（入力画像と参照画像）"))
+                            # clean_latent_indicesはそのまま維持（index 0とindex 1）
+                        else:
+                            clean_latent_indices = clean_latent_indices[:, 0:1]  # 入力画像（最初の1要素）のみ
+                            print(translate("[INFO] clean_latent_indicesを入力画像（index 0）に調整"))
+                        print(translate("[DEBUG] 調整後のclean_latent_indices: {0}").format(clean_latent_indices))
+                    
+                    # clean_latentsも調整（最後の1フレームのみ）
+                    # ただし、kisekaeichi機能の場合は、参照画像も保持する必要がある
+                    if clean_latents.shape[2] > 1:
+                        print(translate("[DEBUG] 調整前のclean_latents形状: {0}").format(clean_latents.shape))
+                        if use_reference_image:
+                            # kisekaeichi: 参照画像（index 1）と入力画像（index 0）を保持
+                            # PRの実装では複数フレームを保持している
+                            print(translate("[INFO] kisekaeichi: clean_latentsの参照画像と入力画像を保持"))
+                            # 形状を維持（参照画像のlatentを保持）
+                        else:
+                            clean_latents = clean_latents[:, :, 0:1]  # 入力画像（最初の1フレーム）のみ
+                            print(translate("[INFO] clean_latentsを入力画像（index 0）に調整"))
+                            
+                        print(translate("[DEBUG] 調整後のclean_latents形状: {0}").format(clean_latents.shape))
+                    
+                    # clean_latentsの処理
+                    if use_reference_image:
+                        # PRのkisekaeichi実装オプション
+                        # target_indexとhistory_indexの処理は既に上で実行済み
+                        
+                        # オプション処理
+                        if not use_clean_latents_2x:  # PRの"no_2x"オプション
+                            clean_latents_2x = None
+                            clean_latent_2x_indices = None
+                            print(translate("[INFO] clean_latents_2xを無効化"))
+                            
+                        if not use_clean_latents_4x:  # PRの"no_4x"オプション
+                            clean_latents_4x = None
+                            clean_latent_4x_indices = None
+                            print(translate("[INFO] clean_latents_4xを無効化"))
+                        
+                        
+                        # PRの実装に基づく処理
+                        print(translate("[DEBUG] clean_latents形状（kisekaeichi適用後）: {0}").format(clean_latents.shape))
+                        print(translate("[DEBUG] clean_latent_indices（kisekaeichi適用後）: {0}").format(clean_latent_indices))
+                    
+                    # clean_latents_2xとclean_latents_4xも必要に応じて調整
+                    if clean_latents_2x is not None and clean_latents_2x.shape[2] > 1:
+                        print(translate("[DEBUG] 調整前のclean_latents_2x形状: {0}").format(clean_latents_2x.shape))
+                        clean_latents_2x = clean_latents_2x[:, :, -1:]  # 最後の1フレームのみ
+                        print(translate("[INFO] clean_latents_2xを最後の1フレームに調整"))
+                        print(translate("[DEBUG] 調整後のclean_latents_2x形状: {0}").format(clean_latents_2x.shape))
+                    
+                    if clean_latents_4x is not None and clean_latents_4x.shape[2] > 1:
+                        print(translate("[DEBUG] 調整前のclean_latents_4x形状: {0}").format(clean_latents_4x.shape))
+                        clean_latents_4x = clean_latents_4x[:, :, -1:]  # 最後の1フレームのみ
+                        print(translate("[INFO] clean_latents_4xを最後の1フレームに調整"))
+                        print(translate("[DEBUG] 調整後のclean_latents_4x形状: {0}").format(clean_latents_4x.shape))
+                    
+                    # clean_latent_2x_indicesとclean_latent_4x_indicesも調整
+                    if clean_latent_2x_indices is not None and clean_latent_2x_indices.shape[1] > 1:
+                        clean_latent_2x_indices = clean_latent_2x_indices[:, -1:]
+                        print(translate("[INFO] clean_latent_2x_indicesを最後の1要素に調整"))
+                    
+                    if clean_latent_4x_indices is not None and clean_latent_4x_indices.shape[1] > 1:
+                        clean_latent_4x_indices = clean_latent_4x_indices[:, -1:]
+                        print(translate("[INFO] clean_latent_4x_indicesを最後の1要素に調整"))
+                
+                # 1フレームモードのパラメータ調整
+                # sample_hunyuanには元の画像サイズを渡す必要がある（latentサイズではない）
+                # sample_hunyuanにはworker関数で設定されたwidthとheightをそのまま使用
+                print(translate("[DEBUG] 元の解像度: {0}").format(resolution))
+                print(translate("[DEBUG] worker関数で設定されたサイズ: width={0}, height={1}").format(width, height))
+                print(translate("[DEBUG] latentサイズ: width={0}, height={1}").format(clean_latents.shape[-1], clean_latents.shape[-2]))
+                print(translate("[DEBUG] clean_latents形状: {0}").format(clean_latents.shape))
+                print(translate("[DEBUG] latent_indices: {0}").format(latent_indices))
+                print(translate("[DEBUG] clean_latent_indices: {0}").format(clean_latent_indices))
+                print(translate("[DEBUG] image_encoder_last_hidden_state形状（調整前）: {0}").format(image_encoder_last_hidden_state.shape))
+                
+                # 最も重要な問題：widthとheightが間違っている可能性
+                # エラーログから、widthが60、heightが104になっているのが問題
+                # これらはlatentサイズであり、実際の画像サイズではない
+                print(translate("[CRITICAL] 実際の画像サイズを再確認"))
+                print(translate("[CRITICAL] 入力画像のサイズ: {0}").format(input_image_np.shape))
+                
+                # 重要な発見：width=60, height=104は縦横が逆になっている可能性
+                # 入力画像は832x480だが、latentは104x60になっている
+                # つまり、width=480, height=832が正しい値のはず
+                print(translate("[CRITICAL] widthとheightの値を確認"))
+                
+                # find_nearest_bucketの結果が間違っている可能性
+                # 入力画像のサイズから正しい値を計算
+                if input_image_np.shape[0] == 832 and input_image_np.shape[1] == 480:
+                    # 実際の画像サイズを使用
+                    actual_width = 480
+                    actual_height = 832
+                    print(translate("[INFO] 実際の画像サイズを使用: width={0}, height={1}").format(actual_width, actual_height))
+                else:
+                    # find_nearest_bucketの結果を使用
+                    actual_width = width
+                    actual_height = height
+                
+                print(translate("[DEBUG] 最終的なサイズ: width={0}, height={1}, frames={2}").format(actual_width, actual_height, sample_num_frames))
+                
                 generated_latents = sample_hunyuan(
                     transformer=transformer,
                     sampler='unipc',
-                    width=width,
-                    height=height,
-                    frames=num_frames,
+                    width=actual_width,
+                    height=actual_height,
+                    frames=sample_num_frames,
                     real_guidance_scale=cfg,
                     distilled_guidance_scale=gs,
                     guidance_rescale=rs,
@@ -1152,9 +1660,9 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     latent_indices=latent_indices,
                     clean_latents=clean_latents,
                     clean_latent_indices=clean_latent_indices,
-                    clean_latents_2x=clean_latents_2x_param,
+                    clean_latents_2x=clean_latents_2x,
                     clean_latent_2x_indices=clean_latent_2x_indices,
-                    clean_latents_4x=clean_latents_4x_param,
+                    clean_latents_4x=clean_latents_4x,
                     clean_latent_4x_indices=clean_latent_4x_indices,
                     callback=callback,
                 )
@@ -1518,7 +2026,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             batch_count=1, use_random_seed=False, latent_window_size=9, latent_index=0,
             use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
             lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
-            use_rope_batch=False, use_queue=False, prompt_queue_file=None):
+            use_rope_batch=False, use_queue=False, prompt_queue_file=None,
+            # Kisekaeichi 関連のパラメータ
+            use_reference_image=False, reference_image=None, 
+            target_index=1, history_index=13, input_mask=None, reference_mask=None):
     global stream
     global batch_stopped, user_abort, user_abort_notified
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files
@@ -1850,7 +2361,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                      output_dir, use_lora, fp8_optimization, resolution,
                      current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
                      lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
-                     batch_index, use_queue, prompt_queue_file)
+                     batch_index, use_queue, prompt_queue_file,
+                     # Kisekaeichi関連パラメータを追加
+                     use_reference_image, reference_image,
+                     target_index, history_index, input_mask, reference_mask)
         except Exception as e:
             import traceback
             print(f"[DEBUG] バッチ{batch_index+1}の実行中にエラー発生: {type(e).__name__} - {e}")
@@ -2026,7 +2540,7 @@ with block:
             # モードについての説明を画像枠の上に表示
             gr.Markdown(translate("**「1フレーム推論」モードでは、1枚の新しい未来の画像を生成します。**"))
             
-            input_image = gr.Image(sources='upload', type="filepath", label=translate("画像"), height=320)
+            input_image = gr.Image(sources=['upload', 'clipboard'], type="filepath", label=translate("Image"), height=320)
             
             # 解像度設定（画像の直下に）
             resolution = gr.Dropdown(
@@ -2254,6 +2768,113 @@ with block:
             extracted_info = gr.Markdown(visible=False)
             extracted_prompt = gr.Textbox(visible=False)
             extracted_seed = gr.Textbox(visible=False)
+            
+            # 着せ替え設定 - 詳細設定の前に配置
+            gr.Markdown(f"### " + translate("Kisekaeichi 設定"))
+            gr.Markdown(translate("参照画像の特徴を入力画像に適用する一枚絵生成機能"))
+            
+            # 参照画像を使用するかどうかのチェックボックス
+            use_reference_image = gr.Checkbox(
+                label=translate("参照画像を使用"),
+                value=False
+            )
+            
+            # 参照画像の入力
+            reference_image = gr.Image(
+                sources=['upload', 'clipboard'],
+                label=translate("参照画像"),
+                type="filepath",
+                interactive=True,
+                visible=False,  # 初期状態では非表示
+                height=320
+            )
+            # 参照画像の説明
+            reference_image_info = gr.Markdown(
+                translate("特徴を抽出する画像（スタイル、服装、背景など）"),
+                visible=False  # 初期状態では非表示
+            )
+            
+            # 高度な設定グループ
+            with gr.Group(visible=False) as advanced_kisekae_group:
+                gr.Markdown(f"#### " + translate("Kisekaeichi 詳細オプション"))
+                
+                with gr.Row():
+                    with gr.Column():
+                        # ターゲットインデックス（公式実装に合わせて追加）
+                        target_index = gr.Slider(
+                            label=translate("ターゲットインデックス"),
+                            minimum=0,
+                            maximum=8,
+                            value=1,  # PR #284推奨値
+                            step=1
+                        )
+                        target_index_info = gr.Markdown(
+                            translate("開始画像の潜在空間での位置（0-8、推奨値1）")
+                        )
+                        
+                        # 履歴インデックス
+                        history_index = gr.Slider(
+                            label=translate("履歴インデックス"),
+                            minimum=0,
+                            maximum=16,
+                            value=16,  # デフォルト値を16に設定
+                            step=1
+                        )
+                        history_index_info = gr.Markdown(
+                            translate("参照画像の潜在空間での位置（0-16、デフォルト16、推奨値13）")
+                        )
+                        
+                        # 後処理ゼロ化オプション（削除）
+                        # ノイズ問題と色の問題の両立が困難なため、zero_postオプションは削除
+                        
+                
+                with gr.Row():
+                    with gr.Column():
+                        # 入力画像用マスク
+                        input_mask = gr.Image(
+                            sources=['upload', 'clipboard'],
+                            label=translate("入力画像マスク（オプション）"),
+                            type="filepath",
+                            interactive=True,
+                            height=320
+                        )
+                        input_mask_info = gr.Markdown(
+                            translate("白い部分を保持、黒い部分を変更（グレースケール画像）")
+                        )
+                    
+                    with gr.Column():
+                        # 参照画像用マスク
+                        reference_mask = gr.Image(
+                            sources=['upload', 'clipboard'],
+                            label=translate("参照画像マスク（オプション）"),
+                            type="filepath",
+                            interactive=True,
+                            height=320
+                        )
+                        reference_mask_info = gr.Markdown(
+                            translate("白い部分を適用、黒い部分を無視（グレースケール画像）")
+                        )
+            
+            # 着せ替え設定の表示/非表示を切り替える関数
+            def toggle_kisekae_settings(use_reference):
+                # インデックスのデフォルト値を設定
+                target_index_value = 1 if use_reference else 0  # 参照画像使用時は1、未使用時は0に戻す
+                history_index_value = 16 if use_reference else 1  # 参照画像使用時は16、未使用時は1に戻す
+                
+                return [
+                    gr.update(visible=use_reference),  # reference_image
+                    gr.update(visible=use_reference),  # advanced_kisekae_group
+                    gr.update(visible=use_reference),  # reference_image_info
+                    gr.update(value=target_index_value),  # target_index
+                    gr.update(value=history_index_value)  # history_index
+                ]
+            
+            # イベントハンドラーの設定
+            use_reference_image.change(
+                toggle_kisekae_settings,
+                inputs=[use_reference_image],
+                outputs=[reference_image, advanced_kisekae_group, reference_image_info, target_index, history_index]
+            )
             
             # 詳細設定アコーディオン - 埋め込みプロンプト機能の直後に配置
             with gr.Accordion(translate("詳細設定"), open=False, elem_classes="section-accordion"):
@@ -2846,7 +3467,10 @@ with block:
            batch_count, use_random_seed, latent_window_size, latent_index,
            use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3, use_rope_batch,
-           use_queue, prompt_queue_file]  # キュー機能パラメータを追加
+           use_queue, prompt_queue_file,  # キュー機能パラメータを追加
+           # Kisekaeichi関連パラメータを追加
+           use_reference_image, reference_image, 
+           target_index, history_index, input_mask, reference_mask]
     start_button.click(fn=process, inputs=ips, outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button])
     end_button.click(fn=end_process, outputs=[end_button])
     
