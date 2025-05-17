@@ -687,9 +687,10 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     setup_vae_if_loaded()
                     load_model_as_complete(vae, target_device=gpu)
                 
-                ref_image_gpu = ref_image_pt.to(gpu)
-                reference_latent = vae_encode(ref_image_gpu, vae)
-                del ref_image_gpu
+                with torch.no_grad():  # 明示的にno_gradコンテキストを使用
+                    ref_image_gpu = ref_image_pt.to(gpu)
+                    reference_latent = vae_encode(ref_image_gpu, vae)
+                    del ref_image_gpu
                 
                 if not high_vram:
                     vae.to('cpu')
@@ -1407,12 +1408,13 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     print(translate("[INFO] kisekaeichi: マスクが指定されていません"))
                 
                 # 公式実装のzero_post処理（固定値として実装）
-                if sample_num_frames == 1 and use_reference_image:
+                if sample_num_frames == 1:
                     one_frame_inference = set()
                     one_frame_inference.add(f"target_index={target_index}")
                     one_frame_inference.add(f"history_index={history_index}")
-                    # 公式実装のデフォルト動作としてzero_postを適用
-                    one_frame_inference.add("zero_post")
+                    # 公式実装の推奨動作として、参照画像がない場合にzero_postを適用
+                    if not use_reference_image:
+                        one_frame_inference.add("zero_post")
                     
                     # zero_post処理（公式実装と完全同一）
                     if "zero_post" in one_frame_inference:
