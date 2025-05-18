@@ -128,6 +128,15 @@ from eichi_utils.settings_manager import (
     open_output_folder
 )
 
+# LoRAプリセット管理モジュールをインポート
+from eichi_utils.lora_preset_manager import (
+    initialize_lora_presets,
+    load_lora_presets,
+    save_lora_preset,
+    load_lora_preset,
+    get_preset_names
+)
+
 import gradio as gr
 from eichi_utils.ui_styles import get_app_css
 import torch
@@ -289,6 +298,10 @@ base_path = webui_folder  # endframe_ichiとの互換性のため
 # 設定保存用フォルダの設定
 settings_folder = os.path.join(webui_folder, 'settings')
 os.makedirs(settings_folder, exist_ok=True)
+
+# LoRAプリセットの初期化
+from eichi_utils.lora_preset_manager import initialize_lora_presets
+initialize_lora_presets()
 
 # 設定から出力フォルダを取得
 app_settings = load_settings()
@@ -2207,7 +2220,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             print(translate("[INFO] lora_dropdown3 = {0}").format(lora_dropdown3))
         print(translate("[INFO] lora_scales_text = {0}").format(lora_scales_text))
     
-    yield None, None, '', '', gr.update(interactive=False), gr.update(interactive=True)
+    yield gr.update(), None, '', '', gr.update(interactive=False), gr.update(interactive=True)
     
     # バッチ処理用の変数 - 各フラグをリセット
     batch_stopped = False
@@ -2254,7 +2267,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         if batch_stopped:
             print(translate("\nバッチ処理がユーザーによって中止されました"))
             yield (
-                None,
+                gr.update(),
                 gr.update(visible=False),
                 translate("バッチ処理が中止されました。"),
                 '',
@@ -2268,7 +2281,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"\n{batch_info}")
             # UIにもバッチ情報を表示
-            yield None, gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True)
+            yield gr.update(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True)
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
         current_prompt = prompt
@@ -2388,7 +2401,14 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                     
                     if flag == 'file':
                         output_filename = data
-                        yield output_filename, gr.update(), gr.update(), gr.update(), gr.update(interactive=False), gr.update(interactive=True)
+                        yield (
+                            output_filename if output_filename is not None else gr.update(),
+                            gr.update(),
+                            gr.update(),
+                            gr.update(),
+                            gr.update(interactive=False),
+                            gr.update(interactive=True),
+                        )
                     
                     if flag == 'progress':
                         preview, desc, html = data
@@ -2405,7 +2425,14 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                                 completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(batch_count, batch_count)
                             
                             # 完了メッセージでUIを更新
-                            yield output_filename, gr.update(visible=False), completion_message, '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation"))
+                            yield (
+                                output_filename if output_filename is not None else gr.update(),
+                                gr.update(visible=False),
+                                completion_message,
+                                '',
+                                gr.update(interactive=True, value=translate("Start Generation")),
+                                gr.update(interactive=False, value=translate("End Generation")),
+                            )
                         break
                         
                     # ユーザーが中断した場合
@@ -2414,7 +2441,14 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         # 処理ループ内での中断検出（デバッグログ削除）
                         print(translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index + 1, batch_count))
                         # endframe_ichiと同様のシンプルな実装に戻す
-                        yield output_filename, gr.update(visible=False), translate("バッチ処理が中断されました"), '', gr.update(interactive=True), gr.update(interactive=False, value=translate("End Generation"))
+                        yield (
+                            output_filename if output_filename is not None else gr.update(),
+                            gr.update(visible=False),
+                            translate("バッチ処理が中断されました"),
+                            '',
+                            gr.update(interactive=True),
+                            gr.update(interactive=False, value=translate("End Generation")),
+                        )
                         return
                         
                 except Exception as e:
@@ -2999,6 +3033,43 @@ with block:
                         info=translate("各LoRAのスケール値をカンマ区切りで入力 (例: 0.8,0.5,0.3)"),
                         visible=False
                     )
+                    
+                    # LoRAプリセット機能のインポート
+                    from eichi_utils.lora_preset_manager import save_lora_preset, load_lora_preset
+                    
+                    # LoRAプリセットグループ（初期状態では非表示）
+                    with gr.Group(visible=False) as lora_preset_group:
+                        # シンプルな1行レイアウト
+                        with gr.Row():
+                            # プリセット選択ボタン（1-5）
+                            preset_buttons = []
+                            for i in range(1, 6):
+                                preset_buttons.append(
+                                    gr.Button(
+                                        translate("設定{0}").format(i),
+                                        variant="secondary",
+                                        scale=1
+                                    )
+                                )
+                            
+                            # Load/Save選択（ラベルなし、横並び）
+                            with gr.Row(scale=1):
+                                load_btn = gr.Button("Load", variant="primary", scale=1)
+                                save_btn = gr.Button("Save", variant="secondary", scale=1)
+                            # 内部的に使うRadio（非表示）
+                            lora_preset_mode = gr.Radio(
+                                choices=[translate("Load"), translate("Save")],
+                                value=translate("Load"),
+                                visible=False
+                            )
+                        
+                        # プリセット状態表示
+                        lora_preset_status = gr.Textbox(
+                            label=translate("プリセット状態"),
+                            value="",
+                            interactive=False,
+                            lines=1
+                        )
 
                     # LoRAディレクトリからファイル一覧を取得する関数
                     def scan_lora_directory():
@@ -3058,11 +3129,13 @@ with block:
                             choices = scan_lora_directory() if not is_upload_mode else None
 
                             # モードに基づいた表示設定
+                            preset_visible = not is_upload_mode  # ディレクトリ選択モードの場合のみプリセット表示
                             return [
                                 gr.update(visible=True, value=previous_lora_mode),  # lora_mode - 前回の値を復元
                                 gr.update(visible=is_upload_mode),  # lora_upload_group
                                 gr.update(visible=not is_upload_mode),  # lora_dropdown_group
                                 gr.update(visible=True),  # lora_scales_text
+                                gr.update(visible=preset_visible),  # lora_preset_group
                             ]
                         else:
                             # LoRA不使用時はLoRA関連UIのみ非表示（FP8最適化は表示したまま）
@@ -3071,6 +3144,7 @@ with block:
                                 gr.update(visible=False),  # lora_upload_group
                                 gr.update(visible=False),  # lora_dropdown_group
                                 gr.update(visible=False),  # lora_scales_text
+                                gr.update(visible=False),  # lora_preset_group
                             ]
                     
                     # LoRA読み込み方式に応じて表示を切り替える関数
@@ -3089,6 +3163,7 @@ with block:
                             return [
                                 gr.update(visible=False),                                # lora_upload_group
                                 gr.update(visible=True),                                 # lora_dropdown_group
+                                gr.update(visible=True),                                 # lora_preset_group
                                 gr.update(choices=choices, value=choices[0]),            # lora_dropdown1
                                 gr.update(choices=choices, value=choices[0]),            # lora_dropdown2
                                 gr.update(choices=choices, value=choices[0])             # lora_dropdown3
@@ -3098,6 +3173,7 @@ with block:
                             return [
                                 gr.update(visible=True),   # lora_upload_group
                                 gr.update(visible=False),  # lora_dropdown_group
+                                gr.update(visible=False),  # lora_preset_group
                                 gr.update(),               # lora_dropdown1 - 変更なし
                                 gr.update(),               # lora_dropdown2 - 変更なし
                                 gr.update()                # lora_dropdown3 - 変更なし
@@ -3139,7 +3215,7 @@ with block:
                         fn=toggle_lora_full_update,
                         inputs=[use_lora],
                         outputs=[lora_mode, lora_upload_group, lora_dropdown_group,
-                                 lora_scales_text,
+                                 lora_scales_text, lora_preset_group,
                                  lora_dropdown1, lora_dropdown2, lora_dropdown3]
                     )
                     
@@ -3147,7 +3223,7 @@ with block:
                     lora_mode.change(
                         fn=toggle_lora_mode,
                         inputs=[lora_mode],
-                        outputs=[lora_upload_group, lora_dropdown_group, lora_dropdown1, lora_dropdown2, lora_dropdown3]
+                        outputs=[lora_upload_group, lora_dropdown_group, lora_preset_group, lora_dropdown1, lora_dropdown2, lora_dropdown3]
                     )
                     
                     # スキャンボタンの処理を紐づけ
@@ -3155,6 +3231,89 @@ with block:
                         fn=update_lora_dropdowns,
                         inputs=[],
                         outputs=[lora_dropdown1, lora_dropdown2, lora_dropdown3]
+                    )
+                    
+                    # LoRAタイプとプリセット表示の組み合わせを制御する関数
+                    def toggle_lora_and_preset(use_lora_val, lora_mode_val):
+                        # LoRAが有効かつディレクトリから選択モードの場合のみプリセットを表示
+                        preset_visible = use_lora_val and lora_mode_val == translate("ディレクトリから選択")
+                        return gr.update(visible=preset_visible)
+                    
+                    # LoRAプリセット機能のハンドラー関数
+                    def handle_lora_preset_button(button_index, mode, lora1, lora2, lora3, scales):
+                        """LoRAプリセットボタンのクリックを処理する"""
+                        if mode == translate("Load"):  # Load
+                            # ロードモード
+                            loaded_values = load_lora_preset(button_index)
+                            if loaded_values:
+                                return (
+                                    gr.update(value=loaded_values[0]),  # lora_dropdown1
+                                    gr.update(value=loaded_values[1]),  # lora_dropdown2
+                                    gr.update(value=loaded_values[2]),  # lora_dropdown3
+                                    gr.update(value=loaded_values[3]),  # lora_scales_text
+                                    translate("設定{0}を読み込みました").format(button_index + 1)  # status
+                                )
+                            else:
+                                return (
+                                    gr.update(), gr.update(), gr.update(), gr.update(),
+                                    translate("設定{0}の読み込みに失敗しました").format(button_index + 1)
+                                )
+                        else:
+                            # セーブモード
+                            success, message = save_lora_preset(button_index, lora1, lora2, lora3, scales)
+                            return (
+                                gr.update(), gr.update(), gr.update(), gr.update(),
+                                message
+                            )
+                    
+                    # Load/Saveボタンのイベントハンドラー
+                    def set_load_mode():
+                        return (
+                            gr.update(value=translate("Load")),
+                            gr.update(variant="primary"),
+                            gr.update(variant="secondary")
+                        )
+                    
+                    def set_save_mode():
+                        return (
+                            gr.update(value=translate("Save")),
+                            gr.update(variant="secondary"),
+                            gr.update(variant="primary")
+                        )
+                    
+                    # イベントの設定
+                    # プリセットボタンのイベント
+                    for i, btn in enumerate(preset_buttons):
+                        btn.click(
+                            fn=lambda mode, lora1, lora2, lora3, scales, idx=i: handle_lora_preset_button(
+                                idx, mode, lora1, lora2, lora3, scales
+                            ),
+                            inputs=[lora_preset_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_scales_text],
+                            outputs=[lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_scales_text, lora_preset_status]
+                        )
+                    
+                    # Load/Saveボタンのイベント
+                    load_btn.click(
+                        set_load_mode,
+                        outputs=[lora_preset_mode, load_btn, save_btn]
+                    )
+                    
+                    save_btn.click(
+                        set_save_mode,
+                        outputs=[lora_preset_mode, load_btn, save_btn]
+                    )
+                    
+                    # LoRA使用状態とモードの変更でプリセット表示を更新
+                    use_lora.change(
+                        toggle_lora_and_preset,
+                        inputs=[use_lora, lora_mode],
+                        outputs=[lora_preset_group]
+                    )
+                    
+                    lora_mode.change(
+                        toggle_lora_and_preset,
+                        inputs=[use_lora, lora_mode],
+                        outputs=[lora_preset_group]
                     )
 
                     # UIロード後に自動的に初期化ボタンをクリックするJavaScriptを追加
@@ -3203,6 +3362,7 @@ with block:
                 lora_dropdown2 = gr.Dropdown(visible=False)
                 lora_dropdown3 = gr.Dropdown(visible=False)
                 lora_scales_text = gr.Textbox(visible=False, value="0.8,0.8,0.8")
+                lora_preset_group = gr.Group(visible=False)  # ダミー
 
             # LoRA設定の下に埋め込みプロンプトおよびシードを複写するチェックボックスを表示
             # 埋め込みプロンプトおよびシードを複写するチェックボックス（LoRA設定の下に表示）
