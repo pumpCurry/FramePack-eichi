@@ -1935,12 +1935,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # ユーザーにわかりやすいメッセージを表示
         print(translate("\n[INFO] ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.update(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(value=seed)
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(value=seed)
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
         print(translate("[INFO] 指定されたSEED値 {0} を使用します。").format(seed))
-        yield gr.update(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update()
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update()
 
     stream = AsyncStream()
 
@@ -1948,7 +1948,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     if batch_stopped:
         print(translate("\nバッチ処理が中断されました（バッチ開始前）"))
         yield (
-            gr.update(),
+            gr.skip(),
             gr.update(visible=False),
             translate("バッチ処理が中断されました"),
             '',
@@ -1998,7 +1998,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         if batch_stopped:
             print(translate("\nバッチ処理がユーザーによって中止されました"))
             yield (
-                gr.update(),
+                gr.skip(),
                 gr.update(visible=False),
                 translate("バッチ処理が中止されました。"),
                 '',
@@ -2013,7 +2013,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"\n{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.update(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update()
+            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update()
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
         current_prompt = prompt
@@ -2093,7 +2093,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         if batch_stopped:
             print(translate("バッチ処理が中断されました。worker関数の実行をキャンセルします。"))
             # 中断メッセージをUIに表示
-            yield (gr.update(),
+            yield (gr.skip(),
                    gr.update(visible=False),
                    translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index, batch_count),
                    '',
@@ -2193,7 +2193,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 batch_output_filename = data
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (
-                    batch_output_filename if batch_output_filename is not None else gr.update(), 
+                    batch_output_filename if batch_output_filename is not None else gr.skip(), 
                     gr.update(value=None, visible=False), 
                     gr.update(), 
                     gr.update(), 
@@ -2209,7 +2209,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     batch_info = translate("バッチ処理: {0}/{1} - ").format(batch_index + 1, batch_count)
                     desc = batch_info + desc
                 # preview_imageを明示的に設定
-                yield gr.update(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update()
+                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update()
 
             if flag == 'end':
                 # このバッチの処理が終了
@@ -2221,7 +2221,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     else:
                         completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(batch_count, batch_count)
                     yield (
-                        batch_output_filename if batch_output_filename is not None else gr.update(),
+                        batch_output_filename if batch_output_filename is not None else gr.skip(),
                         gr.update(value=None, visible=False),
                         completion_message,
                         '',
@@ -2236,7 +2236,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     next_batch_message = translate("バッチ処理: {0}/{1} 完了、次のバッチに進みます...").format(batch_index + 1, batch_count)
                     print(translate("\n◆ バッチ {0}/{1} 完了 - 次のバッチに進みます").format(batch_index + 1, batch_count))
                     yield (
-                        batch_output_filename if batch_output_filename is not None else gr.update(),
+                        batch_output_filename if batch_output_filename is not None else gr.skip(),
                         gr.update(value=None, visible=False),
                         next_batch_message,
                         '',
@@ -3358,6 +3358,7 @@ with block:
         with gr.Column():
             result_video = gr.Video(
                 label=translate("Finished Frames"),
+                key="result_video",
                 autoplay=True,
                 show_share_button=False,
                 height=512,

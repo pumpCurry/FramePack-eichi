@@ -2220,7 +2220,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             print(translate("[INFO] lora_dropdown3 = {0}").format(lora_dropdown3))
         print(translate("[INFO] lora_scales_text = {0}").format(lora_scales_text))
     
-    yield gr.update(), None, '', '', gr.update(interactive=False), gr.update(interactive=True)
+    yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True)
     
     # バッチ処理用の変数 - 各フラグをリセット
     batch_stopped = False
@@ -2267,7 +2267,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         if batch_stopped:
             print(translate("\nバッチ処理がユーザーによって中止されました"))
             yield (
-                gr.update(),
+                gr.skip(),
                 gr.update(visible=False),
                 translate("バッチ処理が中止されました。"),
                 '',
@@ -2281,7 +2281,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"\n{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.update(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True)
+            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True)
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
         current_prompt = prompt
@@ -2402,7 +2402,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                     if flag == 'file':
                         output_filename = data
                         yield (
-                            output_filename if output_filename is not None else gr.update(),
+                            output_filename if output_filename is not None else gr.skip(),
                             gr.update(),
                             gr.update(),
                             gr.update(),
@@ -2412,7 +2412,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                     
                     if flag == 'progress':
                         preview, desc, html = data
-                        yield gr.update(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True)
+                        yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True)
                     
                     if flag == 'end':
                         # endフラグを受信（デバッグログ削除）
@@ -2426,7 +2426,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                             
                             # 完了メッセージでUIを更新
                             yield (
-                                output_filename if output_filename is not None else gr.update(),
+                                output_filename if output_filename is not None else gr.skip(),
                                 gr.update(visible=False),
                                 completion_message,
                                 '',
@@ -2442,7 +2442,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         print(translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index + 1, batch_count))
                         # endframe_ichiと同様のシンプルな実装に戻す
                         yield (
-                            output_filename if output_filename is not None else gr.update(),
+                            output_filename if output_filename is not None else gr.skip(),
                             gr.update(visible=False),
                             translate("バッチ処理が中断されました"),
                             '',
