@@ -2,6 +2,11 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
 
+# Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
+import asyncio
+if sys.platform in ('win32', 'cygwin'):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 # グローバル変数 - 停止フラグと通知状態管理
 user_abort = False
 user_abort_notified = False

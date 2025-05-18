@@ -2,6 +2,11 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
 
+# Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
+import asyncio
+if sys.platform in ('win32', 'cygwin'):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from diffusers_helper.hf_login import login
 
 # VAEキャッシュ機能のインポート
