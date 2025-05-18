@@ -1,0 +1,25 @@
+services:
+  framepack-eichi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - TZ=Europe/Brussels
+    ports:
+      - "7861:7861"
+    volumes:
+      - ./data:/app/framepack/data
+      - ./models:/app/framepack/hf_download
+      - ./outputs:/app/framepack/outputs
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: ["--lang", "en"]  # Options: "en", "ja", "zh-tw"

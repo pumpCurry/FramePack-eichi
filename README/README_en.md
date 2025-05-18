@@ -16,7 +16,27 @@ In other words, it's a ~~local~~ **worldwide** modification specialized in creat
 
 We're extremely grateful to [https://github.com/hinablue](https://github.com/hinablue) **Hina Chen** for multilingual support cooperation.
 
-## 🌟 New Feature: FramePack-oichi Addition (v1.9.2)
+## 🌟 Feature Expansion (v1.9.3)
+
+**FramePack-eichi v1.9.3** focuses on workflow efficiency and usability improvements.
+
+### 🚀 Key New Features
+
+- **Prompt Queue**: Process multiple prompts sequentially from text files
+- **Image Queue**: Automatically process images in a folder sequentially
+- **FP8 Optimization**: Significantly reduced memory usage when not using LoRA (requires PyTorch 2.1+)
+- **LoRA Preset Manager**: Easily save and switch between multiple LoRA configurations
+- **Video Duration Extension**: Added 30s, 40s options to eichi(standard), 30s/40s/60s/120s to F1
+- **kisekaeichi Integration**: Reference image-based video generation technology devised by furusu and implemented by Kohya integrated into oichi
+- **Russian UI Added**: Extended to 4-language support (Japanese, English, Chinese, Russian)
+
+### 💡 Use Cases
+
+- **Batch Processing**: Process multiple generations at once with prompt and image queues
+- **Low-spec Environments**: Comfortable operation even with 8GB VRAM thanks to FP8 optimization
+- **Internationalization**: More users can now access the tool with Russian UI support
+
+## 🌟 FramePack-oichi Addition (v1.9.2)
 
 **FramePack-eichi v1.9.2** introduces a new feature called "FramePack-oichi". This is a dedicated tool for predicting and generating the next future frame image from a single input image.
 
@@ -34,6 +54,7 @@ We're extremely grateful to [https://github.com/hinablue](https://github.com/hin
 - **Idea Exploration**: Quickly check "how an image might move next"
 - **Resource Saving**: Process with fewer resources compared to full video generation
 - **Sequential Generation**: Possible to use the generated image as input again to build up frames
+- **kisekaeichi Function**: Reference image-based video generation technology devised by furusu and implemented by Kohya (added in v1.9.3)
 
 ### 🚀 Launch Method
 
@@ -42,7 +63,7 @@ Dedicated launch scripts are provided:
 - English version: `run_oneframe_ichi_en.bat`
 - Traditional Chinese version: `run_oneframe_ichi_zh-tw.bat`
 
-## 🌟 New Feature: F1 Model Addition (v1.9.1)
+## 🌟 F1 Model Addition (v1.9.1)
 
 **FramePack-eichi v1.9.1** adds a new forward-generation model "FramePack-~~eichi~~ F1" alongside the traditional reverse-generation model "FramePack-eichi" (standard version).
 
@@ -76,8 +97,11 @@ Dedicated launch scripts are provided:
 ## 🌟 Main Features
 
 - **High-Quality Video Generation**: Generate natural motion videos from a single image (existing feature)
+- **Queue Processing**: Automated batch processing with prompt and image queues (added in v1.9.3)
+- **FP8 Optimization (Improved)**: Significantly reduced memory usage when not using LoRA (added in v1.9.3)
 - **F1 Model Support**: New model for forward generation, enabling more intuitive video creation (added in v1.9.1)
 - **FramePack-oichi**: New feature to generate the next future frame image from a single input image (added in v1.9.2)
+- **kisekaeichi Function for oichi**: Reference image-based video generation technology devised by furusu and implemented by Kohya integrated into oichi (added in v1.9.3)
 - **Frame Image Save Function**: Added option to save all generated frame images or only those from the final section (added in v1.9.2)
 - **Flexible Video Length Settings**: Support for 1-20 second section modes (unique feature)
 - **Section Frame Size Settings**: Toggle between 0.5-second and 1-second modes (added in v1.5)
@@ -90,12 +114,14 @@ Dedicated launch scripts are provided:
 - **PNG Metadata Embedding**: Automatically record prompts, seed values, and section information in generated images (added in v1.9.1)
 - **Hunyuan/FramePack LoRA Support**: Add custom expressions through model customization (significantly improved in v1.9/v1.9.1)
 - **LoRA Function Enhancement**: Support for simultaneous use of three LoRAs and selection from the /webui/lora folder (added in v1.9.2)
+- **LoRA Preset Manager**: Save and load multiple LoRA configurations (added in v1.9.3)
+- **Video Duration Extension**: Added 30s, 40s options for eichi, 30s/40s/60s/120s for F1 (added in v1.9.3)
 - **Section Information Batch Management**: Support for downloading/uploading section information via ZIP file and reflecting changes after content modification (added in v1.9.2)
 - **VAE Cache Function**: Processing speed improvement through frame-by-frame VAE decoding (optional feature) - Based on research by furusu [Details1](https://note.com/gcem156/n/nb93535d80c82) [Details2](https://github.com/laksjdjf/FramePack) (added in v1.9.2)
 - **FP8 Optimization**: Reduce VRAM usage and optimize processing speed for LoRA application (added in v1.9.1)
 - **MP4 Compression Settings**: Adjust the balance between video file size and quality (merged from original in v1.6.2)
 - **Output Folder Management**: Specify output folders and OS-independent folder opening (added in v1.2)
-- **Multilingual Support (i18n)**: UI in Japanese, English, and Traditional Chinese (added in v1.8.1)
+- **Multilingual Support (i18n)**: UI in Japanese, English, Chinese, and Russian (added in v1.8.1, Russian added in v1.9.3)
 - **Docker Support**: Easily run FramePack-eichi in a containerized environment (added in v1.9.1)
 
 ![FramePack-eichi Screenshot 2](../images/framepack_eichi_screenshot2.png)
@@ -110,7 +136,50 @@ Dedicated launch scripts are provided:
 - **[Configuration Information](README_column_en.md#-%EF%B8%8F-configuration-information)** - Detailed configuration options
 - **[Changelog](README_changelog.md)** - Complete update history
 
-## 📝 Latest Update Information (v1.9.2)
+## 📝 Latest Update Information (v1.9.3)
+
+### Major Changes
+
+#### 1. Prompt Queue and Image Queue
+- **Prompt Queue**: Load multiple prompts from text file and process sequentially
+- **Image Queue**: Automatically process images in specified folder sequentially
+- **Auto-Processing**: Auto-process next item after completion when queue is enabled
+
+#### 2. FP8 Optimization Improvements
+- **Memory Usage Reduction**: Significant memory usage reduction when not using LoRA
+- **Improved Processing Speed**: Optimization improves processing speed (requires PyTorch 2.1 or higher)
+- **Default Enabled**: FP8 optimization is default enabled for normal use
+
+#### 3. LoRA Preset Manager
+- **Multiple Preset Support**: Save and manage up to 5 presets
+- **Easy Switching**: Easy preset switching from UI
+- **Batch Save**: Batch save of LoRA files, strengths, and other settings
+
+#### 4. UI Organization and Multilingual Support
+- **Logical Grouping**: Grouped related functions for improved usability
+- **Enhanced Explanations**: Added explanations for each function for better understanding
+- **Russian UI Added**: 4-language support (Japanese, English, Chinese, Russian)
+
+#### 5. Video Generation Duration Extension
+- **eichi (standard)**: Added 30s, 40s options in 1s mode (33 frames)
+- **F1**: Added 30s, 40s, 60s, 120s options
+- **Flexible Production**: Support for more diverse video lengths, enabling long video generation
+
+#### 6. Section Management Enhancement
+- **Import/Export Path Normalization**: Path normalization for import/export
+- **Improved Compatibility**: Improved section information compatibility between different environments
+
+#### 7. kisekaeichi Function Integration to oichi
+- **Reference Image Generation**: Integration of reference image-based video generation technology devised by furusu and implemented by Kohya
+- **Precise Control**: Precise control through target index and history index
+- **Mask Function**: Mask function implemented for changing specific areas only
+
+#### 8. Bug Fixes and Optimization
+- **Prompt Processing Fix**: Fixed prompt addition and deletion issues
+- **Windows Error Avoidance**: Avoided Windows errors related to asyncio
+- **Model Downloader**: Added efficient download function for F1 model
+
+## 📝 Update Information (v1.9.2)
 
 ### Major Changes
 
@@ -340,9 +409,12 @@ First, you need to install the original FramePack.
    - `run_endframe_ichi_f1.bat` - F1 version/Japanese (added in v1.9.1)
    - `run_endframe_ichi_en_f1.bat` - F1 version/English (added in v1.9.1)
    - `run_endframe_ichi_zh-tw_f1.bat` - F1 version/Traditional Chinese (added in v1.9.1)
+   - `run_endframe_ichi_ru.bat` - Standard version/Russian (added in v1.9.3)
+   - `run_endframe_ichi_f1_ru.bat` - F1 version/Russian (added in v1.9.3)
    - `run_oneframe_ichi.bat` - One-frame inference/Japanese (added in v1.9.2)
    - `run_oneframe_ichi_en.bat` - One-frame inference/English (added in v1.9.2)
    - `run_oneframe_ichi_zh-tw.bat` - One-frame inference/Traditional Chinese (added in v1.9.2)
+   - `run_oneframe_ichi_ru.bat` - One-frame inference/Russian (added in v1.9.3)
 
 2. Place the following files and folders in the `webui` folder:
    - `endframe_ichi.py` - Standard version main application file
@@ -364,6 +436,9 @@ First, you need to install the original FramePack.
      - `section_manager.py` - Section information management module (added in v1.9.2)
      - `vae_cache.py` - VAE cache module (added in v1.9.2)
      - `README_vae_cache.md` - VAE cache function explanation (added in v1.9.2)
+     - `lora_preset_manager.py` - LoRA preset management module (added in v1.9.3)
+     - `model_downloader.py` - Model download function (added in v1.9.3)
+     - `vae_settings.py` - VAE settings management module (added in v1.9.3)
    - `lora_utils` folder - LoRA-related modules
      - `__init__.py`
      - `dynamic_swap_lora.py` - LoRA management module (maintained for backward compatibility)
@@ -381,14 +456,17 @@ First, you need to install the original FramePack.
      - `ja.json` - Japanese translation file (default language)
      - `en.json` - English translation file
      - `zh-tw.json` - Traditional Chinese translation file
+     - `ru.json` - Russian translation file (added in v1.9.3)
 
 3. Run the executable file for your preferred version and language to start the FramePack-eichi Web UI:
    - Standard version/Japanese: `run_endframe_ichi.bat`
    - Standard version/English: `run_endframe_ichi_en.bat`
    - Standard version/Traditional Chinese: `run_endframe_ichi_zh-tw.bat`
+   - Standard version/Russian: `run_endframe_ichi_ru.bat` (added in v1.9.3)
    - F1 version/Japanese: `run_endframe_ichi_f1.bat` (added in v1.9.1)
    - F1 version/English: `run_endframe_ichi_en_f1.bat` (added in v1.9.1)
    - F1 version/Traditional Chinese: `run_endframe_ichi_zh-tw_f1.bat` (added in v1.9.1)
+   - F1 version/Russian: `run_endframe_ichi_f1_ru.bat` (added in v1.9.3)
 
    Alternatively, you can specify the language directly from the command line:
    ```bash
@@ -528,8 +606,6 @@ On Linux, you can run it with the following steps:
    python endframe_ichi_f1.py --lang zh-tw  # Start F1 version in Traditional Chinese
    ```
 
-Note: Multilingual versions of the README will be added sequentially. For the Traditional Chinese version, please refer to [README_zh.md](README_zh.md).
-
 ## 🔧 Troubleshooting
 
 ### About h11 Errors
@@ -656,6 +732,17 @@ This project is released under the [Apache License 2.0](LICENSE), in compliance 
 ## 📝 Update History
 
 The latest update information is shown below. For the full update history, please refer to the [Changelog](README_changelog.md).
+
+### 2025-05-15: Version 1.9.3
+- **Prompt Queue and Image Queue**: Added automation features for batch processing
+- **FP8 Optimization Improvements**: Significantly improved memory usage and processing speed when not using LoRA
+- **LoRA Preset Manager**: Easily save and switch between multiple LoRA configurations
+- **UI Organization**: Improved usability through logical grouping and detailed explanations
+- **Russian UI Added**: Extended to 4-language support (Japanese, English, Chinese, Russian)
+- **Video Duration Extension**: Added 30s, 40s for eichi(standard), 30s/40s/60s/120s for F1
+- **kisekaeichi oichi Integration**: Reference image technology devised by furusu, implemented by Kohya integrated into oichi
+- **Section Management Enhancement**: Path normalization for import/export
+- **Bug Fixes**: Fixed prompt processing and Windows environment errors
 
 ### 2025-05-11: Version 1.9.2
 - **"FramePack-oichi" New Feature Added**:

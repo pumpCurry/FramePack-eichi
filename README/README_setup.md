@@ -62,13 +62,15 @@ FramePack-eichiは、テキストプロンプトを使用して1枚の画像か�
 
 2. **FramePack-eichiのインストール**:
    - [FramePack-eichiリポジトリ](https://github.com/git-ai-code/FramePack-eichi)をクローンまたはダウンロード
-   - 適切な言語のバッチファイル（日本語は`run_endframe_ichi.bat`、英語は`run_endframe_ichi_en.bat`、繁体字中国語は`run_endframe_ichi_zh-tw.bat`）をFramePackのルートディレクトリにコピー
+   - 適切な言語のバッチファイル（日本語は`run_endframe_ichi.bat`、英語は`run_endframe_ichi_en.bat`、繁体字中国語は`run_endframe_ichi_zh-tw.bat`、ロシア語は`run_endframe_ichi_ru.bat`）をFramePackのルートディレクトリにコピー
+   - F1版を使用する場合は`run_endframe_ichi_f1.bat`（または言語別の`run_endframe_ichi_en_f1.bat`、`run_endframe_ichi_zh-tw_f1.bat`、`run_endframe_ichi_f1_ru.bat`）
+   - 単一フレーム推論の場合は`run_oneframe_ichi.bat`（または言語別の`run_oneframe_ichi_en.bat`、`run_oneframe_ichi_zh-tw.bat`、`run_oneframe_ichi_ru.bat`）
    - FramePack-eichiから以下のファイル/フォルダをFramePackの`webui`フォルダにコピー:
      - `endframe_ichi.py`
-     - `eichi_utils`フォルダ
+     - `eichi_utils`フォルダ（`lora_preset_manager.py`、`model_downloader.py`、`vae_settings.py`などを含む - v1.9.3で追加）
      - `lora_utils`フォルダ
      - `diffusers_helper`フォルダ
-     - `locales`フォルダ
+     - `locales`フォルダ（`ru.json`ロシア語翻訳ファイルを含む - v1.9.3で追加）
 
 3. **高速化ライブラリのインストール（オプションだが推奨）**:
    - [FramePack Issue #138](https://github.com/lllyasviel/FramePack/issues/138)から高速化パッケージインストーラーをダウンロード

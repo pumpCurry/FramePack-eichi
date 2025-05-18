@@ -4,6 +4,39 @@
 
 ## 日本語
 
+### 2025-05-15: バージョン1.9.3
+- **プロンプトキューと画像キュー**:
+  - テキストファイルから複数のプロンプトを読み込み順次処理
+  - 指定フォルダ内の画像を自動的に順次処理  
+  - キュー有効時は処理完了後に自動的に次の項目を処理
+- **FP8最適化の改善**:
+  - LoRA未使用時のメモリ使用量を大幅に削減
+  - 処理速度の向上（PyTorch 2.1以上が必要）
+  - 通常使用時はデフォルトで有効に
+- **LoRAプリセットマネージャー**:
+  - 5つのプリセットを保存・管理可能
+  - UIから簡単にプリセットを切り替え
+  - LoRAファイル、強度、その他の設定を一括保存
+- **UIの整理と多言語対応**:
+  - 関連機能をグループ化し操作性を向上
+  - 各機能の説明を追加し理解しやすく
+  - ロシア語UIの追加で4言語対応に拡張（日本語、英語、中国語、ロシア語）
+- **動画生成時間の拡張**:
+  - eichi(無印)の1秒モード(33フレーム)時に30秒、40秒を追加
+  - F1に30秒、40秒、60秒、120秒の選択肢を追加
+  - より多様な動画長に対応、長尺動画の生成が可能に
+- **セクション管理の強化**:
+  - インポート/エクスポート時のパス正規化
+  - 異なる環境間でのセクション情報の互換性を向上
+- **kisekaeichi機能のoichi統合**:
+  - furusu氏考案・Kohya氏実装の参照画像を用いた動画生成技術をoichiに統合
+  - ターゲットインデックスと履歴インデックスによる精密な制御
+  - 特定領域のみを変更可能なマスク機能も実装  
+- **バグ修正と最適化**:
+  - プロンプト追加と削除の問題を解消
+  - asyncio関連のWindowsエラーを回避
+  - F1モデルの効率的なダウンロード機能を追加
+
 ### 2025-05-11: バージョン1.9.2
 - **「FramePack-oichi」新機能追加**:
   - 1枚の入力画像から次の1枚の未来フレーム画像を予測生成する新機能
@@ -188,6 +221,39 @@
 - キーフレームガイド機能の追加
 
 ## English
+
+### 2025-05-15: Version 1.9.3
+- **Prompt Queue and Image Queue**:
+  - Load multiple prompts from text file and process sequentially
+  - Automatically process images in specified folder sequentially
+  - Auto-process next item after completion when queue is enabled
+- **FP8 Optimization Improvements**:
+  - Significant memory usage reduction when not using LoRA
+  - Improved processing speed (requires PyTorch 2.1 or higher)
+  - Enabled by default for normal use
+- **LoRA Preset Manager**:
+  - Save and manage up to 5 presets
+  - Easy preset switching from UI
+  - Batch save of LoRA files, strengths, and other settings
+- **UI Organization and Multilingual Support**:
+  - Grouped related functions for improved usability
+  - Added explanations for each function for better understanding
+  - Russian UI added for 4-language support (Japanese, English, Chinese, Russian)
+- **Video Generation Duration Extension**:
+  - Added 30s, 40s options to eichi (standard) in 1s mode (33 frames)
+  - Added 30s, 40s, 60s, 120s options to F1
+  - Support for more diverse video lengths, enabling long video generation
+- **Section Management Enhancement**:
+  - Path normalization for import/export
+  - Improved compatibility of section information between different environments
+- **kisekaeichi Function Integration to oichi**:
+  - Integration of reference image-based video generation technology devised by furusu and implemented by Kohya
+  - Precise control through target index and history index
+  - Mask function implemented for changing specific areas only
+- **Bug Fixes and Optimization**:
+  - Fixed prompt addition and deletion issues
+  - Avoided Windows errors related to asyncio
+  - Added efficient download function for F1 model
 
 ### 2025-05-11: Version 1.9.2
 - **"FramePack-oichi" New Feature Added**:
@@ -374,6 +440,39 @@
 
 ## 简体中文
 
+### 2025-05-15: 版本1.9.3
+- **提示词队列和图像队列**：
+  - 从文本文件加载多个提示词并按顺序处理
+  - 自动按顺序处理指定文件夹中的图像
+  - 启用队列时完成后自动处理下一项
+- **FP8优化改进**：
+  - 不使用LoRA时显著减少内存使用
+  - 提高处理速度（需要PyTorch 2.1或更高版本）
+  - 正常使用时默认启用
+- **LoRA预设管理器**：
+  - 保存和管理最多5个预设
+  - 从UI轻松切换预设
+  - 批量保存LoRA文件、强度和其他设置
+- **UI组织和多语言支持**：
+  - 将相关功能分组以提高可用性
+  - 为每个功能添加说明以便更好理解
+  - 添加俄语UI，支持4种语言（日语、英语、中文、俄语）
+- **视频生成时长扩展**：
+  - 在eichi（标准版）的1秒模式（33帧）下添加30秒、40秒选项
+  - F1添加30秒、40秒、60秒、120秒选项
+  - 支持更多样的视频长度，实现长视频生成
+- **分段管理增强**：
+  - 导入/导出的路径规范化
+  - 改善不同环境之间的分段信息兼容性
+- **kisekaeichi功能集成到oichi**：
+  - 集成由furusu设计、Kohya实现的基于参考图像的视频生成技术
+  - 通过目标索引和历史索引进行精确控制
+  - 实现了仅更改特定区域的遮罩功能
+- **错误修复和优化**：
+  - 修复提示词添加和删除问题
+  - 避免与asyncio相关的Windows错误
+  - 添加F1模型的高效下载功能
+
 ### 2025-05-11: 版本1.9.2
 - **"FramePack-oichi"新功能添加**:
   - 新功能可从单张输入图像预测生成下一张未来帧图像
@@ -558,6 +657,39 @@
 - 添加关键帧指南功能
 
 ## Русский
+
+### 2025-05-15: Версия 1.9.3
+- **Очередь промптов и очередь изображений**:
+  - Загрузка нескольких промптов из текстового файла и последовательная обработка
+  - Автоматическая последовательная обработка изображений в указанной папке
+  - Автоматическая обработка следующего элемента после завершения при включенной очереди
+- **Улучшения оптимизации FP8**:
+  - Значительное снижение использования памяти при неиспользовании LoRA
+  - Повышение скорости обработки (требуется PyTorch 2.1 или выше)
+  - Включено по умолчанию для обычного использования
+- **Менеджер пресетов LoRA**:
+  - Сохранение и управление до 5 пресетов
+  - Легкое переключение пресетов из интерфейса
+  - Пакетное сохранение файлов LoRA, силы и других настроек
+- **Организация интерфейса и многоязычная поддержка**:
+  - Группировка связанных функций для улучшения удобства использования
+  - Добавлены объяснения для каждой функции для лучшего понимания
+  - Добавлен русский интерфейс для поддержки 4 языков (японский, английский, китайский, русский)
+- **Расширение продолжительности генерации видео**:
+  - Добавлены варианты 30с, 40с для eichi (стандартная версия) в режиме 1с (33 кадра)
+  - Добавлены варианты 30с, 40с, 60с, 120с для F1
+  - Поддержка более разнообразной длины видео, включая генерацию длинных видео
+- **Улучшение управления секциями**:
+  - Нормализация путей для импорта/экспорта
+  - Улучшенная совместимость информации о секциях между различными средами
+- **Интеграция функции kisekaeichi в oichi**:
+  - Интеграция технологии генерации видео на основе эталонного изображения, разработанной furusu и реализованной Kohya
+  - Точный контроль через целевой индекс и индекс истории
+  - Реализована функция маски для изменения только определенных областей
+- **Исправления ошибок и оптимизация**:
+  - Исправлены проблемы с добавлением и удалением промптов
+  - Избежание ошибок Windows, связанных с asyncio
+  - Добавлена эффективная функция загрузки для модели F1
 
 ### 2025-05-11: Версия 1.9.2
 - **Добавление новой функции «FramePack-oichi»**:

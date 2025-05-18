@@ -16,7 +16,27 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
 
 感謝您 [https://github.com/hinablue](https://github.com/hinablue) **Hina Chen** 對多語言支援的協助。
 
-## 🌟 新功能：FramePack-oichi 添加 (v1.9.2)
+## 🌟 功能擴展 (v1.9.3)
+
+**FramePack-eichi v1.9.3** 專注於工作流程效率和使用便利性的改進。
+
+### 🚀 主要新功能
+
+- **提示詞隊列**：從文本文件順序處理多個提示詞
+- **圖像隊列**：自動順序處理文件夾中的圖像
+- **FP8優化**：不使用LoRA時顯著減少內存使用（需要PyTorch 2.1+）
+- **LoRA預設管理器**：輕鬆保存和切換多個LoRA配置
+- **視頻時長擴展**：eichi(標準版)添加30秒、40秒選項，F1添加30秒/40秒/60秒/120秒
+- **kisekaeichi集成**：由furusu設計、Kohya實現的基於參考圖像的視頻生成技術集成到oichi
+- **添加俄語界面**：擴展至4語言支持（日語、英語、中文、俄語）
+
+### 💡 使用場景
+
+- **批量處理**：通過提示詞和圖像隊列一次處理多個生成任務
+- **低配環境**：由於FP8優化，即使8GB VRAM也能舒適操作
+- **國際化**：通過俄語界面支持，更多用戶可以使用該工具
+
+## 🌟 FramePack-oichi 添加 (v1.9.2)
 
 **FramePack-eichi v1.9.2**引入了一個新功能「FramePack-oichi」。這是一個從單一輸入圖像預測生成下一幀未來圖像的專用工具。
 
@@ -34,6 +54,7 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
 - **創意探索**：快速查看「圖像可能如何移動」
 - **資源節省**：與完整視頻生成相比，使用更少的資源處理
 - **連續生成**：可以將生成的圖像作為輸入再次使用，構建多幀序列
+- **kisekaeichi功能**：由furusu設計、Kohya實現的基於參考圖像的視頻生成技術（v1.9.3添加）
 
 ### 🚀 啟動方式
 
@@ -41,8 +62,9 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
 - 日語版：`run_oneframe_ichi.bat`
 - 英語版：`run_oneframe_ichi_en.bat`
 - 繁體中文版：`run_oneframe_ichi_zh-tw.bat`
+- 俄語版：`run_oneframe_ichi_ru.bat`（v1.9.3新增）
 
-## 🌟 新功能：F1 模型添加 (v1.9.1)
+## 🌟 F1 模型添加 (v1.9.1)
 
 **FramePack-eichi v1.9.1** 在傳統的逆向生成模型「FramePack-eichi」（標準版）基礎上，添加了一個支持正向生成的新模型「FramePack-~~eichi~~ F1」。
 
@@ -78,7 +100,11 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
 ## 🌟 主要功能
 
 - **高品質影片生成**：從單一圖像生成自然流暢的影片 ※現有功能
+- **隊列處理**：通過提示詞和圖像隊列進行自動批量處理 ※v1.9.3 新增
+- **FP8優化（改進版）**：不使用LoRA時顯著減少內存使用 ※v1.9.3 新增
 - **F1 模型支持**：支持正向生成的新模型，實現更直觀的影片創建 ※v1.9.1 新增
+- **FramePack-oichi**：從單一輸入圖像生成下一幀未來圖像的新功能 ※v1.9.2 新增
+- **kisekaeichi功能for oichi**：由furusu設計、Kohya實現的基於參考圖像的視頻生成技術集成到oichi ※v1.9.3 新增
 - **靈活的影片長度設定**：支援 1-20 秒的各個區段模式 ※獨特功能
 - **區段幀大小設定**：可切換 0.5 秒模式和 1 秒模式 ※v1.5 新增
 - **全填充功能**：所有區段使用相同的填充值 ※v1.4 新增
@@ -89,10 +115,12 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
 - **提示詞管理功能**：輕鬆保存、編輯和重用提示詞 ※v1.3 新增
 - **PNG 元數據嵌入**：自動記錄生成圖像中的提示詞、種子值和分段信息 ※v1.9.1 新增
 - **Hunyuan/FramePack LoRA 支援**：通過模型自定義添加獨特表現 ※v1.9/v1.9.1 大幅改進
+- **LoRA預設管理器**：保存和加載多個LoRA配置 ※v1.9.3 新增
+- **視頻時長擴展**：eichi添加30秒、40秒選項，F1添加30秒/40秒/60秒/120秒 ※v1.9.3 新增
 - **FP8 優化**：降低 LoRA 應用時的 VRAM 使用量並優化處理速度 ※v1.9.1 新增
 - **MP4 壓縮設定**：可調整影片檔案大小與品質的平衡 ※v1.6.2 從主版本合併
 - **輸出資料夾管理功能**：支援指定輸出資料夾和與作業系統無關的開啟方式 ※v1.2 新增
-- **多語言支援（i18n）**：支援日語、英語、繁體中文的 UI ※v1.8.1 新增
+- **多語言支援（i18n）**：支援日語、英語、中文、俄語的 UI ※v1.8.1 新增，v1.9.3 新增俄語
 - **Docker 支持**：在容器化環境中輕鬆運行 FramePack-eichi ※v1.9.1 新增
 
 ![FramePack-eichi畫面2](../images/framepack_eichi_screenshot2.png)
@@ -107,7 +135,50 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
 - **[配置信息](README_column_zh.md#%E6%80%A7%E8%83%BD%E8%A8%AD%E5%AE%9A)** - 詳細配置選項
 - **[更新日誌](README_changelog.md)** - 完整更新歷史
 
-## 📝 最新更新資訊 (v1.9.2)
+## 📝 最新更新資訊 (v1.9.3)
+
+### 主要變更
+
+#### 1. 提示詞隊列和圖像隊列
+- **提示詞隊列**：從文本文件加載多個提示詞並順序處理
+- **圖像隊列**：自動順序處理指定文件夾中的圖像
+- **自動處理**：啟用隊列時完成後自動處理下一項
+
+#### 2. FP8優化改進
+- **內存使用減少**：不使用LoRA時顯著減少內存使用
+- **提高處理速度**：優化提高處理速度（需要PyTorch 2.1或更高版本）
+- **默認啟用**：正常使用時FP8優化默認啟用
+
+#### 3. LoRA預設管理器
+- **多預設支持**：保存和管理最多5個預設
+- **輕鬆切換**：從UI輕鬆切換預設
+- **批量保存**：批量保存LoRA文件、強度和其他設置
+
+#### 4. UI組織和多語言支持
+- **邏輯分組**：將相關功能分組以提高可用性
+- **增強說明**：為每個功能添加說明以便更好理解
+- **添加俄語UI**：支持4種語言（日語、英語、中文、俄語）
+
+#### 5. 視頻生成時長擴展
+- **eichi（標準版）**：在1秒模式（33幀）中添加30秒、40秒選項
+- **F1**：添加30秒、40秒、60秒、120秒選項
+- **靈活製作**：支持更多樣的視頻長度，實現長視頻生成
+
+#### 6. 分段管理增強
+- **導入/導出路徑規範化**：導入/導出的路徑規範化
+- **改進兼容性**：改進不同環境之間的分段信息兼容性
+
+#### 7. kisekaeichi功能集成到oichi
+- **參考圖像生成**：集成由furusu設計、Kohya實現的基於參考圖像的視頻生成技術
+- **精確控制**：通過目標索引和歷史索引進行精確控制
+- **遮罩功能**：實現僅更改特定區域的遮罩功能
+
+#### 8. 錯誤修復和優化
+- **提示詞處理修復**：修復提示詞添加和刪除問題
+- **Windows錯誤避免**：避免與asyncio相關的Windows錯誤
+- **模型下載器**：為F1模型添加高效下載功能
+
+## 📝 更新資訊 (v1.9.2)
 
 ### 主要變更
 
@@ -334,9 +405,12 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
    - `run_endframe_ichi_f1.bat` - F1版/日語用（v1.9.1新增）
    - `run_endframe_ichi_en_f1.bat` - F1版/英語用（v1.9.1新增）
    - `run_endframe_ichi_zh-tw_f1.bat` - F1版/繁體中文用（v1.9.1新增）
+   - `run_endframe_ichi_ru.bat` - 標準版/俄語用（v1.9.3新增）
+   - `run_endframe_ichi_f1_ru.bat` - F1版/俄語用（v1.9.3新增）
    - `run_oneframe_ichi.bat` - 單幀推論/日語用（v1.9.2新增）
    - `run_oneframe_ichi_en.bat` - 單幀推論/英語用（v1.9.2新增）
    - `run_oneframe_ichi_zh-tw.bat` - 單幀推論/繁體中文用（v1.9.2新增）
+   - `run_oneframe_ichi_ru.bat` - 單幀推論/俄語用（v1.9.3新增）
 
 2. 將以下檔案和資料夾放在`webui`資料夾中：
    - `endframe_ichi.py` - 標準版主應用程式檔案
@@ -358,6 +432,9 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
      - `section_manager.py` - 分段信息管理模組（v1.9.2新增）
      - `vae_cache.py` - VAE緩存模組（v1.9.2新增）
      - `README_vae_cache.md` - VAE緩存功能說明（v1.9.2新增）
+     - `lora_preset_manager.py` - LoRA預設管理模組（v1.9.3新增）
+     - `model_downloader.py` - 模型下載功能（v1.9.3新增）
+     - `vae_settings.py` - VAE設定管理模組（v1.9.3新增）
    - `lora_utils` 資料夾 - LoRA相關模組
      - `__init__.py`
      - `dynamic_swap_lora.py` - LoRA管理模組（為兼容性保留）
@@ -375,14 +452,17 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
      - `ja.json` - 日語翻譯檔案（預設語言）
      - `en.json` - 英語翻譯檔案
      - `zh-tw.json` - 繁體中文翻譯檔案
+     - `ru.json` - 俄語翻譯檔案（v1.9.3新增）
 
 3. 執行所需版本和語言的執行檔，FramePack-eichi 的 WebUI 將以對應設定啟動：
    - 標準版/日語：`run_endframe_ichi.bat`
    - 標準版/英語：`run_endframe_ichi_en.bat`
    - 標準版/繁體中文：`run_endframe_ichi_zh-tw.bat`
+   - 標準版/俄語：`run_endframe_ichi_ru.bat`（v1.9.3新增）
    - F1版/日語：`run_endframe_ichi_f1.bat`（v1.9.1新增）
    - F1版/英語：`run_endframe_ichi_en_f1.bat`（v1.9.1新增）
    - F1版/繁體中文：`run_endframe_ichi_zh-tw_f1.bat`（v1.9.1新增）
+   - F1版/俄語：`run_endframe_ichi_f1_ru.bat`（v1.9.3新增）
 
    或者，也可以從命令行直接指定語言啟動：
    ```bash
@@ -493,17 +573,17 @@ FramePack-eichi 可以通過 Docker 輕鬆設置，在不同系統之間提供�
    - `run_endframe_ichi.bat` - 標準版/日語（預設）
    - `run_endframe_ichi_en.bat` - 標準版/英語
    - `run_endframe_ichi_zh-tw.bat` - 標準版/繁體中文
+   - `run_endframe_ichi_ru.bat` - 標準版/俄語
    - `run_endframe_ichi_f1.bat` - F1版/日語
    - `run_endframe_ichi_en_f1.bat` - F1版/英語
    - `run_endframe_ichi_zh-tw_f1.bat` - F1版/繁體中文
+   - `run_endframe_ichi_f1_ru.bat` - F1版/俄語
 
 2. **通過命令行指定語言**:
    ```bash
    python endframe_ichi.py --lang en  # 以標準版/英語啟動
    python endframe_ichi_f1.py --lang zh-tw  # 以F1版/繁體中文啟動
    ```
-
-※ README 的多語言版本將陸續推出。繁體中文版本請參閱 [README_zh.md](README_zh.md)。
 
 ## 🔧 故障排除
 
@@ -611,6 +691,17 @@ LoRA 應用處理流程：
 ## 📝 更新日誌
 
 最新的更新資訊如下所示。完整的更新歷史請參考[更新日誌](README_changelog.md)。
+
+### 2025-05-15：版本 1.9.3
+- **提示詞隊列和圖像隊列**：添加了批量處理的自動化功能
+- **FP8優化改進**：大幅改善了不使用LoRA時的內存使用量和處理速度
+- **LoRA預設管理器**：可以輕鬆保存和切換多個LoRA配置
+- **UI組織**：通過邏輯分組和詳細說明提高了易用性
+- **添加俄語UI**：擴展至4語言支持（日語、英語、中文、俄語）
+- **視頻生成時長擴展**：eichi(標準版)添加30秒、40秒，F1添加30秒/40秒/60秒/120秒
+- **kisekaeichi oichi集成**：將furusu設計、Kohya實現的參考圖像視頻生成技術集成到oichi
+- **分段管理增強**：導入/導出時的路徑規範化
+- **錯誤修復**：修復了提示詞處理和Windows環境錯誤
 
 ### 2025-05-11：版本 1.9.2
 - **「FramePack-oichi」新功能添加**：

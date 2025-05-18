@@ -8,6 +8,7 @@ This guide provides detailed instructions on how to use both the Standard and F1
 - [Differences Between Standard and F1 Versions](#differences-between-standard-and-f1-versions)
 - [How to Use the Standard Version](#how-to-use-the-standard-version)
 - [How to Use the F1 Version](#how-to-use-the-f1-version)
+- [How to Use the oichi Version (One-Frame Version)](#how-to-use-the-oichi-version-one-frame-version)
 - [Detailed Explanation of Settings](#detailed-explanation-of-settings)
 - [Troubleshooting](#troubleshooting)
 
@@ -41,11 +42,13 @@ To use the Standard version, run one of the following batch files:
 - Japanese version: `run_endframe_ichi.bat`
 - English version: `run_endframe_ichi_en.bat`
 - Chinese version: `run_endframe_ichi_zh-tw.bat`
+- Russian version: `run_endframe_ichi_ru.bat`
 
 ### 2. Basic Usage
 
 1. **Selecting Video Mode**:
    - Select the desired duration mode from the "Video Mode" dropdown in the upper right
+   - Available modes for Standard version: 1-20 seconds, 30 seconds, 40 seconds *Extended in v1.9.3
    - The mode determines the number of sections (e.g., "4 seconds" is 4 sections)
 
 2. **Setting Keyframe Images**:
@@ -71,6 +74,10 @@ To use the Standard version, run one of the following batch files:
    - Apply a LoRA model to adjust expressions
    - Enter the path to a .safetensors file under "path1:"
    - Set the weight to a value between 0.0 and 1.0 in "weight1:"
+   - **Preset Manager *New in v1.9.3**:
+     - Save and manage up to 5 presets
+     - Easily switch presets from the UI
+     - Batch save LoRA files, strength, and other settings
 
 7. **Video Generation**:
    - Click the "Start" button after completing all settings
@@ -128,11 +135,13 @@ To use the F1 version, run one of the following batch files:
 - Japanese version: `run_endframe_ichi_f1.bat`
 - English version: `run_endframe_ichi_en_f1.bat`
 - Chinese version: `run_endframe_ichi_zh-tw_f1.bat`
+- Russian version: `run_endframe_ichi_f1_ru.bat`
 
 ### 2. Basic Usage
 
 1. **Selecting Video Mode**:
    - Select the desired duration mode from the "Video Mode" dropdown in the upper right
+   - Available modes for F1 version: 1-20 seconds, 30 seconds, 40 seconds, 60 seconds, 120 seconds *Extended in v1.9.3
    - In the F1 version, only the first image is used as a section image
 
 2. **Setting the Initial Image**:
@@ -151,6 +160,10 @@ To use the F1 version, run one of the following batch files:
    - Apply a LoRA model to adjust expressions
    - Enter the path to a .safetensors file under "path1:"
    - Set the weight to a value between 0.0 and 1.0 in "weight1:"
+   - **Preset Manager *New in v1.9.3**:
+     - Save and manage up to 5 presets
+     - Easily switch presets from the UI
+     - Batch save LoRA files, strength, and other settings
 
 6. **Video Generation**:
    - Click the "Start" button after completing all settings
@@ -176,6 +189,48 @@ To use the F1 version, run one of the following batch files:
 - The new F1 version is "FramePack_F1_I2V_HY_20250503", a model specialized in forward generation
 - Unlike the Standard version, you can't specify fine movements, but more natural and unpredictable movements are possible
 - It's effective to use it with the mindset of specifying a general direction with prompts and leaving the details to the AI
+
+## How to Use the oichi Version (One-Frame Version)
+
+### 1. Overview
+
+The oichi version is a special version that generates the next frame from a single image. It specializes in predicting one frame ahead rather than generating entire videos, allowing for lighter and faster processing. In v1.9.3, the kisekaeichi function was added.
+
+### 2. How to Launch
+
+To use the oichi version, run one of the following batch files:
+
+- Japanese version: `run_oneframe_ichi.bat`
+- English version: `run_oneframe_ichi_en.bat`
+- Chinese version: `run_oneframe_ichi_zh-tw.bat`
+- Russian version: `run_oneframe_ichi_ru.bat`
+
+### 3. Basic Usage
+
+1. **Image Setup**:
+   - Upload a single image
+   - The next frame will be generated from this image
+
+2. **Prompt Setup**:
+   - Describe the content of the next frame you want to generate
+   - Specify movements or changes in detail
+
+3. **kisekaeichi Function *New in v1.9.3**:
+   - Technology using reference images conceived by furusu and implemented by Kohya
+   - Precise control using target index and history index
+   - Mask function for changing only specific areas
+   - Used when applying different costumes or styles
+
+4. **Running Generation**:
+   - Click the "Generate" button
+   - The next frame will be generated
+
+### 4. kisekaeichi Function Details
+
+- **Reference Image Setup**: Set a reference image for the style or costume you want to change
+- **Mask Function**: Specify the area you want to change (overall or partial changes possible)
+- **Strength Adjustment**: Adjust the influence of the reference image
+- **Note**: As an experimental feature, results heavily depend on the input and reference images
 
 ## Detailed Explanation of Settings
 

@@ -62,13 +62,15 @@ FramePack-eichi is an AI video generation system that creates short videos from 
 
 2. **Installing FramePack-eichi**:
    - Clone or download the [FramePack-eichi repository](https://github.com/git-ai-code/FramePack-eichi)
-   - Copy the appropriate language batch file (`run_endframe_ichi.bat` for Japanese, `run_endframe_ichi_en.bat` for English, `run_endframe_ichi_zh-tw.bat` for Traditional Chinese) to the FramePack root directory
+   - Copy the appropriate language batch file (`run_endframe_ichi.bat` for Japanese, `run_endframe_ichi_en.bat` for English, `run_endframe_ichi_zh-tw.bat` for Traditional Chinese, `run_endframe_ichi_ru.bat` for Russian) to the FramePack root directory
+   - For F1 version, use `run_endframe_ichi_f1.bat` (or language-specific `run_endframe_ichi_en_f1.bat`, `run_endframe_ichi_zh-tw_f1.bat`, `run_endframe_ichi_f1_ru.bat`)
+   - For single-frame inference, use `run_oneframe_ichi.bat` (or language-specific `run_oneframe_ichi_en.bat`, `run_oneframe_ichi_zh-tw.bat`, `run_oneframe_ichi_ru.bat`)
    - Copy the following files/folders from FramePack-eichi to the `webui` folder in FramePack:
      - `endframe_ichi.py`
-     - `eichi_utils` folder
+     - `eichi_utils` folder (includes `lora_preset_manager.py`, `model_downloader.py`, `vae_settings.py`, etc. - added in v1.9.3)
      - `lora_utils` folder
      - `diffusers_helper` folder
-     - `locales` folder
+     - `locales` folder (includes `ru.json` Russian translation file - added in v1.9.3)
 
 3. **Installing Acceleration Libraries (Optional but Recommended)**:
    - Download the acceleration package installer from [FramePack Issue #138](https://github.com/lllyasviel/FramePack/issues/138)

@@ -17,7 +17,27 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 
 [https://github.com/hinablue](https://github.com/hinablue) Hina Chen氏より多言語対応の協力をいただき非常に感謝しております。
 
-## 🌟 新機能 FramePack-oichi追加 (v1.9.2)
+## 🌟 新機能拡張 (v1.9.3)
+
+**FramePack-eichi v1.9.3**では、ワークフローの効率化と使いやすさの向上を重視した機能を追加しました。
+
+### 🚀 主な新機能
+
+- **プロンプトキュー**: テキストファイルから複数のプロンプトを順次処理
+- **画像キュー**: フォルダ内の画像を自動的に順次処理
+- **FP8最適化**: LoRA未使用時のメモリ使用量を大幅削減（PyTorch 2.1以上が必要）
+- **LoRAプリセットマネージャー**: 複数のLoRA設定を簡単に保存・切り替え
+- **動画生成時間の拡張**: eichi(無印)に30秒、40秒を追加、F1に30秒、40秒、60秒、120秒を追加
+- **kisekaeichi機能のoichi統合**: furusu氏考案・Kohya氏実装の参照画像技術をoichiに統合
+- **ロシア語UIの追加**: 4言語対応に拡張（日本語、英語、中国語、ロシア語）
+
+### 💡 活用シーン
+
+- **大量処理**: プロンプトキューと画像キューで複数の生成をまとめて処理
+- **低スペック環境**: FP8最適化により8GB VRAMでも快適に動作
+- **国際化対応**: ロシア語UIの追加でより多くのユーザーが利用可能に
+
+## 🌟 FramePack-oichi追加 (v1.9.2)
 
 **FramePack-eichi v1.9.2**では、新たに「FramePack-oichi」(通称：お壱)が追加されました。お壱の方は1枚の入力画像から次の1枚の未来フレーム画像を予測生成する専用ツールです。
 
@@ -35,6 +55,7 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 - **アイデア検討**: 画像が「次にどう動くか」を素早く確認したい時
 - **リソース節約**: フル動画生成に比べて少ないリソースで処理可能
 - **連続生成**: 生成した画像を入力として再度生成し、フレームを積み重ねることも可能
+- **kisekaeichi機能**: furusu氏考案・Kohya氏実装の参照画像を用いた動画生成技術（v1.9.3で追加）
 
 ### 🚀 起動方法
 
@@ -43,7 +64,7 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 - 英語版: `run_oneframe_ichi_en.bat`
 - 繁体字中国語版: `run_oneframe_ichi_zh-tw.bat`
 
-## 🌟 新機能 F1モデルの追加 (v1.9.1)
+## 🌟 F1モデルの追加 (v1.9.1)
 
 **FramePack-eichi v1.9.1**では、従来の逆順生成モデル「FramePack-eichi」（無印版）に加えて、順生成に対応した新モデル「FramePack-~~eichi~~ F1」が追加されました。
 
@@ -77,8 +98,11 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 ## 🌟 主な機能
 
 - **高品質な動画生成**: 単一画像から自然な動きの動画を生成　※既存機能
+- **キュー処理機能**: プロンプトキューと画像キューによる複数処理の自動化　※v1.9.3で追加
+- **FP8最適化（改善版）**: LoRA未使用時のメモリ使用量を大幅削減　※v1.9.3で追加
 - **F1モデル対応**：順生成に対応した新モデルを搭載、より直感的な動画生成を実現　※v1.9.1で追加
 - **FramePack-oichi**: 1枚の画像から次の1枚の未来フレーム画像を生成する新機能　※v1.9.2で追加
+- **kisekaeichi機能のoichi統合**: furusu氏考案・Kohya氏実装の参照画像を用いた動画生成技術をoichiに統合　※v1.9.3で追加
 - **フレーム画像保存設定**: 生成した全フレーム画像または最終セクションのみの保存オプションを追加　※v1.9.2で追加
 - **柔軟な動画長設定**: 1〜20秒の各セクションモードに対応　※独自機能
 - **セクションフレームサイズ設定**: 0.5秒モードと1秒モードを切り替え可能　※v1.5で追加
@@ -94,9 +118,11 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 - **セクション情報の一括管理**: ZIPファイルによるセクション情報のダウンロード/アップロードと内容変更後の再ダウンロードに対応　※v1.9.2で追加
 - **VAEキャッシュ機能**: フレーム単位のデコードによる処理速度向上（オプション）　※v1.9.2で追加、[furusu氏の検証](https://note.com/gcem156/n/nb93535d80c82)と[FramePack実装](https://github.com/laksjdjf/FramePack)に基づく
 - **FP8最適化**: LoRA適用時のVRAM使用量削減と処理速度の最適化　※v1.9.1で追加
+- **LoRAプリセットマネージャー**: 複数のLoRA設定の保存・読み込み機能　※v1.9.3で追加
+- **動画生成時間の拡張**: eichi(無印)に30秒、40秒を追加、F1に30秒、40秒、60秒、120秒を追加　※v1.9.3で追加
 - **MP4圧縮設定**: 動画のファイルサイズと品質のバランスを調整可能　※v1.6.2で本家からマージ
 - **出力フォルダ管理機能**: 出力先フォルダの指定とOSに依存しない開き方をサポート ※v1.2で追加
-- **多言語対応（i18n）**: 日本語、英語、繁体字中国語のUIをサポート　※v1.8.1で追加
+- **多言語対応（i18n）**: 日本語、英語、繁体字中国語、ロシア語のUIをサポート　※v1.8.1で追加、v1.9.3でロシア語追加
 - **Docker対応**: コンテナ化された環境でFramePack-eichiを簡単に実行　※v1.9.1で追加
 
 ![FramePack-eichi画面2](images/framepack_eichi_screenshot2.png)
@@ -111,7 +137,50 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 - **[設定情報](README/README_column.md#--設定情報)** - 設定に関する詳細情報
 - **[更新履歴](README/README_changelog.md)** - 全バージョンの更新内容
 
-## 📝 最新アップデート情報 (v1.9.2)
+## 📝 最新アップデート情報 (v1.9.3)
+
+### 主要な変更点
+
+#### 1. プロンプトキューと画像キュー機能
+- **プロンプトキュー**: テキストファイルから複数のプロンプトを読み込み、順次処理
+- **画像キュー**: 指定フォルダ内の画像を自動的に順次処理
+- **自動処理**: キューが有効な場合、処理完了後に自動的に次の項目を処理
+
+#### 2. FP8最適化の改善
+- **メモリ使用量の削減**: LoRA未使用時のメモリ使用量を大幅に削減
+- **処理速度の向上**: 最適化により処理速度も向上（PyTorch 2.1以上が必要）
+- **デフォルトで有効**: 通常の使用ではFP8最適化がデフォルトで有効に
+
+#### 3. LoRAプリセットマネージャー
+- **複数プリセット対応**: 5つのプリセットを保存・管理可能
+- **簡単な切り替え**: UIから簡単にプリセットを切り替え
+- **設定の保存**: LoRAファイル、強度、その他の設定を一括保存
+
+#### 4. UIの整理と多言語対応
+- **論理的なグループ化**: 関連機能をグループ化し、操作性を向上
+- **説明の充実**: 各機能の説明を追加し、理解しやすく
+- **ロシア語UIの追加**: 4言語対応に拡張
+
+#### 5. 動画生成時間の拡張
+- **eichi(無印)**: 1秒モード(33フレーム)時に30秒、40秒を追加
+- **F1**: 30秒、40秒、60秒、120秒の選択肢を追加
+- **柔軟な制作**: より多様な動画長に対応、長尺動画の生成が可能に
+
+#### 6. セクション管理の強化
+- **インポート/エクスポート機能**: セクション設定の保存と読み込みを強化
+- **パス正規化**: 異なる環境間でのセクション情報の互換性を向上
+
+#### 7. kisekaeichi機能のoichi統合
+- **参照画像による動画生成**: furusu氏考案・Kohya氏実装の技術をoichiに統合
+- **詳細な制御機能**: ターゲットインデックスと履歴インデックスによる精密な制御
+- **マスク機能**: 特定の領域のみを変更可能なマスク機能も実装
+
+#### 8. バグ修正と最適化
+- **プロンプト処理の不具合修正**: プロンプト追加と削除の問題を解消
+- **Windowsエラー回避**: asyncio関連のWindowsエラーを回避
+- **モデルダウンローダー**: F1モデルの効率的なダウンロード機能を追加
+
+## 📝 アップデート情報 (v1.9.2)
 
 ### 主要な変更点
 
@@ -245,12 +314,15 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
    - `run_endframe_ichi.bat` - 無印版/日本語用（デフォルト）
    - `run_endframe_ichi_en.bat` - 無印版/英語用
    - `run_endframe_ichi_zh-tw.bat` - 無印版/繁体字中国語用
+   - `run_endframe_ichi_ru.bat` - 無印版/ロシア語用 ※v1.9.3で追加
    - `run_endframe_ichi_f1.bat` - F1版/日本語用 ※v1.9.1で追加
    - `run_endframe_ichi_en_f1.bat` - F1版/英語用 ※v1.9.1で追加
    - `run_endframe_ichi_zh-tw_f1.bat` - F1版/繁体字中国語用 ※v1.9.1で追加
+   - `run_endframe_ichi_f1_ru.bat` - F1版/ロシア語用 ※v1.9.3で追加
    - `run_oneframe_ichi.bat` - 1フレーム推論/日本語用 ※v1.9.2で追加
    - `run_oneframe_ichi_en.bat` - 1フレーム推論/英語用 ※v1.9.2で追加
    - `run_oneframe_ichi_zh-tw.bat` - 1フレーム推論/繁体字中国語用 ※v1.9.2で追加
+   - `run_oneframe_ichi_ru.bat` - 1フレーム推論/ロシア語用 ※v1.9.3で追加
 
 2. 以下のファイルとフォルダを`webui`フォルダに配置します：
    - `endframe_ichi.py` - 無印版メインアプリケーションファイル
@@ -271,6 +343,9 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
      - `transformer_manager.py` - トランスフォーマーモデル管理モジュール ※v1.9.1で追加
      - `section_manager.py` - セクション情報管理モジュール ※v1.9.2で追加
      - `vae_cache.py` - VAEキャッシュモジュール ※v1.9.2で追加
+     - `lora_preset_manager.py` - LoRAプリセット管理モジュール ※v1.9.3で追加
+     - `model_downloader.py` - モデルダウンロード機能 ※v1.9.3で追加
+     - `vae_settings.py` - VAE設定管理モジュール ※v1.9.3で追加
    - `lora_utils` フォルダ - LoRA関連モジュール
      - `__init__.py`
      - `dynamic_swap_lora.py` - LoRA管理モジュール（後方互換性用に維持）
@@ -288,17 +363,21 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
      - `ja.json` - 日本語の翻訳ファイル（デフォルト言語）
      - `en.json` - 英語の翻訳ファイル
      - `zh-tw.json` - 繁体字中国語の翻訳ファイル
+     - `ru.json` - ロシア語の翻訳ファイル ※v1.9.3で追加
 
 3. 希望するバージョンと言語の実行ファイルを実行すると、対応するWebUIが起動します：
    - 無印版/日本語：`run_endframe_ichi.bat`
    - 無印版/英語：`run_endframe_ichi_en.bat`
    - 無印版/繁体字中国語：`run_endframe_ichi_zh-tw.bat`
+   - 無印版/ロシア語：`run_endframe_ichi_ru.bat` ※v1.9.3で追加
    - F1版/日本語：`run_endframe_ichi_f1.bat` ※v1.9.1で追加
    - F1版/英語：`run_endframe_ichi_en_f1.bat` ※v1.9.1で追加
    - F1版/繁体字中国語：`run_endframe_ichi_zh-tw_f1.bat` ※v1.9.1で追加
+   - F1版/ロシア語：`run_endframe_ichi_f1_ru.bat` ※v1.9.3で追加
    - 1フレーム推論版/日本語：`run_oneframe_ichi.bat` ※v1.9.2で追加
    - 1フレーム推論版/英語：`run_oneframe_ichi_en.bat` ※v1.9.2で追加
    - 1フレーム推論版/繁体字中国語：`run_oneframe_ichi_zh-tw.bat` ※v1.9.2で追加
+   - 1フレーム推論版/ロシア語：`run_oneframe_ichi_ru.bat` ※v1.9.3で追加
 
    または、コマンドラインから直接言語を指定して起動することも可能です：
    ```bash
@@ -439,8 +518,6 @@ Linuxでは、以下の手順で実行可能です：
    python endframe_ichi_f1.py --lang zh-tw  # F1版/繁体字中国語で起動
    ```
 
-※ READMEの多言語版も順次対応予定です。繁体字中国語版は[README/README_zh.md](README/README_zh.md)をご参照ください。
-
 ## 🔧 トラブルシューティング
 
 ### h11エラーについて
@@ -547,6 +624,17 @@ F1モデルを使用する場合、無印モデルに加えて以下の追加メ
 ## 📝 更新履歴
 
 最新の更新情報を以下に示します。更新履歴の全文は[更新履歴](README/README_changelog.md)をご参照ください。
+
+### 2025-05-15: バージョン1.9.3
+- **プロンプトキューと画像キュー**: 複数処理の自動化機能を追加
+- **FP8最適化の改善**: LoRA未使用時のメモリ使用量と処理速度を大幅に改善
+- **LoRAプリセットマネージャー**: 複数のLoRA設定を簡単に保存・切り替え可能に
+- **UIの整理**: 論理的なグループ化と説明の充実で使いやすさを向上
+- **ロシア語UIの追加**: 4言語対応に拡張（日本語、英語、中国語、ロシア語）
+- **動画生成時間の拡張**: eichi(無印)に30秒、40秒を追加、F1に30秒、40秒、60秒、120秒を追加
+- **kisekaeichi機能のoichi統合**: furusu氏考案・Kohya氏実装の参照画像を用いた動画生成技術をoichiに統合
+- **セクション管理の強化**: インポート/エクスポート時のパス正規化
+- **バグ修正**: プロンプト処理とWindows環境でのエラーを修正
 
 ### 2025-05-11: バージョン1.9.2
 - **「FramePack-oichi」新機能追加**: 1枚の入力画像から次の1枚の未来フレーム画像を予測生成

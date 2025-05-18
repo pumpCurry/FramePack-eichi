@@ -49,6 +49,18 @@ This document serves as a detailed version of the FramePack-eichi main README, p
 - Performance improvement with `scaled_mm` optimization for RTX 40 series GPUs
 - Recommended to keep disabled by default (may result in warnings or errors in some environments)
 
+### kisekaeichi Function *Added in v1.9.3 (oichi only)
+- Video generation technology using reference images, conceived by furusu and implemented by Kohya
+- Precise control using target index and history index
+- Implementation of mask function for changing specific areas only
+- Designed for use with FramePack-oichi (single frame inference)
+
+### LoRA Preset Manager *Added in v1.9.3
+- Save and manage up to 5 presets
+- Easily switch presets from the UI
+- Batch save LoRA files, strength, and other settings
+- Contributes to workflow efficiency
+
 ### Hunyuan LoRA Settings *Added in v1.3, Significantly Improved in v1.9
 - "Use LoRA" checkbox: Toggles LoRA on/off
 - LoRA file selection: Select the LoRA file to use
@@ -432,16 +444,9 @@ Guidelines for appropriate settings based on the scene:
 
 ### Frame Settings
 - **Video length**: Radio buttons + `total_second_length` slider *Extension of unique feature
-  - **1 second**: Ultra-short video (about 30 frames @ 30fps) - Added in v1.5.1
-  - **2 seconds**: Short video (about 60 frames @ 30fps) - Added in v1.6.1
-  - **3 seconds**: Short video (about 90 frames @ 30fps) - Added in v1.6.1
-  - **4 seconds**: Short video (about 120 frames @ 30fps) - Added in v1.6.1
-  - **6 seconds**: Standard mode (about 180 frames @ 30fps)
-  - **8 seconds**: Standard mode (about 240 frames @ 30fps)
-  - **10 seconds**: Long video (about 300 frames @ 30fps)
-  - **12 seconds**: Long video (about 360 frames @ 30fps)
-  - **16 seconds**: Long video (about 480 frames @ 30fps)
-  - **20 seconds**: Long video (about 600 frames @ 30fps)
+  - **eichi (Standard Version)**: 1-20 seconds, 30 seconds, 40 seconds (added in v1.9.3)
+  - **F1 Version**: 1-20 seconds, 30 seconds, 40 seconds, 60 seconds, 120 seconds (added in v1.9.3)
+  - Actual frame count is approximately 30fps equivalent
 
 - **Automatic keyframe copy**: `enable_keyframe_copy` checkbox (Default: Disabled - Changed in v1.5.1) *Unique feature
   - Enabled: Keyframe images are automatically copied to other sections
@@ -497,6 +502,9 @@ Guidelines for appropriate settings based on the scene:
   
   # For English (default):
   command: ["--lang", "en"]
+  
+  # For Russian (added in v1.9.3):
+  command: ["--lang", "ru"]
   ```
 
 - **Volume settings**: Set with volumes parameter in docker-compose.yml
@@ -509,3 +517,13 @@ Guidelines for appropriate settings based on the scene:
   - data: Storage location for configuration files
   - models: Location for downloaded models
   - outputs: Storage location for generated videos
+
+### Multi-language Support (Extended in v1.9.3)
+FramePack-eichi supports the following 4 languages:
+
+- **Japanese**: `--lang ja` or launch script `run_endframe_ichi.bat`
+- **English**: `--lang en` or launch script `run_endframe_ichi_en.bat`
+- **Traditional Chinese**: `--lang zh-tw` or launch script `run_endframe_ichi_zh-tw.bat`
+- **Russian**: `--lang ru` or launch script `run_endframe_ichi_ru.bat` *Added in v1.9.3
+
+By using the language-specific launch scripts, the UI will automatically display in the appropriate language at startup. The language setting ensures all UI labels, descriptions, and help texts are displayed in the selected language.
