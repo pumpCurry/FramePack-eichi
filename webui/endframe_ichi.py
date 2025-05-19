@@ -294,7 +294,7 @@ os.makedirs(input_dir, exist_ok=True)
 # キーフレーム処理関数は keyframe_handler.py に移動済み
 
 @torch.no_grad()
-def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, save_latent_frames=False, save_last_section_frames=False, use_vae_cache=False, use_queue=False, prompt_queue_file=None):
+def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, alarm_on_completion=False):
     # グローバル変数を使用
     global vae_cache_enabled, current_prompt
     # パラメータ経由の値とグローバル変数の値を確認
@@ -434,27 +434,16 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
     # グローバル変数の値を優先
     use_vae_cache = vae_cache_enabled or use_vae_cache
 
-    # フレーム保存フラグのタイプと値を確認（必ずブール値であるべき）
-    # print(translate("[DEBUG] worker関数に渡されたフラグ - save_latent_frames型: {0}, 値: {1}").format(type(save_latent_frames).__name__, save_latent_frames))
-    # print(translate("[DEBUG] worker関数に渡されたフラグ - save_last_section_frames型: {0}, 値: {1}").format(type(save_last_section_frames).__name__, save_last_section_frames))
-    
-    # 万が一文字列が渡された場合の防御コード
-    if isinstance(save_latent_frames, str):
-        # 文字列の場合は、条件判定して適切なブール値に変換
-        if save_latent_frames == translate("全フレーム画像保存"):
+    # frame_save_modeから save_latent_frames と save_last_section_frames を算出
+    save_latent_frames = False
+    save_last_section_frames = False
+    if isinstance(frame_save_mode, str):
+        if frame_save_mode == translate("全フレーム画像保存"):
             save_latent_frames = True
-        else:
-            save_latent_frames = False
-        print(translate("[WARN] save_latent_framesが文字列でした。ブール値に変換: {0}").format(save_latent_frames))
-    
-    if isinstance(save_last_section_frames, str):
-        # 文字列の場合は、条件判定して適切なブール値に変換
-        # 注意: UIでは「最終セクションのみ全フレーム画像保存」という表記を使っている
-        if save_last_section_frames == translate("最終セクションのみフレーム画像保存") or save_last_section_frames == translate("最終セクションのみ全フレーム画像保存"):
+        elif frame_save_mode == translate("最終セクションのみ全フレーム画像保存"):
             save_last_section_frames = True
-        else:
-            save_last_section_frames = False
-        print(translate("[WARN] save_last_section_framesが文字列でした。ブール値に変換: {0}").format(save_last_section_frames))
+    
+    # print(f"[DEBUG] worker - frame_save_mode: {frame_save_mode} -> save_latent_frames: {save_latent_frames}, save_last_section_frames: {save_last_section_frames}")
     
     # 最終的に必ずブール型に変換しておく
     save_latent_frames = bool(save_latent_frames)
@@ -2309,10 +2298,15 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         stream.output_queue.push(('progress', (None, translate("エラー: テンソルデータ結合に失敗しました - {0}").format(str(e)), make_progress_bar_html(100, translate('エラー')))))
 
                 # 処理終了時に通知
-                if HAS_WINSOUND:
-                    winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
+                # アラーム再生条件
+                if alarm_on_completion == True:  # 明示的にTrueかチェック
+                    if HAS_WINSOUND:
+                        print("[INFO] Playing alarm sound (Windows)")
+                        winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
+                    else:
+                        print(translate("\n✓ 処理が完了しました！"))  # Linuxでの代替通知
                 else:
-                    print(translate("\n✓ 処理が完了しました！"))  # Linuxでの代替通知
+                    print(f"[INFO] Alarm skip (値: {alarm_on_completion})")
 
                 # メモリ解放を明示的に実行
                 if torch.cuda.is_available():
@@ -2550,9 +2544,11 @@ def validate_images(input_image, section_settings, length_radio=None, frame_size
     error_bar = make_progress_bar_html(100, translate('画像がありません'))
     return False, error_html + error_bar
 
-def process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, save_latent_frames=False, save_last_section_frames=False, use_vae_cache=False, use_queue=False, prompt_queue_file=None):
+def process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, save_settings_on_start=False, alarm_on_completion=False):
     # プロセス関数の最初でVAEキャッシュ設定を確認
-    print(f"process関数開始時のVAEキャッシュ設定: {use_vae_cache}, 型: {type(use_vae_cache)}")
+    # print(f"process関数開始時のVAEキャッシュ設定: {use_vae_cache}, 型: {type(use_vae_cache)}")
+    # print(f"[DEBUG] process関数のsave_settings_on_start: {save_settings_on_start}, 型: {type(save_settings_on_start)}")
+    # print(f"[DEBUG] process関数のalarm_on_completion: {alarm_on_completion}, 型: {type(alarm_on_completion)}")
     
     # デバッグ：process関数開始時のプロンプトとSEED値（必要に応じてコメント解除）
     # print(f"[DEBUG-PROCESS-START] process関数開始時: prompt='{prompt[:50]}...', seed={seed}")
@@ -2566,6 +2562,17 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
+
+    # frame_save_modeから save_latent_frames と save_last_section_frames を算出
+    save_latent_frames = False
+    save_last_section_frames = False
+    if isinstance(frame_save_mode, str):
+        if frame_save_mode == translate("全フレーム画像保存"):
+            save_latent_frames = True
+        elif frame_save_mode == translate("最終セクションのみ全フレーム画像保存"):
+            save_last_section_frames = True
+    
+    # print(f"[DEBUG] frame_save_mode: {frame_save_mode} -> save_latent_frames: {save_latent_frames}, save_last_section_frames: {save_last_section_frames}")
 
     # バリデーション関数で既にチェック済みなので、ここでの再チェックは不要
 
@@ -3068,6 +3075,13 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # print(f"[DEBUG-PROCESS] async_run呼び出し前: seed={seed}")
         # print(f"[DEBUG-PROCESS] async_run呼び出し前: current_seed={current_seed}")
         # print(f"[DEBUG-PROCESS] async_run呼び出し前: use_queue={use_queue}")
+        
+        # print(f"[DEBUG] async_run呼び出し前 - alarm_on_completion: {alarm_on_completion}, type: {type(alarm_on_completion)}")
+        # Gradioオブジェクトの場合は値を取得
+        actual_alarm_value = alarm_on_completion
+        if hasattr(alarm_on_completion, 'value'):
+            actual_alarm_value = alarm_on_completion.value
+        # print(f"[DEBUG] actual_alarm_value: {actual_alarm_value}, type: {type(actual_alarm_value)}")
 
         async_run(
             worker,
@@ -3106,11 +3120,11 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             fp8_optimization,
             resolution,
             batch_index,
-            save_latent_frames,  # 全フレーム画像保存フラグ（ラジオボタンから設定）
-            save_last_section_frames,  # 最終セクションのみ全フレーム画像保存フラグ（ラジオボタンから設定）
+            frame_save_mode,  # フレーム保存モード（save_latent_framesとsave_last_section_framesは内部で計算）
             use_vae_cache,  # VAEキャッシュ設定
             bool(use_queue),  # キュー使用フラグ - 確実にブール値として渡す
-            prompt_queue_file  # プロンプトキューファイル
+            prompt_queue_file,  # プロンプトキューファイル
+            actual_alarm_value  # アラーム設定（値のみ）
         )
 
         # 現在のバッチの出力ファイル名
@@ -3232,6 +3246,22 @@ quick_prompts = [
 quick_prompts = [[x] for x in quick_prompts]
 
 css = get_app_css()
+
+# アプリケーション起動時に保存された設定を読み込む
+from eichi_utils.settings_manager import load_app_settings
+saved_app_settings = load_app_settings()
+
+# 読み込んだ設定をログに出力
+print(translate("=== アプリケーション設定を読み込みます ==="))
+if saved_app_settings:
+    print(translate("✅ 保存された設定を適用します"))
+    # デバッグ用に設定内容を表示
+    for key, value in saved_app_settings.items():
+        if key != 'save_settings_on_start':  # 自動保存設定は除外
+            print(f"  {key}: {value}")
+else:
+    print(translate("ℹ️ 保存された設定が見つかりません。デフォルト値を使用します"))
+
 block = gr.Blocks(css=css).queue()
 with block:
     gr.HTML('<h1>FramePack<span class="title-suffix">-eichi</span></h1>')
@@ -3253,8 +3283,23 @@ with block:
             )
         with gr.Column(scale=1):
             # オールパディング設定
-            use_all_padding = gr.Checkbox(label=translate("オールパディング"), value=False, info=translate("数値が小さいほど直前の絵への影響度が下がり動きが増える"), elem_id="all_padding_checkbox")
-            all_padding_value = gr.Slider(label=translate("パディング値"), minimum=0.2, maximum=3, value=1, step=0.1, info=translate("すべてのセクションに適用するパディング値（0.2〜3の整数）"), visible=False)
+            use_all_padding = gr.Checkbox(
+                label=translate("オールパディング"), 
+                value=saved_app_settings.get("use_all_padding", False) if saved_app_settings else False, 
+                info=translate("数値が小さいほど直前の絵への影響度が下がり動きが増える"), 
+                elem_id="all_padding_checkbox",
+                elem_classes="saveable-setting"
+            )
+            all_padding_value = gr.Slider(
+                label=translate("パディング値"), 
+                minimum=0.2, 
+                maximum=3, 
+                value=saved_app_settings.get("all_padding_value", 1) if saved_app_settings else 1, 
+                step=0.1, 
+                info=translate("すべてのセクションに適用するパディング値（0.2〜3の整数）"), 
+                visible=saved_app_settings.get("use_all_padding", False) if saved_app_settings else False,
+                elem_classes="saveable-setting"
+            )
             
             # オールパディングのチェックボックス状態に応じてスライダーの表示/非表示を切り替える
             def toggle_all_padding_visibility(use_all_padding):
@@ -3445,8 +3490,9 @@ with block:
                         resolution = gr.Dropdown(
                             label=translate("解像度"),
                             choices=[512, 640, 768, 960, 1080],
-                            value=640,
-                            info=translate("出力動画の基準解像度。640推奨。960/1080は高負荷・高メモリ消費")
+                            value=saved_app_settings.get("resolution", 640) if saved_app_settings else 640,
+                            info=translate("出力動画の基準解像度。640推奨。960/1080は高負荷・高メモリ消費"),
+                            elem_classes="saveable-setting"
                         )
                     with gr.Column(scale=1):
                         batch_count = gr.Slider(
@@ -5611,13 +5657,19 @@ with block:
             # 計算結果を表示するエリア
             section_calc_display = gr.HTML("", label="")
 
-            use_teacache = gr.Checkbox(label=translate('Use TeaCache'), value=True, info=translate('Faster speed, but often makes hands and fingers slightly worse.'))
+            use_teacache = gr.Checkbox(
+                label=translate('Use TeaCache'), 
+                value=saved_app_settings.get("use_teacache", True) if saved_app_settings else True, 
+                info=translate('Faster speed, but often makes hands and fingers slightly worse.'),
+                elem_classes="saveable-setting"
+            )
             
             # VAEキャッシュ設定
             use_vae_cache = gr.Checkbox(
                 label=translate('VAEキャッシュを使用'),
-                value=False,
-                info=translate('デコードを1フレームずつ処理し、速度向上（メモリ使用量増加。VRAM24GB以上推奨。それ以下の場合、メモリスワップで逆に遅くなります）')
+                value=saved_app_settings.get("use_vae_cache", False) if saved_app_settings else False,
+                info=translate('デコードを1フレームずつ処理し、速度向上（メモリ使用量増加。VRAM24GB以上推奨。それ以下の場合、メモリスワップで逆に遅くなります）'),
+                elem_classes="saveable-setting"
             )
             print(f"VAEキャッシュCheckbox初期化: id={id(use_vae_cache)}")
             
@@ -5780,18 +5832,65 @@ with block:
 
             total_second_length = gr.Slider(label=translate("Total Video Length (Seconds)"), minimum=1, maximum=120, value=1, step=1)
             latent_window_size = gr.Slider(label=translate("Latent Window Size"), minimum=1, maximum=33, value=9, step=1, visible=False)  # Should not change
-            steps = gr.Slider(label=translate("Steps"), minimum=1, maximum=100, value=25, step=1, info=translate('Changing this value is not recommended.'))
+            steps = gr.Slider(
+                label=translate("Steps"), 
+                minimum=1, 
+                maximum=100, 
+                value=saved_app_settings.get("steps", 25) if saved_app_settings else 25, 
+                step=1, 
+                info=translate('Changing this value is not recommended.'),
+                elem_classes="saveable-setting"
+            )
 
-            cfg = gr.Slider(label=translate("CFG Scale"), minimum=1.0, maximum=32.0, value=1.0, step=0.01, visible=False)  # Should not change
-            gs = gr.Slider(label=translate("Distilled CFG Scale"), minimum=1.0, maximum=32.0, value=10.0, step=0.01, info=translate('Changing this value is not recommended.'))
-            rs = gr.Slider(label=translate("CFG Re-Scale"), minimum=0.0, maximum=1.0, value=0.0, step=0.01, visible=False)  # Should not change
+            cfg = gr.Slider(
+                label=translate("CFG Scale"), 
+                minimum=1.0, 
+                maximum=32.0, 
+                value=saved_app_settings.get("cfg", 1.0) if saved_app_settings else 1.0, 
+                step=0.01, 
+                visible=False,
+                elem_classes="saveable-setting"
+            )  # Should not change
+            gs = gr.Slider(
+                label=translate("Distilled CFG Scale"), 
+                minimum=1.0, 
+                maximum=32.0, 
+                value=saved_app_settings.get("gs", 10.0) if saved_app_settings else 10.0, 
+                step=0.01, 
+                info=translate('Changing this value is not recommended.'),
+                elem_classes="saveable-setting"
+            )
+            rs = gr.Slider(
+                label=translate("CFG Re-Scale"), 
+                minimum=0.0, 
+                maximum=1.0, 
+                value=0.0, 
+                step=0.01, 
+                visible=False
+            )  # Should not change
 
             available_cuda_memory_gb = round(torch.cuda.get_device_properties(0).total_memory / (1024**3))
             default_gpu_memory_preservation_gb = 6 if available_cuda_memory_gb >= 20 else (8 if available_cuda_memory_gb > 16 else 10)
-            gpu_memory_preservation = gr.Slider(label=translate("GPU Memory to Preserve (GB) (smaller = more VRAM usage)"), minimum=6, maximum=128, value=default_gpu_memory_preservation_gb, step=0.1, info=translate("空けておくGPUメモリ量を指定。小さい値=より多くのVRAMを使用可能=高速、大きい値=より少ないVRAMを使用=安全"))
+            gpu_memory_preservation = gr.Slider(
+                label=translate("GPU Memory to Preserve (GB) (smaller = more VRAM usage)"), 
+                minimum=6, 
+                maximum=128, 
+                value=saved_app_settings.get("gpu_memory_preservation", default_gpu_memory_preservation_gb) if saved_app_settings else default_gpu_memory_preservation_gb, 
+                step=0.1, 
+                info=translate("空けておくGPUメモリ量を指定。小さい値=より多くのVRAMを使用可能=高速、大きい値=より少ないVRAMを使用=安全"),
+                elem_classes="saveable-setting"
+            )
 
             # MP4圧縮設定スライダーを追加
-            mp4_crf = gr.Slider(label=translate("MP4 Compression"), minimum=0, maximum=100, value=16, step=1, info=translate("数値が小さいほど高品質になります。0は無圧縮。黒画面が出る場合は16に設定してください。"))
+            mp4_crf = gr.Slider(
+                label=translate("MP4 Compression"), 
+                minimum=0, 
+                maximum=100, 
+                value=saved_app_settings.get("mp4_crf", 16) if saved_app_settings else 16, 
+                step=1, 
+                info=translate("数値が小さいほど高品質になります。0は無圧縮。黒画面が出る場合は16に設定してください。"),
+                elem_classes="saveable-setting"
+            )
             
             # VAEタイリング設定（ゴースト対策）
             from eichi_utils import create_vae_settings_ui, get_current_vae_settings_display
@@ -5809,17 +5908,27 @@ with block:
             vae_controls['current_settings_md'].value = update_vae_settings_display()
 
             # セクションごとの動画保存チェックボックスを追加（デフォルトOFF）
-            keep_section_videos = gr.Checkbox(label=translate("完了時にセクションごとの動画を残す - チェックがない場合は最終動画のみ保存されます（デフォルトOFF）"), value=False)
+            keep_section_videos = gr.Checkbox(
+                label=translate("完了時にセクションごとの動画を残す - チェックがない場合は最終動画のみ保存されます（デフォルトOFF）"), 
+                value=saved_app_settings.get("keep_section_videos", False) if saved_app_settings else False,
+                elem_classes="saveable-setting"
+            )
 
             # テンソルデータ保存チェックボックス违加
             save_tensor_data = gr.Checkbox(
                 label=translate("完了時にテンソルデータ(.safetensors)も保存 - このデータを別の動画の後に結合可能"),
-                value=False,
-                info=translate("チェックすると、生成されたテンソルデータを保存します。アップロードされたテンソルがあれば、結合したテンソルデータも保存されます。")
+                value=saved_app_settings.get("save_tensor_data", False) if saved_app_settings else False,
+                info=translate("チェックすると、生成されたテンソルデータを保存します。アップロードされたテンソルがあれば、結合したテンソルデータも保存されます。"),
+                elem_classes="saveable-setting"
             )
 
             # セクションごとの静止画保存チェックボックスを追加（デフォルトOFF）
-            save_section_frames = gr.Checkbox(label=translate("Save Section Frames"), value=False, info=translate("各セクションの最終フレームを静止画として保存します（デフォルトOFF）"))
+            save_section_frames = gr.Checkbox(
+                label=translate("Save Section Frames"), 
+                value=saved_app_settings.get("save_section_frames", False) if saved_app_settings else False, 
+                info=translate("各セクションの最終フレームを静止画として保存します（デフォルトOFF）"),
+                elem_classes="saveable-setting"
+            )
             
             # フレーム画像保存のラジオボタンを追加（デフォルトは「保存しない」）
             # gr.Groupで囲むことで灰色背景のスタイルに統一
@@ -5832,8 +5941,9 @@ with block:
                         translate("全フレーム画像保存"),
                         translate("最終セクションのみ全フレーム画像保存")
                     ],
-                    value=translate("保存しない"),
-                    info=translate("フレーム画像の保存方法を選択します。過去セクション分も含めて保存します。全セクションか最終セクションのみか選択できます。")
+                    value=saved_app_settings.get("frame_save_mode", translate("保存しない")) if saved_app_settings else translate("保存しない"),
+                    info=translate("フレーム画像の保存方法を選択します。過去セクション分も含めて保存します。全セクションか最終セクションのみか選択できます。"),
+                    elem_classes="saveable-setting"
                 )
 
             # UIコンポーネント定義後のイベント登録
@@ -5972,9 +6082,10 @@ with block:
                     label=translate("EndFrame影響度"),
                     minimum=0.01,
                     maximum=1.00,
-                    value=1.00,
+                    value=saved_app_settings.get("end_frame_strength", 1.00) if saved_app_settings else 1.00,
                     step=0.01,
-                    info=translate("最終フレームが動画全体に与える影響の強さを調整します。値を小さくすると最終フレームの影響が弱まり、最初のフレームに早く移行します。1.00が通常の動作です。")
+                    info=translate("最終フレームが動画全体に与える影響の強さを調整します。値を小さくすると最終フレームの影響が弱まり、最初のフレームに早く移行します。1.00が通常の動作です。"),
+                    elem_classes="saveable-setting"
                 )
 
             # 出力フォルダ設定
@@ -6029,16 +6140,226 @@ with block:
                 return gr.update(value=folder_name), gr.update(value=folder_path)
 
             open_folder_btn.click(fn=handle_open_folder_btn, inputs=[output_dir], outputs=[output_dir, path_display])
+            
+            # アプリケーション設定管理UI
+            with gr.Group():
+                gr.Markdown(f"### " + translate("アプリケーション設定"))
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        save_current_settings_btn = gr.Button(value=translate("💾 現在の設定を保存"), size="sm")
+                    with gr.Column(scale=1):
+                        reset_settings_btn = gr.Button(value=translate("🔄 設定をリセット"), size="sm")
+                
+                # 自動保存設定
+                save_settings_default_value = saved_app_settings.get("save_settings_on_start", False) if saved_app_settings else False
+                save_settings_on_start = gr.Checkbox(
+                    label=translate("生成開始時に自動保存"),
+                    value=save_settings_default_value,
+                    info=translate("チェックをオンにすると、生成開始時に現在の設定が自動的に保存されます。設定は再起動時に反映されます。"),
+                    elem_classes="saveable-setting",
+                    interactive=True
+                )
+                
+                # 完了時のアラーム設定
+                alarm_default_value = saved_app_settings.get("alarm_on_completion", True) if saved_app_settings else True
+                alarm_on_completion = gr.Checkbox(
+                    label=translate("完了時にアラームを鳴らす(Windows)"),
+                    value=alarm_default_value,
+                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします（Windows）"),
+                    elem_classes="saveable-setting",
+                    interactive=True
+                )
+                
+                # 設定状態の表示
+                settings_status = gr.Markdown("")
+                
+            
+            # アプリケーション設定の保存機能
+            def save_app_settings_handler(
+                # 保存対象の設定項目
+                resolution_val,
+                mp4_crf_val,
+                steps_val,
+                cfg_val,
+                use_teacache_val,
+                gpu_memory_preservation_val,
+                gs_val,
+                use_all_padding_val,
+                all_padding_value_val,
+                end_frame_strength_val,
+                keep_section_videos_val,
+                save_section_frames_val,
+                save_tensor_data_val,
+                frame_save_mode_val,
+                use_vae_cache_val,
+                save_settings_on_start_val,
+                alarm_on_completion_val
+            ):
+                """現在の設定を保存"""
+                from eichi_utils.settings_manager import save_app_settings
+                
+                # 現在の設定を収集
+                current_settings = {
+                    # 基本設定
+                    "resolution": resolution_val,
+                    "mp4_crf": mp4_crf_val,
+                    "steps": steps_val,
+                    "cfg": cfg_val,
+                    # パフォーマンス設定
+                    "use_teacache": use_teacache_val,
+                    "gpu_memory_preservation": gpu_memory_preservation_val,
+                    "use_vae_cache": use_vae_cache_val,
+                    # 詳細設定
+                    "gs": gs_val,
+                    # パディング設定
+                    "use_all_padding": use_all_padding_val,
+                    "all_padding_value": all_padding_value_val,
+                    # エンドフレーム設定
+                    "end_frame_strength": end_frame_strength_val,
+                    # 保存設定
+                    "keep_section_videos": keep_section_videos_val,
+                    "save_section_frames": save_section_frames_val,
+                    "save_tensor_data": save_tensor_data_val,
+                    "frame_save_mode": frame_save_mode_val,
+                    # 自動保存設定
+                    "save_settings_on_start": save_settings_on_start_val,
+                    # アラーム設定
+                    "alarm_on_completion": alarm_on_completion_val
+                }
+                
+                # 設定を保存
+                success = save_app_settings(current_settings)
+                
+                if success:
+                    return translate("✅ 設定を保存しました")
+                else:
+                    return translate("❌ 設定の保存に失敗しました")
+            
+            # 設定のリセット機能
+            def reset_app_settings_handler():
+                """設定をデフォルト値にリセット"""
+                from eichi_utils.settings_manager import get_default_app_settings
+                
+                # デフォルト設定を取得
+                default_settings = get_default_app_settings()
+                
+                # 各UIコンポーネントを更新するためのgr.updateオブジェクトを作成
+                updates = []
+                
+                # 基本設定
+                updates.append(gr.update(value=default_settings["resolution"]))
+                updates.append(gr.update(value=default_settings["mp4_crf"]))
+                updates.append(gr.update(value=default_settings["steps"]))
+                updates.append(gr.update(value=default_settings["cfg"]))
+                
+                # パフォーマンス設定
+                updates.append(gr.update(value=default_settings["use_teacache"]))
+                updates.append(gr.update(value=default_settings["gpu_memory_preservation"]))
+                updates.append(gr.update(value=default_settings.get("use_vae_cache", False)))
+                
+                # 詳細設定
+                updates.append(gr.update(value=default_settings["gs"]))
+                
+                # パディング設定
+                updates.append(gr.update(value=default_settings["use_all_padding"]))
+                updates.append(gr.update(value=default_settings["all_padding_value"]))
+                
+                # エンドフレーム設定
+                updates.append(gr.update(value=default_settings["end_frame_strength"]))
+                
+                # 保存設定
+                updates.append(gr.update(value=default_settings["keep_section_videos"]))
+                updates.append(gr.update(value=default_settings["save_section_frames"]))
+                updates.append(gr.update(value=default_settings["save_tensor_data"]))
+                updates.append(gr.update(value=default_settings["frame_save_mode"]))
+                
+                # 自動保存設定
+                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))
+                
+                # アラーム設定
+                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))
+                
+                # ステータスメッセージ
+                updates.append(translate("🔄 設定をデフォルト値にリセットしました"))
+                
+                return updates
+            
+            # イベントハンドラの登録
+            save_current_settings_btn.click(
+                fn=save_app_settings_handler,
+                inputs=[
+                    resolution,
+                    mp4_crf,
+                    steps,
+                    cfg,
+                    use_teacache,
+                    gpu_memory_preservation,
+                    gs,
+                    use_all_padding,
+                    all_padding_value,
+                    end_frame_strength,
+                    keep_section_videos,
+                    save_section_frames,
+                    save_tensor_data,
+                    frame_save_mode,
+                    use_vae_cache,
+                    save_settings_on_start,
+                    alarm_on_completion
+                ],
+                outputs=[settings_status]
+            )
+            
+            reset_settings_btn.click(
+                fn=reset_app_settings_handler,
+                inputs=[],
+                outputs=[
+                    resolution,
+                    mp4_crf,
+                    steps,
+                    cfg,
+                    use_teacache,
+                    gpu_memory_preservation,
+                    use_vae_cache,
+                    gs,
+                    use_all_padding,
+                    all_padding_value,
+                    end_frame_strength,
+                    keep_section_videos,
+                    save_section_frames,
+                    save_tensor_data,
+                    frame_save_mode,
+                    save_settings_on_start,
+                    alarm_on_completion,
+                    settings_status
+                ]
+            )
 
             # プロンプト管理パネル（右カラムから左カラムに移動済み）
 
     # 実行前のバリデーション関数
-    def validate_and_process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, save_latent_frames=False, save_last_section_frames=False, use_vae_cache=False, use_queue=False, prompt_queue_file=None):
-        # print(f"[DEBUG-VALIDATE] validate_and_process開始: prompt='{prompt[:50]}...', seed={seed}")
-        # print(f"[DEBUG-VALIDATE] prompt型: {type(prompt)}, seed型: {type(seed)}")
+    def validate_and_process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, save_settings_on_start=False, alarm_on_completion=False):
+        """入力画像または最後のキーフレーム画像のいずれかが有効かどうかを確認し、問題がなければ処理を実行する"""
+        # Gradioオブジェクトの場合は値を取得（save_settings_on_start）
+        actual_save_settings_value = save_settings_on_start
+        
+        # Gradioのチェックボックスは直接bool値として渡される
+        if isinstance(save_settings_on_start, bool):
+            actual_save_settings_value = save_settings_on_start
+        elif hasattr(save_settings_on_start, 'value'):
+            actual_save_settings_value = save_settings_on_start.value
+        
+        # Gradioオブジェクトの場合は値を取得（alarm_on_completion）
+        actual_alarm_value = alarm_on_completion
+        
+        # Gradioのチェックボックスは直接bool値として渡される
+        if isinstance(alarm_on_completion, bool):
+            actual_alarm_value = alarm_on_completion
+        elif hasattr(alarm_on_completion, 'value'):
+            actual_alarm_value = alarm_on_completion.value
+        
         # グローバル変数の宣言 - 関数の先頭で行う
         global batch_stopped, queue_enabled, queue_type, prompt_queue_file_path, vae_cache_enabled, image_queue_files
-        # すべての入力パラメーターの型情報をデバッグ出力（問題診断用）
+        
         print("=== 入力パラメーター型情報 ===")
         print(f"use_queue: 型={type(use_queue).__name__}")
         print(f"prompt_queue_file: 型={type(prompt_queue_file).__name__}")
@@ -6067,7 +6388,7 @@ with block:
         print(f"[DEBUG] batch_count: {batch_count}, 型: {type(batch_count)}")
         
         # フレーム保存モードとVAEキャッシュの引数位置を確認
-        print(f"[DEBUG] フレーム保存モード設定値: {save_latent_frames}, 型: {type(save_latent_frames)}")
+        print(f"[DEBUG] フレーム保存モード設定値: {frame_save_mode}, 型: {type(frame_save_mode)}")
         print(f"[DEBUG] VAEキャッシュ設定値: {use_vae_cache}, 型: {type(use_vae_cache)}")
         
         # グローバル変数宣言
@@ -6078,9 +6399,6 @@ with block:
         # デバッグ: 引数の型と値を表示
         print(translate("[DEBUG] resolution_value 型: {0}, 値: {1}").format(type(resolution).__name__, resolution))
         print(translate("[DEBUG] batch_count 型: {0}, 値: {1}").format(type(batch_count).__name__, batch_count))
-        
-        # フレーム保存モードの値を取得
-        frame_save_mode = save_latent_frames
         
         # VAEキャッシュを取得（グローバル変数を優先）
         use_vae_cache_ui_value = use_vae_cache
@@ -6107,36 +6425,9 @@ with block:
             frame_save_mode_value = frame_save_mode
             print(translate("[DEBUG] 通常の値として使用: {0}").format(frame_save_mode_value))
         
-        # モード選択に基づいてフラグを設定（必ずブール値を設定する）
-        # 選択肢は3つ: "保存しない", "全フレーム画像保存", "最終セクションのみ全フレーム画像保存"
-        
-        # UIのデバッグ出力用に変数を作成（これらは実際には使用しない）
-        save_latent_frames_display = False
-        save_last_section_frames_display = False
-        
-        # 実際に使用するフラグ（必ずブール値を設定）
-        save_latent_frames = False  # 最初にFalseに設定
-        save_last_section_frames = False  # 最初にFalseに設定
-        
-        # 選択された値に基づいてフラグを設定
-        if frame_save_mode_value == translate("全フレーム画像保存"):
-            save_latent_frames = True
-            save_latent_frames_display = translate("全フレーム画像保存")
-        elif frame_save_mode_value == translate("最終セクションのみ全フレーム画像保存"):
-            save_last_section_frames = True
-            save_last_section_frames_display = translate("最終セクションのみ全フレーム画像保存")
-        
-        # UIデバッグ用の出力
-        print(translate("[DEBUG] フレーム保存モード (オリジナル): {0}").format(frame_save_mode))
-        print(translate("[DEBUG] フレーム保存モード (実際の値): {0}").format(frame_save_mode_value))
-        print(translate("[DEBUG] save_latent_frames: {0}").format(save_latent_frames_display))
-        print(translate("[DEBUG] save_last_section_frames: {0}").format(save_last_section_frames_display))
-        
-        # 実際のプログラム内部で使用する値の出力
-        print(translate("[DEBUG] 設定済みフラグ (内部値) - save_latent_frames型: {0}, 値: {1}, save_last_section_frames型: {2}, 値: {3}").format(
-            type(save_latent_frames).__name__, save_latent_frames, 
-            type(save_last_section_frames).__name__, save_last_section_frames
-        ))
+        # フレーム保存モードの値をデバッグ出力
+        # print(translate("[DEBUG] フレーム保存モード (オリジナル): {0}").format(frame_save_mode))
+        # print(translate("[DEBUG] フレーム保存モード (実際の値): {0}").format(frame_save_mode_value))
 
         # バッチ回数を有効な範囲に制限
         # 型チェックしてから変換（数値でない場合はデフォルト値の1を使用）
@@ -6207,6 +6498,52 @@ with block:
             yield None, gr.update(visible=False), translate("エラー: 画像が選択されていません"), error_message, gr.update(interactive=True), gr.update(interactive=False), gr.update()
             return
 
+        # 自動保存機能: actual_save_settings_valueがTrueの場合、現在の設定を保存
+        if actual_save_settings_value:
+            print(translate("=== 生成開始時の自動保存を実行します ==="))
+            
+            # 現在の設定を収集
+            current_settings = {
+                # 基本設定
+                "resolution": resolution,
+                "mp4_crf": mp4_crf,
+                "steps": steps,
+                "cfg": cfg,
+                # パフォーマンス設定
+                "use_teacache": use_teacache,
+                "gpu_memory_preservation": gpu_memory_preservation,
+                "use_vae_cache": use_vae_cache,
+                # 詳細設定
+                "gs": gs,
+                "rs": rs,
+                # パディング設定
+                "use_all_padding": use_all_padding,
+                "all_padding_value": all_padding_value,
+                # エンドフレーム設定
+                "end_frame_strength": end_frame_strength,
+                # フレーム設定
+                "frame_size_radio": frame_size_setting,
+                # 保存設定
+                "keep_section_videos": keep_section_videos,
+                "output_dir": output_dir,
+                "save_section_frames": save_section_frames,
+                "save_tensor_data": save_tensor_data,
+                "frame_save_mode": frame_save_mode,
+                # 自動保存設定
+                "save_settings_on_start": actual_save_settings_value,
+                # アラーム設定
+                "alarm_on_completion": actual_alarm_value
+            }
+            
+            # 設定を保存
+            from eichi_utils.settings_manager import save_app_settings
+            success = save_app_settings(current_settings)
+            
+            if success:
+                print(translate("✅ 現在の設定を自動保存しました"))
+            else:
+                print(translate("❌ 設定の自動保存に失敗しました"))
+
         # 画像がある場合は通常の処理を実行
         # LoRA関連の引数をログ出力
         print(translate("[DEBUG] LoRA関連の引数を確認:"))
@@ -6225,15 +6562,6 @@ with block:
             
         # グローバル変数vae_cache_enabledは既に宣言済み
         
-        # フレーム保存モードのブール値変換
-        save_latent_frames = False
-        save_last_section_frames = False
-        if isinstance(frame_save_mode, str):
-            if frame_save_mode == translate("全フレーム画像保存"):
-                save_latent_frames = True
-            elif frame_save_mode == translate("最終セクションのみ全フレーム画像保存"):
-                save_last_section_frames = True
-        
         # グローバル変数からVAEキャッシュ設定を取得
         use_vae_cache = vae_cache_enabled
         print(f"最終的なVAEキャッシュ設定フラグ: {use_vae_cache}")
@@ -6241,7 +6569,8 @@ with block:
         # 最終的なフラグを設定（名前付き引数で渡すため変数の整理のみ）
         print(translate("[DEBUG] 最終的なuse_loraフラグを{0}に設定しました").format(use_lora))
         # 最終的な設定値の確認
-        print(f"[DEBUG] 最終的なフラグ設定 - save_latent_frames: {save_latent_frames}, save_last_section_frames: {save_last_section_frames}, use_vae_cache: {use_vae_cache}, use_lora: {use_lora}")
+        # print(f"[DEBUG] 最終的なフラグ設定 - frame_save_mode: {frame_save_mode}, use_vae_cache: {use_vae_cache}, use_lora: {use_lora}")
+        # print(f"[DEBUG] actual_save_settings_value: {actual_save_settings_value}, actual_alarm_value: {actual_alarm_value}")
 
         # キュー機能の状態を確認
         # グローバル変数の状態を先に取得
@@ -6394,16 +6723,17 @@ with block:
             fp8_optimization=fp8_optimization,
             resolution=resolution_value,
             batch_count=batch_count,
-            save_latent_frames=save_latent_frames,
-            save_last_section_frames=save_last_section_frames,
+            frame_save_mode=frame_save_mode,  # frame_save_modeを追加
             use_vae_cache=use_vae_cache,
             use_queue=bool(queue_enabled),  # 確実にブール値として渡す
-            prompt_queue_file=prompt_queue_file
+            prompt_queue_file=prompt_queue_file,
+            save_settings_on_start=actual_save_settings_value,  # 値取得後の自動保存パラメータを追加
+            alarm_on_completion=actual_alarm_value  # 値取得後のアラームパラメータを追加
         )
 
     # 実行ボタンのイベント
     # UIから渡されるパラメーターリスト
-    ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, end_frame, end_frame_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, section_settings, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_vae_cache, use_queue, prompt_queue_file]
+    ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, end_frame, end_frame_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, section_settings, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_vae_cache, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion]
     
     # デバッグ: チェックボックスの現在値を出力
     print(f"use_vae_cacheチェックボックス値: {use_vae_cache.value if hasattr(use_vae_cache, 'value') else 'no value attribute'}, id={id(use_vae_cache)}")

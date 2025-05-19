@@ -29,8 +29,11 @@ def initialize_settings():
     settings_dir = os.path.dirname(settings_file)
 
     if not os.path.exists(settings_file):
-        # 初期デフォルト設定
-        default_settings = {'output_folder': 'outputs'}
+        # 初期デフォルト設定（アプリケーション設定を含む）
+        default_settings = {
+            'output_folder': 'outputs',
+            'app_settings_eichi': get_default_app_settings()
+        }
         try:
             os.makedirs(settings_dir, exist_ok=True)
             with open(settings_file, 'w', encoding='utf-8') as f:
@@ -98,3 +101,80 @@ def open_output_folder(folder_path):
     except Exception as e:
         print(translate("フォルダを開く際にエラーが発生しました: {0}").format(e))
         return False
+
+def get_default_app_settings():
+    """アプリケーションのデフォルト設定を返す"""
+    return {
+        # 基本設定
+        "resolution": 640,
+        "mp4_crf": 16,
+        "steps": 25,
+        "cfg": 1.0,
+        
+        # パフォーマンス設定
+        "use_teacache": True,
+        "gpu_memory_preservation": 6,
+        "use_vae_cache": False,
+        
+        # 詳細設定
+        "gs": 10.0,  # Distilled CFG Scale
+        
+        # パディング設定
+        "use_all_padding": False,
+        "all_padding_value": 1.0,
+        
+        # エンドフレーム設定
+        "end_frame_strength": 1.0,
+        
+        # 保存設定
+        "keep_section_videos": False,
+        "save_section_frames": False,
+        "save_tensor_data": False,
+        "frame_save_mode": "保存しない",
+        
+        # 自動保存設定
+        "save_settings_on_start": False,
+        
+        # アラーム設定
+        "alarm_on_completion": True
+    }
+
+def load_app_settings():
+    """アプリケーション設定を読み込む"""
+    settings = load_settings()
+    # 旧キーからの移行処理
+    if 'app_settings' in settings and 'app_settings_eichi' not in settings:
+        settings['app_settings_eichi'] = settings['app_settings']
+        del settings['app_settings']
+        save_settings(settings)
+    elif 'app_settings_eichi' not in settings:
+        settings['app_settings_eichi'] = get_default_app_settings()
+        save_settings(settings)
+    
+    # 既存の設定にデフォルト値をマージ（新しいキーのため）
+    app_settings = settings.get('app_settings_eichi', {})
+    default_settings = get_default_app_settings()
+    
+    # 存在しないキーにはデフォルト値を使用
+    for key, default_value in default_settings.items():
+        if key not in app_settings:
+            app_settings[key] = default_value
+            print(f"[INFO] 新しい設定項目 '{key}' をデフォルト値 {default_value} で追加")
+    
+    # マージした設定を保存
+    if app_settings != settings.get('app_settings_eichi', {}):
+        settings['app_settings_eichi'] = app_settings
+        save_settings(settings)
+    
+    return app_settings
+
+def save_app_settings(app_settings):
+    """アプリケーション設定を保存"""
+    settings = load_settings()
+    
+    # 不要なキーを除外してコピー（手動保存と自動保存の一貫性のため）
+    filtered_settings = {k: v for k, v in app_settings.items() 
+                        if k not in ['rs', 'output_dir', 'frame_size_radio']}
+    
+    settings['app_settings_eichi'] = filtered_settings
+    return save_settings(settings)

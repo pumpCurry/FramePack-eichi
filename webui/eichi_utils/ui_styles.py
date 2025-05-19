@@ -156,4 +156,16 @@ def get_app_css():
     .section-accordion .gr-block {
         border-radius: 8px;
     }
+
+    /* 保存対象の設定項目を青色でハイライト */
+    .saveable-setting {
+        background-color: #e3f2fd !important;
+        border-left: 3px solid #2196f3 !important;
+    }
+    
+    /* 保存対象項目のラベルにアイコンを追加 */
+    .saveable-setting label::before {
+        content: "💾 ";
+        margin-right: 5px;
+    }
     """
