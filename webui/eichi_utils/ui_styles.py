@@ -157,15 +157,34 @@ def get_app_css():
         border-radius: 8px;
     }
 
-    /* 保存対象の設定項目を薄い青色でハイライト */
+    /* 保存対象の設定項目を薄い青色でハイライト（ライト/ダークモード対応） */
     .saveable-setting {
-        background-color: #f0f8ff !important; /* より薄い背景色（AliceBlue） */
-        border-left: 3px solid #90caf9 !important; /* より薄いボーダー色 */
+        background-color: rgba(240, 248, 255, 0.5) !important; /* 薄い青色を透過指定（ライトモード） */
+        border-left: 3px solid #90caf9 !important; /* 薄いボーダー色 */
+    }
+    
+    /* システムのダークモード対応 */
+    @media (prefers-color-scheme: dark) {
+        .saveable-setting {
+            background-color: rgba(25, 35, 60, 0.4) !important; /* ダークモードでの背景色 */
+            border-left: 3px solid #64b5f6 !important; /* ダークモードでのボーダー色（少し明るめ） */
+        }
+    }
+    
+    /* Gradioのダークテーマ対応 */
+    .dark .saveable-setting {
+        background-color: rgba(25, 35, 60, 0.4) !important; /* ダークモードでの背景色 */
+        border-left: 3px solid #64b5f6 !important; /* ダークモードでのボーダー色（少し明るめ） */
     }
     
     /* 保存対象項目のラベルにアイコンを追加 */
     .saveable-setting label::before {
         content: "💾 ";
         margin-right: 5px;
+    }
+    
+    /* ダークモードでのラベル色調整 */
+    .dark .saveable-setting label {
+        color: #90caf9 !important; /* ダークモードで少し明るい青に */
     }
     """
