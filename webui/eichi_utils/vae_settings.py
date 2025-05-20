@@ -439,7 +439,6 @@ def create_vae_settings_ui(translate_fn):
     import gradio as gr
     
     # 現在の設定をロード
-    print("[VAE設定] UI作成のための設定ロード")
     current_settings = load_vae_settings()
     
     with gr.Accordion(translate_fn("VAE詳細設定 (ゴースト対策)"), open=False) as vae_settings_accordion:
@@ -614,5 +613,4 @@ def create_vae_settings_ui(translate_fn):
         'current_settings_md': current_settings_md
     }
     
-    print("[VAE設定] UIコンポーネント作成完了")
     return vae_settings_accordion, controls

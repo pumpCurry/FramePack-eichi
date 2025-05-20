@@ -249,7 +249,7 @@ print(translate("ログ設定を読み込み: 有効={0}, フォルダ={1}").for
 if log_settings.get('log_enabled', False):
     # 現在のファイル名を渡す
     enable_logging(log_settings.get('log_folder', 'logs'), source_name="endframe_ichi_f1")
-    print(translate("✅ ログ出力を有効化しました"))
+    print(translate("ログ出力を有効化しました"))
 
 # キュー関連のグローバル変数
 queue_enabled = False  # キュー機能の有効/無効フラグ
@@ -3800,7 +3800,7 @@ with block:
                     disable_logging()
                     # 新しい設定でログを再開（有効な場合）
                     apply_log_settings(log_settings, source_name="endframe_ichi_f1")
-                    print(translate("✅ ログ設定を更新しました: 有効={0}, フォルダ={1}").format(
+                    print(translate("ログ設定を更新しました: 有効={0}, フォルダ={1}").format(
                         log_enabled_val, log_folder_val))
                 
                 if app_success and log_success:

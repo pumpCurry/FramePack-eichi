@@ -70,9 +70,6 @@ def enable_logging(log_folder=None, source_name="endframe_ichi"):
         # 相対パスを絶対パスに変換
         _log_folder = get_absolute_path(log_folder)
     
-    # 診断用のメッセージを表示
-    print(f"[DEBUG] enable_logging呼び出し: folder={_log_folder}, source={source_name}")
-    
     # ログディレクトリが存在しない場合は作成
     try:
         if not os.path.exists(_log_folder):
@@ -98,9 +95,6 @@ def enable_logging(log_folder=None, source_name="endframe_ichi"):
     log_filepath = os.path.join(_log_folder, log_filename)
     
     try:
-        # フルパスを表示
-        print(f"[DEBUG] ログファイルパス: {os.path.abspath(log_filepath)}")
-        
         # ログファイルを開く
         _log_file = open(log_filepath, "w", encoding="utf-8")
         
@@ -183,7 +177,6 @@ def set_log_folder(folder_path):
             print(f"[DEBUG] 新しいログフォルダを作成: {_log_folder}")
         except Exception as e:
             print(f"[WARNING] ログフォルダの作成に失敗: {e}")
-            pass
     
     print(f"[DEBUG] ログフォルダを設定: {os.path.abspath(_log_folder)}")
     return True
@@ -226,7 +219,6 @@ def get_default_log_settings():
         "log_enabled": False,
         "log_folder": "logs"
     }
-    print(f"[DEBUG] デフォルトのログ設定: {settings}")
     return settings
 
 def load_log_settings(app_settings):

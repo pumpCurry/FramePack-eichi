@@ -116,10 +116,6 @@ class TextEncoderManager:
             if self._is_loaded():
                 self.dispose_text_encoders()
 
-            print(translate("\ntext_encoderとtext_encoder_2をリロードします..."))
-            print(translate("適用する設定:"))
-            print(f"  - High-VRAM mode: {self.next_state['high_vram']}")
-
             # 新しいtext_encoderとtext_encoder_2インスタンスを作成
             from transformers import LlamaModel, CLIPTextModel
             self.text_encoder = LlamaModel.from_pretrained(

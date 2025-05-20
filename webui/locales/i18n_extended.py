@@ -1,10 +1,8 @@
 def set_lang(language):
     """言語設定を行う"""
     from locales import i18n
-    print(f"[DEBUG] Setting language from i18n_extended to: {language}")
     i18n.lang = language
     i18n.init(language)  # 言語設定を反映（明示的に言語を渡す）
-    print(f"[DEBUG] Language initialized successfully: {language}")
 
 # i18nモジュールからtranslate関数をインポート
 from locales.i18n import translate

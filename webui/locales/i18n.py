@@ -122,7 +122,5 @@ def init(locale="ja"):
         print(f"[WARNING] Unsupported language: {locale}. Falling back to 'ja'")
         locale = "ja"
     
-    print(f"[DEBUG] Initializing language to: {locale}")
     lang = locale
     translateContext = load_translations()
-    print(f"[DEBUG] Loaded translations for: {', '.join(translateContext.keys())}")
