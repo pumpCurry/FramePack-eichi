@@ -187,4 +187,24 @@ def get_app_css():
     .dark .saveable-setting label {
         color: #90caf9 !important; /* ダークモードで少し明るい青に */
     }
+
+    /* markdownタイトル用 */
+    .markdown-title {
+        padding: 3px;
+    }
+
+    /* markdownサブタイトル用 */
+    .markdown-subtitle {
+        padding: 2px;
+    }
+
+    /* markdown領域用 */
+    .markdown-desc {
+        padding: 2px;
+    }
+
+    /* グルーピング用ボーダー */
+    .group-border {
+        border: solid 1px;
+    }
     """
