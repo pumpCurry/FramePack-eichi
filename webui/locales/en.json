@@ -740,5 +740,18 @@
   "入力画像マスク（オプション）": "Input Image Mask (Optional)",
   "白い部分を保持、黒い部分を変更（グレースケール画像）": "Keep white areas, change black areas (grayscale image)",
   "参照画像マスク（オプション）": "Reference Image Mask (Optional)",
-  "白い部分を適用、黒い部分を無視（グレースケール画像）": "Apply white areas, ignore black areas (grayscale image)"
+  "白い部分を適用、黒い部分を無視（グレースケール画像）": "Apply white areas, ignore black areas (grayscale image)",
+  "アプリケーション設定": "Application Settings",
+  "💾 現在の設定を保存": "💾 Save Current Settings",
+  "🔄 設定をリセット": "🔄 Reset Settings",
+  "チェックをオンにすると、生成開始時に現在の設定が自動的に保存されます。設定は再起動時に反映されます。": "When checked, current settings will be automatically saved at generation start. Settings will be applied at restart.",
+  "生成開始時に自動保存": "Auto-save at Generation Start",
+  "チェックをオンにすると、生成完了時にアラーム音を鳴らします（Windows）": "When checked, an alarm sound will play when generation is complete (Windows)",
+  "完了時にアラームを鳴らす(Windows)": "Play Alarm on Completion (Windows)",
+  "ログ設定": "Log Settings",
+  "チェックをオンにすると、コンソール出力をログファイルにも保存します": "When checked, console output will also be saved to log files",
+  "コンソールログを出力する": "Output Console Logs",
+  "ログ出力先": "Log Output Location",
+  "ログファイルの保存先フォルダを指定します": "Specify the folder where log files will be saved",
+  "📂 ログフォルダを開く": "📂 Open Log Folder"
 }

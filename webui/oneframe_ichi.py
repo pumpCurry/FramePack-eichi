@@ -125,7 +125,16 @@ from eichi_utils.settings_manager import (
     initialize_settings,
     load_settings,
     save_settings,
-    open_output_folder
+    open_output_folder,
+    load_app_settings_oichi,
+    save_app_settings_oichi
+)
+
+# ログ管理モジュールをインポート
+from eichi_utils.log_manager import (
+    enable_logging, disable_logging, is_logging_enabled, 
+    get_log_folder, set_log_folder, open_log_folder,
+    get_default_log_settings, load_log_settings, apply_log_settings
 )
 
 # LoRAプリセット管理モジュールをインポート
@@ -307,6 +316,17 @@ initialize_lora_presets()
 app_settings = load_settings()
 output_folder_name = app_settings.get('output_folder', 'outputs')
 print(translate("設定から出力フォルダを読み込み: {0}").format(output_folder_name))
+
+# ログ設定を読み込み適用
+log_settings = app_settings.get('log_settings', get_default_log_settings())
+print(translate("ログ設定を読み込み: 有効={0}, フォルダ={1}").format(
+    log_settings.get('log_enabled', False), 
+    log_settings.get('log_folder', 'logs')
+))
+if log_settings.get('log_enabled', False):
+    # 現在のファイル名を渡す
+    enable_logging(log_settings.get('log_folder', 'logs'), source_name="oneframe_ichi")
+    print(translate("✅ ログ出力を有効化しました"))
 
 # 出力フォルダのフルパスを生成
 outputs_folder = get_output_folder_path(output_folder_name)
@@ -2049,7 +2069,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             use_rope_batch=False, use_queue=False, prompt_queue_file=None,
             # Kisekaeichi 関連のパラメータ
             use_reference_image=False, reference_image=None, 
-            target_index=1, history_index=13, input_mask=None, reference_mask=None):
+            target_index=1, history_index=13, input_mask=None, reference_mask=None,
+            save_settings_on_start=False, alarm_on_completion=True):
     global stream
     global batch_stopped, user_abort, user_abort_notified
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files
@@ -2227,6 +2248,34 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     user_abort = False
     user_abort_notified = False
     original_seed = seed if seed else (random.randint(0, 2**32 - 1) if use_random_seed else 31337)
+    
+    # 設定の自動保存処理（最初のバッチ開始時のみ）
+    if save_settings_on_start and batch_count > 0:
+        print(translate("=== 現在の設定を自動保存します ==="))
+        # 現在のUIの値を収集してアプリケーション設定として保存
+        current_settings = {
+            'resolution': resolution,
+            'steps': steps,
+            'cfg': cfg,
+            'use_teacache': use_teacache,
+            'gpu_memory_preservation': gpu_memory_preservation,
+            'gs': gs,
+            'latent_window_size': latent_window_size,
+            'latent_index': latent_index,
+            'use_clean_latents_2x': use_clean_latents_2x,
+            'use_clean_latents_4x': use_clean_latents_4x,
+            'use_clean_latents_post': use_clean_latents_post,
+            'target_index': target_index,
+            'history_index': history_index,
+            'save_settings_on_start': save_settings_on_start,
+            'alarm_on_completion': alarm_on_completion
+        }
+        
+        # 設定を保存
+        if save_app_settings_oichi(current_settings):
+            print(translate("✅ アプリケーション設定を保存しました"))
+        else:
+            print(translate("❌ アプリケーション設定の保存に失敗しました"))
     
     # バッチ処理ループ
     # バッチ処理のサマリーを出力
@@ -2517,8 +2566,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     user_abort = False
     user_abort_notified = False
     
-    # 処理完了時の効果音
-    if HAS_WINSOUND:
+    # 処理完了時の効果音（アラーム設定が有効な場合のみ）
+    if HAS_WINSOUND and alarm_on_completion:
         try:
             # Windows環境では完了音を鳴らす
             winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS)
@@ -2560,6 +2609,20 @@ def end_process():
     return gr.update(value=translate("停止処理中..."))
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
+
+# アプリケーション起動時に保存された設定を読み込む
+saved_app_settings = load_app_settings_oichi()
+
+# 読み込んだ設定をログに出力
+print(translate("=== アプリケーション設定を読み込みます ==="))
+if saved_app_settings:
+    print(translate("✅ 保存された設定を適用します"))
+    # デバッグ用に設定内容を表示
+    for key, value in saved_app_settings.items():
+        print(f"  {key}: {value}")
+else:
+    print(translate("ℹ️ 保存された設定が見つかりません。デフォルト値を使用します"))
+
 block = gr.Blocks(css=css).queue()
 with block:
     # eichiと同じ半透明度スタイルを使用
@@ -2587,8 +2650,9 @@ with block:
             resolution = gr.Dropdown(
                 label=translate("解像度"),
                 choices=[512, 640, 768, 960, 1080],
-                value=640,
-                info=translate("出力画像の基準解像度。640推奨。960/1080は高負荷・高メモリ消費")
+                value=saved_app_settings.get("resolution", 640) if saved_app_settings else 640,
+                info=translate("出力画像の基準解像度。640推奨。960/1080は高負荷・高メモリ消費"),
+                elem_classes="saveable-setting"
             )
             
             # バッチ処理設定 - endframe_ichiと同じUIにする
@@ -2846,8 +2910,9 @@ with block:
                             label=translate("ターゲットインデックス"),
                             minimum=0,
                             maximum=8,
-                            value=1,  # PR #284推奨値
-                            step=1
+                            value=saved_app_settings.get("target_index", 1) if saved_app_settings else 1,  # PR #284推奨値
+                            step=1,
+                            elem_classes="saveable-setting"
                         )
                         target_index_info = gr.Markdown(
                             translate("開始画像の潜在空間での位置（0-8、推奨値1）")
@@ -2858,8 +2923,9 @@ with block:
                             label=translate("履歴インデックス"),
                             minimum=0,
                             maximum=16,
-                            value=16,  # デフォルト値を16に設定
-                            step=1
+                            value=saved_app_settings.get("history_index", 16) if saved_app_settings else 16,  # デフォルト値を16に設定
+                            step=1,
+                            elem_classes="saveable-setting"  
                         )
                         history_index_info = gr.Markdown(
                             translate("参照画像の潜在空間での位置（0-16、デフォルト16、推奨値13）")
@@ -2929,10 +2995,11 @@ with block:
                             label=translate("RoPE値 (latent_window_size)"),
                             minimum=1,
                             maximum=64,
-                            value=9,  # デフォルト値
+                            value=saved_app_settings.get("latent_window_size", 9) if saved_app_settings else 9,  # デフォルト値
                             step=1,
                             interactive=True,  # 明示的に対話可能に設定
-                            info=translate("動きの変化量に影響します。大きい値ほど大きな変化が発生します。モデルの内部調整用パラメータです。")
+                            info=translate("動きの変化量に影響します。大きい値ほど大きな変化が発生します。モデルの内部調整用パラメータです。"),
+                            elem_classes="saveable-setting"
                         )
                     
                     with gr.Column(scale=1):
@@ -2941,10 +3008,11 @@ with block:
                             label=translate("レイテントインデックス"),
                             minimum=0,
                             maximum=64,
-                            value=0,  # デフォルト値
+                            value=saved_app_settings.get("latent_index", 0) if saved_app_settings else 0,  # デフォルト値
                             step=1,
                             interactive=True,  # 明示的に対話可能に設定
-                            info=translate("0は基本、大きい値で衣装変更などの効果が得られる場合があります。値が大きいとノイズが増えます。")
+                            info=translate("0は基本、大きい値で衣装変更などの効果が得られる場合があります。値が大きいとノイズが増えます。"),
+                            elem_classes="saveable-setting"
                         )
                 
                 with gr.Row():
@@ -2952,18 +3020,20 @@ with block:
                         # clean_latents_2xの有効/無効
                         use_clean_latents_2x = gr.Checkbox(
                             label=translate("clean_latents_2xを使用"),
-                            value=True,
+                            value=saved_app_settings.get("use_clean_latents_2x", True) if saved_app_settings else True,
                             interactive=True,  # 明示的に対話可能に設定
-                            info=translate("オフにすると変化が発生します。画質や速度に影響があります")
+                            info=translate("オフにすると変化が発生します。画質や速度に影響があります"),
+                            elem_classes="saveable-setting"
                         )
                     
                     with gr.Column(scale=1):
                         # clean_latents_4xの有効/無効
                         use_clean_latents_4x = gr.Checkbox(
                             label=translate("clean_latents_4xを使用"),
-                            value=True,
+                            value=saved_app_settings.get("use_clean_latents_4x", True) if saved_app_settings else True,
                             interactive=True,  # 明示的に対話可能に設定
-                            info=translate("オフにすると変化が発生します。画質や速度に影響があります")
+                            info=translate("オフにすると変化が発生します。画質や速度に影響があります"),
+                            elem_classes="saveable-setting"
                         )
                 
                 with gr.Row():
@@ -2971,9 +3041,10 @@ with block:
                         # clean_latents_postの有効/無効
                         use_clean_latents_post = gr.Checkbox(
                             label=translate("clean_latents_postを使用"),
-                            value=True,
+                            value=saved_app_settings.get("use_clean_latents_post", True) if saved_app_settings else True,
                             interactive=True,  # 明示的に対話可能に設定
-                            info=translate("オフにするとかなり速くなりますが、ノイズが増える可能性があります")
+                            info=translate("オフにするとかなり速くなりますが、ノイズが増える可能性があります"),
+                            elem_classes="saveable-setting"
                         )
             
             # 前回選択したLoRAモードを保存するためのグローバル変数
@@ -3440,25 +3511,26 @@ with block:
             
             # endframe_ichiと同じ順序で設定項目を配置
             # TeaCacheとランダムシード設定
-            use_teacache = gr.Checkbox(label=translate('Use TeaCache'), value=True, info=translate('Faster speed, but often makes hands and fingers slightly worse.'))
+            use_teacache = gr.Checkbox(label=translate('Use TeaCache'), value=saved_app_settings.get("use_teacache", True) if saved_app_settings else True, info=translate('Faster speed, but often makes hands and fingers slightly worse.'), elem_classes="saveable-setting")
             
             # Use Random Seedの初期値
             use_random_seed = gr.Checkbox(label=translate("Use Random Seed"), value=use_random_seed_default)
             seed = gr.Number(label=translate("Seed"), value=seed_default, precision=0)
             
             # ステップ数などの設定を右カラムに配置
-            steps = gr.Slider(label=translate("ステップ数"), minimum=1, maximum=100, value=25, step=1, info=translate('この値の変更は推奨されません'))
-            gs = gr.Slider(label=translate("蒸留CFGスケール"), minimum=1.0, maximum=32.0, value=10.0, step=0.01, info=translate('この値の変更は推奨されません'))
+            steps = gr.Slider(label=translate("ステップ数"), minimum=1, maximum=100, value=saved_app_settings.get("steps", 25) if saved_app_settings else 25, step=1, info=translate('この値の変更は推奨されません'), elem_classes="saveable-setting")
+            gs = gr.Slider(label=translate("蒸留CFGスケール"), minimum=1.0, maximum=32.0, value=saved_app_settings.get("gs", 10.0) if saved_app_settings else 10.0, step=0.01, info=translate('この値の変更は推奨されません'), elem_classes="saveable-setting")
             
             # 非表示設定
-            cfg = gr.Slider(label="CFG Scale", minimum=1.0, maximum=32.0, value=1.0, step=0.01, visible=False)
+            cfg = gr.Slider(label="CFG Scale", minimum=1.0, maximum=32.0, value=saved_app_settings.get("cfg", 2.5) if saved_app_settings else 2.5, step=0.01, visible=False, elem_classes="saveable-setting")
             rs = gr.Slider(label="CFG Re-Scale", minimum=0.0, maximum=1.0, value=0.0, step=0.01, visible=False)
             
             # GPU設定
             gpu_memory_preservation = gr.Slider(
                 label=translate("GPUメモリ保持 (GB)"), 
-                minimum=6, maximum=128, value=6, step=0.1, 
-                info=translate("OOMが発生する場合は値を大きくしてください。値が大きいほど速度が遅くなります。")
+                minimum=6, maximum=128, value=saved_app_settings.get("gpu_memory_preservation", 6) if saved_app_settings else 6, step=0.1, 
+                info=translate("OOMが発生する場合は値を大きくしてください。値が大きいほど速度が遅くなります。"),
+                elem_classes="saveable-setting"
             )
             
             # GPUメモリ保持部分のみ残し、詳細設定アコーディオンは削除（すでに移動済み）
@@ -3486,6 +3558,208 @@ with block:
                         value=os.path.join(base_path, output_folder_name),
                         interactive=False
                     )
+            
+            # 設定保存UI
+            with gr.Group():
+                gr.Markdown(f"### " + translate("アプリケーション設定"))
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        save_current_settings_btn = gr.Button(value=translate("💾 現在の設定を保存"), size="sm")
+                    with gr.Column(scale=1):
+                        reset_settings_btn = gr.Button(value=translate("🔄 設定をリセット"), size="sm")
+                
+                # 自動保存設定
+                save_settings_on_start = gr.Checkbox(
+                    label=translate("生成開始時に自動保存"),
+                    value=saved_app_settings.get("save_settings_on_start", False) if saved_app_settings else False,
+                    info=translate("チェックをオンにすると、生成開始時に現在の設定が自動的に保存されます。設定は再起動時に反映されます。"),
+                    elem_classes="saveable-setting",
+                    interactive=True
+                )
+                
+                # 完了時のアラーム設定
+                alarm_on_completion = gr.Checkbox(
+                    label=translate("完了時にアラームを鳴らす(Windows)"),
+                    value=saved_app_settings.get("alarm_on_completion", True) if saved_app_settings else True,
+                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします（Windows）"),
+                    elem_classes="saveable-setting",
+                    interactive=True
+                )
+                
+                # ログ設定
+                gr.Markdown("### " + translate("ログ設定"))
+                
+                # 設定からログ設定を読み込む
+                all_settings = load_settings()
+                log_settings = all_settings.get('log_settings', {'log_enabled': False, 'log_folder': 'logs'})
+                
+                # ログ有効/無効設定
+                log_enabled = gr.Checkbox(
+                    label=translate("コンソールログを出力する"),
+                    value=log_settings.get('log_enabled', False),
+                    info=translate("チェックをオンにすると、コンソール出力をログファイルにも保存します"),
+                    elem_classes="saveable-setting",
+                    interactive=True
+                )
+                
+                # ログ出力先設定
+                log_folder = gr.Textbox(
+                    label=translate("ログ出力先"),
+                    value=log_settings.get('log_folder', 'logs'),
+                    info=translate("ログファイルの保存先フォルダを指定します"),
+                    elem_classes="saveable-setting",
+                    interactive=True
+                )
+                
+                # ログフォルダを開くボタン
+                open_log_folder_btn = gr.Button(value=translate("📂 ログフォルダを開く"), size="sm")
+                
+                # ログフォルダを開くボタンのクリックイベント
+                open_log_folder_btn.click(fn=open_log_folder)
+                
+                # 設定状態の表示
+                settings_status = gr.Markdown("")
+            
+            # アプリケーション設定の保存機能
+            def save_app_settings_handler(
+                # 保存対象の設定項目
+                resolution_val,
+                steps_val,
+                cfg_val,
+                use_teacache_val,
+                gpu_memory_preservation_val,
+                gs_val,
+                latent_window_size_val,
+                latent_index_val,
+                use_clean_latents_2x_val,
+                use_clean_latents_4x_val,
+                use_clean_latents_post_val,
+                target_index_val,
+                history_index_val,
+                save_settings_on_start_val,
+                alarm_on_completion_val,
+                # ログ設定項目
+                log_enabled_val,
+                log_folder_val
+            ):
+                """現在の設定を保存"""
+                current_settings = {
+                    'resolution': resolution_val,
+                    'steps': steps_val,
+                    'cfg': cfg_val,
+                    'use_teacache': use_teacache_val,
+                    'gpu_memory_preservation': gpu_memory_preservation_val,
+                    'gs': gs_val,
+                    'latent_window_size': latent_window_size_val,
+                    'latent_index': latent_index_val,
+                    'use_clean_latents_2x': use_clean_latents_2x_val,
+                    'use_clean_latents_4x': use_clean_latents_4x_val,
+                    'use_clean_latents_post': use_clean_latents_post_val,
+                    'target_index': target_index_val,
+                    'history_index': history_index_val,
+                    'save_settings_on_start': save_settings_on_start_val,
+                    'alarm_on_completion': alarm_on_completion_val
+                }
+                
+                # アプリ設定を保存
+                try:
+                    app_success = save_app_settings_oichi(current_settings)
+                except Exception as e:
+                    return translate("設定の保存に失敗しました: {0}").format(str(e))
+                
+                # ログ設定も保存 - 値の型を確認
+                # log_enabledはbooleanに確実に変換
+                is_log_enabled = False
+                if isinstance(log_enabled_val, bool):
+                    is_log_enabled = log_enabled_val
+                elif hasattr(log_enabled_val, 'value'):
+                    is_log_enabled = bool(log_enabled_val.value)
+                
+                # log_folderは文字列に確実に変換
+                log_folder_path = "logs"
+                if log_folder_val and isinstance(log_folder_val, str):
+                    log_folder_path = log_folder_val
+                elif hasattr(log_folder_val, 'value') and log_folder_val.value:
+                    log_folder_path = str(log_folder_val.value)
+                
+                print(f"[DEBUG] 保存するログ設定: 有効={is_log_enabled}, フォルダ={log_folder_path}")
+                
+                log_settings = {
+                    "log_enabled": is_log_enabled,
+                    "log_folder": log_folder_path
+                }
+                
+                # 全体設定を取得し、ログ設定を更新
+                all_settings = load_settings()
+                all_settings['log_settings'] = log_settings
+                log_success = save_settings(all_settings)
+                
+                # ログ設定を適用（設定保存後、すぐに新しいログ設定を反映）
+                if log_success:
+                    # 一旦ログを無効化
+                    disable_logging()
+                    # 新しい設定でログを再開（有効な場合）
+                    apply_log_settings(log_settings, source_name="oneframe_ichi")
+                    print(translate("✅ ログ設定を更新しました: 有効={0}, フォルダ={1}").format(
+                        log_enabled_val, log_folder_val))
+                
+                if app_success and log_success:
+                    return translate("設定を保存しました")
+                else:
+                    return translate("設定の一部保存に失敗しました")
+
+            def reset_app_settings_handler():
+                """設定をデフォルトに戻す"""
+                from eichi_utils.settings_manager import get_default_app_settings_oichi
+                
+                # デバッグ出力
+                print("[DEBUG] リセット関数が呼ばれました")
+                
+                default_settings = get_default_app_settings_oichi()
+                updates = []
+                
+                # 各UIコンポーネントのデフォルト値を設定
+                updates.append(gr.update(value=default_settings.get("resolution", 640)))  # 1
+                updates.append(gr.update(value=default_settings.get("steps", 25)))  # 2
+                updates.append(gr.update(value=default_settings.get("cfg", 2.5)))  # 3
+                updates.append(gr.update(value=default_settings.get("use_teacache", True)))  # 4
+                updates.append(gr.update(value=default_settings.get("gpu_memory_preservation", 6)))  # 5
+                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 6
+                updates.append(gr.update(value=default_settings.get("latent_window_size", 9)))  # 7
+                updates.append(gr.update(value=default_settings.get("latent_index", 0)))  # 8
+                updates.append(gr.update(value=default_settings.get("use_clean_latents_2x", True)))  # 9
+                updates.append(gr.update(value=default_settings.get("use_clean_latents_4x", True)))  # 10
+                updates.append(gr.update(value=default_settings.get("use_clean_latents_post", True)))  # 11
+                updates.append(gr.update(value=default_settings.get("target_index", 1)))  # 12
+                updates.append(gr.update(value=default_settings.get("history_index", 16)))  # 13
+                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 14
+                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 15
+                
+                # ログ設定 (16番目め17番目の要素)
+                # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
+                updates.append(gr.update(value=False))  # log_enabled (16)
+                updates.append(gr.update(value="logs"))  # log_folder (17)
+                
+                # ログ設定をアプリケーションに適用
+                default_log_settings = {
+                    "log_enabled": False,
+                    "log_folder": "logs"
+                }
+                
+                print("[DEBUG] リセット時のログ設定: enabled=False, folder=logs")
+                
+                # 設定ファイルを更新
+                all_settings = load_settings()
+                all_settings['log_settings'] = default_log_settings
+                save_settings(all_settings)
+                
+                # ログ設定を適用 (既存のログファイルを閉じて、設定に従って再設定)
+                disable_logging()  # 既存のログを閉じる
+                
+                # 設定状態メッセージ (18番目の要素)
+                updates.append(translate("設定をデフォルトに戻しました"))
+                
+                return updates
     
     # シードのランダム化機能
     def set_random_seed(is_checked):
@@ -3637,7 +3911,61 @@ with block:
            use_queue, prompt_queue_file,  # キュー機能パラメータを追加
            # Kisekaeichi関連パラメータを追加
            use_reference_image, reference_image, 
-           target_index, history_index, input_mask, reference_mask]
+           target_index, history_index, input_mask, reference_mask,
+           save_settings_on_start, alarm_on_completion]  # 設定保存パラメータを追加
+    
+    # 設定保存ボタンのクリックイベント
+    save_current_settings_btn.click(
+        fn=save_app_settings_handler,
+        inputs=[
+            resolution,
+            steps,
+            cfg,
+            use_teacache,
+            gpu_memory_preservation,
+            gs,
+            latent_window_size,
+            latent_index,
+            use_clean_latents_2x,
+            use_clean_latents_4x,
+            use_clean_latents_post,
+            target_index,
+            history_index,
+            save_settings_on_start,
+            alarm_on_completion,
+            # ログ設定を追加
+            log_enabled,
+            log_folder
+        ],
+        outputs=[settings_status]
+    )
+    
+    # 設定リセットボタンのクリックイベント
+    reset_settings_btn.click(
+        fn=reset_app_settings_handler,
+        inputs=[],
+        outputs=[
+            resolution,            # 1
+            steps,                # 2
+            cfg,                  # 3
+            use_teacache,         # 4
+            gpu_memory_preservation, # 5
+            gs,                   # 6
+            latent_window_size,   # 7
+            latent_index,         # 8
+            use_clean_latents_2x, # 9
+            use_clean_latents_4x, # 10
+            use_clean_latents_post, # 11
+            target_index,         # 12
+            history_index,        # 13
+            save_settings_on_start, # 14
+            alarm_on_completion,  # 15
+            log_enabled,          # 16
+            log_folder,           # 17
+            settings_status       # 18
+        ]
+    )
+    
     start_button.click(fn=process, inputs=ips, outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button])
     end_button.click(fn=end_process, outputs=[end_button])
     
