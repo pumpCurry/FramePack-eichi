@@ -157,10 +157,10 @@ def get_app_css():
         border-radius: 8px;
     }
 
-    /* 保存対象の設定項目を青色でハイライト */
+    /* 保存対象の設定項目を薄い青色でハイライト */
     .saveable-setting {
-        background-color: #e3f2fd !important;
-        border-left: 3px solid #2196f3 !important;
+        background-color: #f0f8ff !important; /* より薄い背景色（AliceBlue） */
+        border-left: 3px solid #90caf9 !important; /* より薄いボーダー色 */
     }
     
     /* 保存対象項目のラベルにアイコンを追加 */
