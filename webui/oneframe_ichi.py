@@ -144,6 +144,7 @@ from eichi_utils.lora_preset_manager import (
     load_lora_preset,
     get_preset_names
 )
+from eichi_utils import prompt_cache
 
 import gradio as gr
 from eichi_utils.ui_styles import get_app_css
@@ -787,8 +788,38 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
         global cached_clip_l_pooler, cached_clip_l_pooler_n, cached_llama_attention_mask, cached_llama_attention_mask_n
         
         # プロンプトが変更されたかチェック
-        use_cache = (cached_prompt == prompt and cached_n_prompt == n_prompt and 
-                    cached_llama_vec is not None and cached_llama_vec_n is not None)
+        use_cache = (cached_prompt == prompt and cached_n_prompt == n_prompt and
+                     cached_llama_vec is not None and cached_llama_vec_n is not None)
+
+        if use_cache_files and not use_cache:
+            disk_cache = prompt_cache.load_from_cache(prompt, n_prompt)
+            if disk_cache:
+                print(translate("ファイルキャッシュからテキストエンコード結果を読み込みます"))
+                llama_vec = disk_cache['llama_vec']
+                llama_vec_n = disk_cache['llama_vec_n']
+                clip_l_pooler = disk_cache['clip_l_pooler']
+                clip_l_pooler_n = disk_cache['clip_l_pooler_n']
+                llama_attention_mask = disk_cache['llama_attention_mask']
+                llama_attention_mask_n = disk_cache['llama_attention_mask_n']
+                use_cache = True
+                cached_prompt = prompt
+                cached_n_prompt = n_prompt
+                cached_llama_vec = llama_vec
+                cached_llama_vec_n = llama_vec_n
+                cached_clip_l_pooler = clip_l_pooler
+                cached_clip_l_pooler_n = clip_l_pooler_n
+                cached_llama_attention_mask = llama_attention_mask
+                cached_llama_attention_mask_n = llama_attention_mask_n
+
+                if use_cache_files:
+                    prompt_cache.save_to_cache(prompt, n_prompt, {
+                        'llama_vec': llama_vec.cpu(),
+                        'llama_vec_n': llama_vec_n.cpu(),
+                        'clip_l_pooler': clip_l_pooler.cpu(),
+                        'clip_l_pooler_n': clip_l_pooler_n.cpu(),
+                        'llama_attention_mask': llama_attention_mask.cpu(),
+                        'llama_attention_mask_n': llama_attention_mask_n.cpu()
+                    })
         
         if use_cache:
             # キャッシュを使用
@@ -3533,7 +3564,12 @@ with block:
         # プリセット選択時に編集欄のみを更新
         for preset in load_presets()["presets"]:
             if preset["name"] == preset_name:
-                return gr.update(value=preset_name), gr.update(value=preset["prompt"])
+                prompt_text = preset["prompt"]
+                if use_cache_files:
+                    if prompt_cache.load_from_cache(prompt_text, ""):
+                        ph = preset.get("prompt_hash") or prompt_cache.prompt_hash(prompt_text, "")
+                        print(translate("キャッシュを使用できます: {0}").format(ph))
+                return gr.update(value=preset_name), gr.update(value=prompt_text)
         return gr.update(), gr.update()
 
     # プリセット選択時に編集欄に反映

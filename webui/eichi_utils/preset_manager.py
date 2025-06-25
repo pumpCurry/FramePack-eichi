@@ -7,6 +7,7 @@ import os
 import json
 import traceback
 from datetime import datetime
+from . import prompt_cache
 
 from locales.i18n_extended import translate
 
@@ -50,7 +51,8 @@ def initialize_presets():
                     "prompt": default_startup_prompt,
                     "timestamp": datetime.now().isoformat(),
                     "is_default": True,
-                    "is_startup_default": True
+                    "is_startup_default": True,
+                    "prompt_hash": prompt_cache.prompt_hash(default_startup_prompt, "")
                 })
                 presets_data["default_startup_prompt"] = default_startup_prompt
 
@@ -73,7 +75,8 @@ def initialize_presets():
             "name": translate("デフォルト {i}: {prompt_text}...").format(i=i+1, prompt_text=prompt_text[:20]),
             "prompt": prompt_text,
             "timestamp": datetime.now().isoformat(),
-            "is_default": True
+            "is_default": True,
+            "prompt_hash": prompt_cache.prompt_hash(prompt_text, "")
         })
 
     # 起動時デフォルトプリセットを追加
@@ -82,7 +85,8 @@ def initialize_presets():
         "prompt": default_startup_prompt,
         "timestamp": datetime.now().isoformat(),
         "is_default": True,
-        "is_startup_default": True
+        "is_startup_default": True,
+        "prompt_hash": prompt_cache.prompt_hash(default_startup_prompt, "")
     })
 
     # 保存
@@ -206,6 +210,7 @@ def save_preset(name, prompt_text):
                 # 既存の起動時デフォルトを更新
                 preset["prompt"] = prompt_text
                 preset["timestamp"] = datetime.now().isoformat()
+                preset["prompt_hash"] = prompt_cache.prompt_hash(prompt_text, "")
                 startup_default_exists = True
                 # 起動時デフォルトを更新
                 break
@@ -217,7 +222,8 @@ def save_preset(name, prompt_text):
                 "prompt": prompt_text,
                 "timestamp": datetime.now().isoformat(),
                 "is_default": True,
-                "is_startup_default": True
+                "is_startup_default": True,
+                "prompt_hash": prompt_cache.prompt_hash(prompt_text, "")
             })
             print(translate("起動時デフォルトを新規作成: {0}").format(prompt_text[:50]))
 
@@ -242,6 +248,7 @@ def save_preset(name, prompt_text):
         if preset["name"] == name:
             preset["prompt"] = prompt_text
             preset["timestamp"] = datetime.now().isoformat()
+            preset["prompt_hash"] = prompt_cache.prompt_hash(prompt_text, "")
             preset_exists = True
             # 既存のプリセットを更新
             break
@@ -251,7 +258,8 @@ def save_preset(name, prompt_text):
             "name": name,
             "prompt": prompt_text,
             "timestamp": datetime.now().isoformat(),
-            "is_default": False
+            "is_default": False,
+            "prompt_hash": prompt_cache.prompt_hash(prompt_text, "")
         })
         # 新規プリセットを作成
 
