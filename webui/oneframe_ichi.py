@@ -145,6 +145,7 @@ from eichi_utils.lora_preset_manager import (
     get_preset_names
 )
 from eichi_utils import prompt_cache
+from eichi_utils.favorite_settings_manager import load_favorites, save_favorite, delete_favorite
 
 import gradio as gr
 from eichi_utils.ui_styles import get_app_css
@@ -3378,6 +3379,17 @@ with block:
                 
                 # 設定状態の表示
                 settings_status = gr.Markdown("")
+
+                # よく使う設定管理
+                with gr.Group():
+                    gr.Markdown(f"### " + translate("よく使う設定管理"))
+                    fav_name = gr.Textbox(label=translate("設定名"), placeholder=translate("名前を入力..."))
+                    fav_dropdown = gr.Dropdown(label=translate("設定"), choices=[f["name"] for f in load_favorites().get("favorites", [])])
+                    with gr.Row():
+                        fav_save_btn = gr.Button(value=translate("保存"), variant="primary")
+                        fav_apply_btn = gr.Button(value=translate("反映"), variant="primary")
+                        fav_delete_btn = gr.Button(value=translate("削除"))
+                    fav_message = gr.Markdown("")
             
             # アプリケーション設定の保存機能
             def save_app_settings_handler(
@@ -3656,7 +3668,81 @@ with block:
     open_folder_btn.click(
         fn=handle_open_folder_btn,
         inputs=[output_dir],
-        outputs=[output_dir, path_display]
+        outputs=[output_dir, path_display])
+    # よく使う設定管理イベント
+    def save_favorite_handler(name, prompt_val, l1, l2, l3, scales, use_ref, ti, hi, lw, li, c2x, c4x, cpost, teacache_val, rand_seed, seed_val, steps_val, gs_val, gpu_mem, out_dir):
+        settings = {
+            "prompt": prompt_val,
+            "lora1": l1,
+            "lora2": l2,
+            "lora3": l3,
+            "lora_scales": scales,
+            "use_reference_image": use_ref,
+            "target_index": ti,
+            "history_index": hi,
+            "latent_window_size": lw,
+            "latent_index": li,
+            "use_clean_latents_2x": c2x,
+            "use_clean_latents_4x": c4x,
+            "use_clean_latents_post": cpost,
+            "use_teacache": teacache_val,
+            "use_random_seed": rand_seed,
+            "seed": seed_val,
+            "steps": steps_val,
+            "gs": gs_val,
+            "gpu_memory_preservation": gpu_mem,
+            "output_folder": out_dir
+        }
+        msg = save_favorite(name, settings)
+        choices = [f["name"] for f in load_favorites().get("favorites", [])]
+        return msg, gr.update(choices=choices)
+
+    def apply_favorite_handler(sel_name):
+        for fav in load_favorites().get("favorites", []):
+            if fav.get("name") == sel_name:
+                return (
+                    fav.get("prompt", ""),
+                    fav.get("lora1", translate("なし")),
+                    fav.get("lora2", translate("なし")),
+                    fav.get("lora3", translate("なし")),
+                    fav.get("lora_scales", "0.8,0.8,0.8"),
+                    fav.get("use_reference_image", False),
+                    fav.get("target_index", 1),
+                    fav.get("history_index", 16),
+                    fav.get("latent_window_size", 9),
+                    fav.get("latent_index", 0),
+                    fav.get("use_clean_latents_2x", True),
+                    fav.get("use_clean_latents_4x", True),
+                    fav.get("use_clean_latents_post", True),
+                    fav.get("use_teacache", True),
+                    fav.get("use_random_seed", True),
+                    fav.get("seed", 0),
+                    fav.get("steps", 25),
+                    fav.get("gs", 10.0),
+                    fav.get("gpu_memory_preservation", 6),
+                    fav.get("output_folder", "outputs")
+                )
+        return [gr.update()]*20
+
+    def delete_favorite_handler(sel_name):
+        result = delete_favorite(sel_name)
+        choices = [f["name"] for f in load_favorites().get("favorites", [])]
+        return result, gr.update(choices=choices)
+
+    fav_save_btn.click(
+        fn=save_favorite_handler,
+        inputs=[fav_name, prompt, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_scales_text, use_reference_image, target_index, history_index, latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post, use_teacache, use_random_seed, seed, steps, gs, gpu_memory_preservation, output_dir],
+        outputs=[fav_message, fav_dropdown]
+    )
+    fav_apply_btn.click(
+        fn=apply_favorite_handler,
+        inputs=[fav_dropdown],
+        outputs=[prompt, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_scales_text, use_reference_image, target_index, history_index, latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post, use_teacache, use_random_seed, seed, steps, gs, gpu_memory_preservation, output_dir]
+    )
+    fav_delete_btn.click(
+        fn=delete_favorite_handler,
+        inputs=[fav_dropdown],
+        outputs=[fav_message, fav_dropdown]
     )
     
     # 生成開始・中止のイベント
