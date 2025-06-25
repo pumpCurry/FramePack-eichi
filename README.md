@@ -156,6 +156,7 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 - **LoRA機能の強化**: 3つのLoRAの同時使用に対応、/webui/loraフォルダからの選択機能　※v1.9.2で追加
 - **セクション情報の一括管理**: ZIPファイルによるセクション情報のダウンロード/アップロードと内容変更後の再ダウンロードに対応　※v1.9.2で追加
 - **VAEキャッシュ機能**: フレーム単位のデコードによる処理速度向上（オプション）　※v1.9.2で追加、[furusu氏の検証](https://note.com/gcem156/n/nb93535d80c82)と[FramePack実装](https://github.com/laksjdjf/FramePack)に基づく
+- **プロンプトキャッシュ機能**: プロンプト解析結果をMD5ハッシュで保存し、同一プロンプトでは再解析を省略　※v1.9.5で追加
 - **FP8最適化**: LoRA適用時のVRAM使用量削減と処理速度の最適化　※v1.9.1で追加
 - **LoRAプリセットマネージャー**: 複数のLoRA設定の保存・読み込み機能　※v1.9.3で追加
 - **動画生成時間の拡張**: eichi(無印)に30秒、40秒を追加、F1に30秒、40秒、60秒、120秒を追加　※v1.9.3で追加
@@ -425,6 +426,7 @@ RTX 50シリーズ（RTX 5070Ti、RTX 5080、RTX 5090など）では特別なセ
      - `tensor_processing.py` - テンソル処理機能 ※v1.9.4で追加
      - `tensor_tool.py` - テンソルツール（eichi用） ※v1.9.4で追加
      - `tensor_tool_f1.py` - テンソルツール（F1用） ※v1.9.4で追加
+     - `prompt_cache.py` - プロンプトキャッシュモジュール ※v1.9.5で追加
    - `lora_utils` フォルダ - LoRA関連モジュール
      - `__init__.py`
      - `dynamic_swap_lora.py` - LoRA管理モジュール（後方互換性用に維持）
