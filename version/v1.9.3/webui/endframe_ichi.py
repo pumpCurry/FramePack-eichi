@@ -3444,9 +3444,9 @@ with block:
                     with gr.Column(scale=2):
                         resolution = gr.Dropdown(
                             label=translate("解像度"),
-                            choices=[512, 640, 768, 960, 1080],
+                            choices=[512, 640, 768, 960, 1080, 1280, 1536, 1920],
                             value=640,
-                            info=translate("出力動画の基準解像度。640推奨。960/1080は高負荷・高メモリ消費")
+                            info=translate("出力動画の基準解像度。640推奨。高解像度は高負荷・高メモリ消費")
                         )
                     with gr.Column(scale=1):
                         batch_count = gr.Slider(
