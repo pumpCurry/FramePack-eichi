@@ -496,6 +496,7 @@
   "反映": "Apply",
   "クリア": "Clear",
   "削除": "Delete",
+  "再読み込み": "Reload",
   "Quick List": "Quick List",
   "<strong>計算詳細</strong>: モード={0}, フレームサイズ={1}, 総フレーム数={2}, セクションあたり={3}フレーム, 必要セクション数={4}": "<strong>Calculation details</strong>: Mode={0}, Frame size={1}, Total frames={2}, Frames per section={3}, Required sections={4}",
   "動画モード {0} とフレームサイズ {1} で必要なセクション数: <strong>{2}</strong>": "Required sections for video mode {0} and frame size {1}: <strong>{2}</strong>",
