@@ -384,7 +384,7 @@ def get_image_queue_files():
 @torch.no_grad()
 def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
            gpu_memory_preservation, use_teacache, lora_files=None, lora_files2=None, lora_scales_text="0.8,0.8,0.8",
-           output_dir=None, use_lora=False, fp8_optimization=False, resolution=640,
+           output_dir=None, save_input_images=False, use_lora=False, fp8_optimization=False, resolution=640,
            latent_window_size=9, latent_index=0, use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
            lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
            batch_index=None, use_queue=False, prompt_queue_file=None,
@@ -593,7 +593,11 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             input_image_np = resize_and_center_crop(input_image, target_width=width, target_height=height)
         
         # 入力画像は必要な場合のみ保存
-        # Image.fromarray(input_image_np).save(os.path.join(outputs_folder, f'{job_id}_input.png'))
+        if save_input_images:
+            try:
+                Image.fromarray(input_image_np).save(os.path.join(outputs_folder, f'{job_id}_input.png'))
+            except Exception as e:
+                print(translate("入力画像の保存に失敗しました: {0}").format(e))
         
         input_image_pt = torch.from_numpy(input_image_np).float() / 127.5 - 1
         input_image_pt = input_image_pt.permute(2, 0, 1)[None, :, None]
@@ -682,6 +686,12 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 ref_image_np = resize_and_center_crop(ref_image_np, target_width=width, target_height=height)
                 ref_image_pt = torch.from_numpy(ref_image_np).float() / 127.5 - 1
                 ref_image_pt = ref_image_pt.permute(2, 0, 1)[None, :, None]
+
+                if save_input_images:
+                    try:
+                        Image.fromarray(ref_image_np).save(os.path.join(outputs_folder, f'{job_id}_input_reference.png'))
+                    except Exception as e:
+                        print(translate("参照画像の保存に失敗しました: {0}").format(e))
                 
                 # VAEエンコード（参照画像）
                 if vae is None or not high_vram:
@@ -1836,7 +1846,7 @@ def check_metadata_on_checkbox_change(should_copy, image_path):
 
 def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache,
             lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_directory=None,
-            batch_count=1, use_random_seed=False, latent_window_size=9, latent_index=0,
+            save_input_images=False, batch_count=1, use_random_seed=False, latent_window_size=9, latent_index=0,
             use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
             lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
             use_rope_batch=False, use_queue=False, prompt_queue_file=None,
@@ -2044,6 +2054,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             'use_clean_latents_post': use_clean_latents_post,
             'target_index': target_index,
             'history_index': history_index,
+            'save_input_images': save_input_images,
             'save_settings_on_start': save_settings_on_start,
             'alarm_on_completion': alarm_on_completion
         }
@@ -2203,7 +2214,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             # ワーカー実行 - 詳細設定パラメータを含む（キュー機能対応）
             async_run(worker, current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
                      gpu_memory_preservation, use_teacache, lora_files, lora_files2, lora_scales_text,
-                     output_dir, use_lora, fp8_optimization, resolution,
+                     output_dir, save_input_images, use_lora, fp8_optimization, resolution,
                      current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
                      lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
                      batch_index, use_queue, prompt_queue_file,
@@ -3318,6 +3329,13 @@ with block:
                         value=os.path.join(base_path, output_folder_name),
                         interactive=False
                     )
+
+                save_input_images = gr.Checkbox(
+                    label=translate("入力画像を保存"),
+                    value=saved_app_settings.get("save_input_images", False) if saved_app_settings else False,
+                    info=translate("チェックをオンにすると、入力画像と参照画像を出力フォルダに保存します。"),
+                    elem_classes="saveable-setting"
+                )
             
             # 設定保存UI
             with gr.Group():
@@ -3407,6 +3425,7 @@ with block:
                 use_clean_latents_post_val,
                 target_index_val,
                 history_index_val,
+                save_input_images_val,
                 save_settings_on_start_val,
                 alarm_on_completion_val,
                 # ログ設定項目
@@ -3428,6 +3447,7 @@ with block:
                     'use_clean_latents_post': use_clean_latents_post_val,
                     'target_index': target_index_val,
                     'history_index': history_index_val,
+                    'save_input_images': save_input_images_val,
                     'save_settings_on_start': save_settings_on_start_val,
                     'alarm_on_completion': alarm_on_completion_val
                 }
@@ -3498,13 +3518,14 @@ with block:
                 updates.append(gr.update(value=default_settings.get("use_clean_latents_post", True)))  # 11
                 updates.append(gr.update(value=default_settings.get("target_index", 1)))  # 12
                 updates.append(gr.update(value=default_settings.get("history_index", 16)))  # 13
-                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 14
-                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 15
-                
-                # ログ設定 (16番目め17番目の要素)
+                updates.append(gr.update(value=default_settings.get("save_input_images", False)))  # 14
+                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 15
+                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 16
+
+                # ログ設定 (17番目め18番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
-                updates.append(gr.update(value=False))  # log_enabled (16)
-                updates.append(gr.update(value="logs"))  # log_folder (17)
+                updates.append(gr.update(value=False))  # log_enabled (17)
+                updates.append(gr.update(value="logs"))  # log_folder (18)
                 
                 # ログ設定をアプリケーションに適用
                 default_log_settings = {
@@ -3747,7 +3768,7 @@ with block:
     
     # 生成開始・中止のイベント
     ips = [input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache,
-           lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_dir,
+           lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_dir, save_input_images,
            batch_count, use_random_seed, latent_window_size, latent_index,
            use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3, use_rope_batch,
@@ -3774,6 +3795,7 @@ with block:
             use_clean_latents_post,
             target_index,
             history_index,
+            save_input_images,
             save_settings_on_start,
             alarm_on_completion,
             log_enabled,
@@ -3800,11 +3822,12 @@ with block:
             use_clean_latents_post, # 11
             target_index,         # 12
             history_index,        # 13
-            save_settings_on_start, # 14
-            alarm_on_completion,  # 15
-            log_enabled,          # 16
-            log_folder,           # 17
-            settings_status       # 18
+            save_input_images,    # 14
+            save_settings_on_start, # 15
+            alarm_on_completion,  # 16
+            log_enabled,          # 17
+            log_folder,           # 18
+            settings_status       # 19
         ]
     )
     

@@ -257,8 +257,9 @@ def get_default_app_settings_oichi():
         
         # キュー設定
         "use_queue": False,
-        
+
         # 自動保存・アラーム設定
+        "save_input_images": False,
         "save_settings_on_start": False,
         "alarm_on_completion": True
     }
