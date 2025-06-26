@@ -3269,6 +3269,7 @@ with block:
                         apply_preset_btn = gr.Button(value=translate("反映"), variant="primary")
                         clear_btn = gr.Button(value=translate("クリア"))
                         delete_preset_btn = gr.Button(value=translate("削除"))
+                        reload_preset_btn = gr.Button(value=translate("再読み込み"))
                 
                 # メッセージ表示用
                 result_message = gr.Markdown("")
@@ -3407,6 +3408,7 @@ with block:
                         fav_save_btn = gr.Button(value=translate("保存"), variant="primary")
                         fav_apply_btn = gr.Button(value=translate("反映"), variant="primary")
                         fav_delete_btn = gr.Button(value=translate("削除"))
+                        fav_reload_btn = gr.Button(value=translate("再読み込み"))
                     fav_message = gr.Markdown("")
             
             # アプリケーション設定の保存機能
@@ -3635,6 +3637,23 @@ with block:
         updated_choices = [(name, name) for name in sorted_names]
 
         return result, gr.update(choices=updated_choices)
+
+    def reload_preset_handler():
+        presets_data = load_presets()
+        choices = [preset["name"] for preset in presets_data["presets"]]
+        default_presets = [name for name in choices if any(p["name"] == name and p.get("is_default", False) for p in presets_data["presets"])]
+        user_presets = [name for name in choices if name not in default_presets]
+        sorted_choices = [(name, name) for name in sorted(default_presets) + sorted(user_presets)]
+
+        default_prompt = ""
+        default_name = ""
+        for preset in presets_data["presets"]:
+            if preset.get("is_startup_default", False):
+                default_prompt = preset["prompt"]
+                default_name = preset["name"]
+                break
+
+        return gr.update(choices=sorted_choices), gr.update(value=default_name), gr.update(value=default_prompt)
     
     # 保存ボタンのクリックイベントを接続
     save_btn.click(
@@ -3669,6 +3688,12 @@ with block:
         fn=delete_preset_handler,
         inputs=[preset_dropdown],
         outputs=[result_message, preset_dropdown]
+    )
+
+    reload_preset_btn.click(
+        fn=reload_preset_handler,
+        inputs=[],
+        outputs=[preset_dropdown, edit_name, edit_prompt]
     )
     
     # 画像変更時にメタデータを抽出するイベント設定
@@ -3750,6 +3775,10 @@ with block:
         choices = [f["name"] for f in load_favorites().get("favorites", [])]
         return result, gr.update(choices=choices)
 
+    def reload_favorites_handler():
+        choices = [f["name"] for f in load_favorites().get("favorites", [])]
+        return gr.update(choices=choices)
+
     fav_save_btn.click(
         fn=save_favorite_handler,
         inputs=[fav_name, prompt, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_scales_text, use_reference_image, target_index, history_index, latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post, use_teacache, use_random_seed, seed, steps, gs, gpu_memory_preservation, output_dir],
@@ -3764,6 +3793,12 @@ with block:
         fn=delete_favorite_handler,
         inputs=[fav_dropdown],
         outputs=[fav_message, fav_dropdown]
+    )
+
+    fav_reload_btn.click(
+        fn=reload_favorites_handler,
+        inputs=[],
+        outputs=[fav_dropdown]
     )
     
     # 生成開始・中止のイベント
