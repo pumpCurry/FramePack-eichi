@@ -24,11 +24,17 @@ _webui_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def get_absolute_path(path):
     """
     相対パスを絶対パスに変換する
+
+    パスに真偽値やNoneが渡されると ``os.path`` 関数で例外が発生するため、
+    その場合は空文字列として扱う。
     """
+    if isinstance(path, bool) or path is None:
+        path = ""
+
     if os.path.isabs(path):
         return path
     else:
-        return os.path.normpath(os.path.join(_webui_path, path))
+        return os.path.normpath(os.path.join(_webui_path, str(path)))
 
 class LoggerWriter:
     """
@@ -224,6 +230,11 @@ def set_log_folder(folder_path):
     global _log_folder
     
     print(f"[DEBUG] set_log_folder呼び出し: 現在={_log_folder}, 新規={folder_path}")
+
+    if isinstance(folder_path, bool) or folder_path is None:
+        # 真偽値やNoneが渡された場合はデフォルトの"logs"を使用
+        print(f"[WARNING] 不正なフォルダパスを受け取ったため 'logs' を使用します: {folder_path}")
+        folder_path = "logs"
     
     # 現在ログが有効な場合は一度無効化する
     if _log_enabled:
