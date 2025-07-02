@@ -255,10 +255,9 @@ def set_log_folder(folder_path):
     return True
 
 def open_log_folder():
-    """
-    ログフォルダをOSに依存せず開く
-    """
-    folder_path = _log_folder
+    """ログフォルダをOSに依存せず開く"""
+    # ブール値が入り込むと os.path.exists で例外となるため正規化
+    folder_path = get_absolute_path(_log_folder)
     
     if not os.path.exists(folder_path):
         try:

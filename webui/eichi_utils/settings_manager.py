@@ -86,6 +86,11 @@ def save_settings(settings):
 
 def open_output_folder(folder_path):
     """指定されたフォルダをOSに依存せず開く"""
+    # ブール値やNoneが渡されてもエラーにならないよう文字列に変換
+    if isinstance(folder_path, bool) or folder_path is None:
+        folder_path = ""
+    folder_path = os.path.abspath(os.path.realpath(str(folder_path)))
+
     if not os.path.exists(folder_path):
         os.makedirs(folder_path, exist_ok=True)
 
