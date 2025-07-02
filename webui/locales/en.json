@@ -421,6 +421,8 @@
   "Start Generation": "Start Generation",
   "FP8 最適化": "FP8 Optimization",
   "メモリ使用量を削減し速度を改善（PyTorch 2.1以上が必要）": "Reduce memory usage and improve speed (requires PyTorch 2.1 or higher)",
+  "LoRAの設定を再起動時再利用する": "Reuse LoRA settings after restart",
+  "チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します": "When enabled, caches FP8-optimized LoRA weights for reuse",
   "### セクション設定（逆順表示）\\nセクションは逆時系列で表示されています。Image(始点)は必須でFinal(終点)から遡って画像を設定してください。**最終キーフレームの画像は、Image(始点)より優先されます。総数{0}**": "### Section Settings (Reverse Order Display)\\nSections are displayed in reverse chronological order. Image (starting point) is required; please set images working backwards from Final (endpoint). **The final keyframe image takes priority over the Image (starting point). Total: {0}**",
   "埋め込みプロンプトおよびシードを複写する": "Copy the embedded prompt and seed",
   "チェックをオンにすると、画像のメタデータからプロンプトとシードを自動的に取得します": "When this checkbox is turned on, prompts and seed values will be automatically retrieved from the image metadata",

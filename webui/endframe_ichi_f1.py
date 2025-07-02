@@ -259,6 +259,7 @@ initialize_settings()
 # LoRAプリセットの初期化
 from eichi_utils.lora_preset_manager import initialize_lora_presets
 initialize_lora_presets()
+from eichi_utils import lora_state_cache
 
 # ベースパスを定義
 base_path = os.path.dirname(os.path.abspath(__file__))
@@ -4745,6 +4746,22 @@ with block:
                     value=True,
                     info=translate("メモリ使用量を削減し速度を改善（PyTorch 2.1以上が必要）")
                 )
+
+            # LoRA設定キャッシュ
+            with gr.Row():
+                lora_cache_checkbox = gr.Checkbox(
+                    label=translate("LoRAの設定を再起動時再利用する"),
+                    value=False,
+                    info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
+                )
+
+            def update_lora_cache(value):
+                lora_state_cache.set_cache_enabled(value)
+                return None
+
+            lora_cache_checkbox.change(
+                fn=update_lora_cache, inputs=[lora_cache_checkbox], outputs=[]
+            )
 
             # セクション入力用のリストを初期化
             section_number_inputs = []
