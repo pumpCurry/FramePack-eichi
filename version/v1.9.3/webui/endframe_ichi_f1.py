@@ -2788,19 +2788,19 @@ with block:
                         label=translate("LoRAモデル選択 1"),
                         choices=[],
                         value=None,
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     lora_dropdown2 = gr.Dropdown(
                         label=translate("LoRAモデル選択 2"),
                         choices=[],
                         value=None,
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     lora_dropdown3 = gr.Dropdown(
                         label=translate("LoRAモデル選択 3"),
                         choices=[],
                         value=None,
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     # スキャンボタン
                     lora_scan_button = gr.Button(translate("LoRAディレクトリを再スキャン"), variant="secondary")
