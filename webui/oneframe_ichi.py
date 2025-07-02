@@ -2431,7 +2431,7 @@ with block:
             # 解像度設定（画像の直下に）
             resolution = gr.Dropdown(
                 label=translate("解像度"),
-                choices=[512, 640, 768, 960, 1080, 1280, 1536, 1920],
+                choices=list(range(384, 3841, 64)),
                 value=saved_app_settings.get("resolution", 640) if saved_app_settings else 640,
                 info=translate("出力画像の基準解像度。640推奨。高解像度は高負荷・高メモリ消費"),
                 elem_classes="saveable-setting"
