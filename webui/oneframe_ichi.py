@@ -2882,9 +2882,9 @@ with block:
                     with gr.Group(visible=False) as lora_dropdown_group:
                         # LoRAドロップダウン
                         none_choice = translate("なし")
-                        lora_dropdown1 = gr.Dropdown(label=translate("LoRA1"), choices=[none_choice], value=none_choice)
-                        lora_dropdown2 = gr.Dropdown(label=translate("LoRA2"), choices=[none_choice], value=none_choice)
-                        lora_dropdown3 = gr.Dropdown(label=translate("LoRA3"), choices=[none_choice], value=none_choice)
+                        lora_dropdown1 = gr.Dropdown(label=translate("LoRA1"), choices=[none_choice], value=none_choice, allow_custom_value=True)
+                        lora_dropdown2 = gr.Dropdown(label=translate("LoRA2"), choices=[none_choice], value=none_choice, allow_custom_value=True)
+                        lora_dropdown3 = gr.Dropdown(label=translate("LoRA3"), choices=[none_choice], value=none_choice, allow_custom_value=True)
                         
                         # ドロップダウン更新ボタン（下に配置）
                         lora_scan_button = gr.Button(value=translate("LoRAフォルダを再スキャン"), variant="secondary")

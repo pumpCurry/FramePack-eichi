@@ -1085,7 +1085,7 @@ def create_enhanced_config_queue_ui():
                     label=translate("Select Config"),
                     choices=available_configs,
                     value=None,
-                    allow_custom_value=False,
+                    allow_custom_value=True,
                     info=translate("Select a config file to load, queue, or delete")
                 )
             with gr.Column(scale=1):
@@ -4927,19 +4927,19 @@ with block:
                         label=translate("LoRAモデル選択 1"),
                         choices=[],
                         value=None,
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     lora_dropdown2 = gr.Dropdown(
                         label=translate("LoRAモデル選択 2"),
                         choices=[],
                         value=None,
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     lora_dropdown3 = gr.Dropdown(
                         label=translate("LoRAモデル選択 3"),
                         choices=[],
                         value=None,
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     # スキャンボタン
                     lora_scan_button = gr.Button(translate("LoRAディレクトリを再スキャン"), variant="secondary")
