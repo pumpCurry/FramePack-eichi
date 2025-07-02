@@ -428,7 +428,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
                 try:
                     # ファイルが存在し、読み込める場合
-                    if queue_file_path and os.path.exists(queue_file_path):
+                    if queue_file_path and isinstance(queue_file_path, (str, bytes, os.PathLike)) and os.path.exists(queue_file_path):
                         print(translate("プロンプトキューファイルを読み込みます: {0}").format(queue_file_path))
 
                         with open(queue_file_path, 'r', encoding='utf-8') as f:
@@ -2555,7 +2555,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         print(translate("バッチ処理回数が無効です。デフォルト値の1を使用します: {0}").format(batch_count))
         batch_count = 1  # デフォルト値
     # プロンプトキューが有効な場合は行数も表示
-    if bool(use_queue) and queue_type == "prompt" and prompt_queue_file_path is not None and os.path.exists(prompt_queue_file_path):
+    if bool(use_queue) and queue_type == "prompt" \
+        and isinstance(prompt_queue_file_path, (str, bytes, os.PathLike)) \
+        and os.path.exists(prompt_queue_file_path):
         try:
             with open(prompt_queue_file_path, 'r', encoding='utf-8') as f:
                 prompt_lines = [line.strip() for line in f.readlines() if line.strip()]
@@ -2822,7 +2824,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             # キューが有効な場合はその情報も表示
             if bool(use_queue):
                 # プロンプトキューの場合
-                if queue_type == "prompt" and prompt_queue_file_path is not None and os.path.exists(prompt_queue_file_path):
+                if queue_type == "prompt" \
+                        and isinstance(prompt_queue_file_path, (str, bytes, os.PathLike)) \
+                        and os.path.exists(prompt_queue_file_path):
                     try:
                         with open(prompt_queue_file_path, 'r', encoding='utf-8') as f:
                             prompt_lines = [line.strip() for line in f.readlines() if line.strip()]
@@ -3086,7 +3090,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 batch_info = ""
                 if batch_count > 1:
                     # プロンプトキューが有効な場合はその情報も表示
-                    if bool(use_queue) and queue_type == "prompt" and prompt_queue_file_path is not None and os.path.exists(prompt_queue_file_path):
+                    if bool(use_queue) and queue_type == "prompt" \
+                            and isinstance(prompt_queue_file_path, (str, bytes, os.PathLike)) \
+                            and os.path.exists(prompt_queue_file_path):
                         try:
                             with open(prompt_queue_file_path, 'r', encoding='utf-8') as f:
                                 prompt_lines = [line.strip() for line in f.readlines() if line.strip()]
@@ -3475,20 +3481,26 @@ with block:
 
                 # ファイルアップロード時のイベントハンドラ
                 def handle_file_upload(file_obj):
+                    """アップロードされたファイル情報を処理する"""
                     global prompt_queue_file_path
 
                     if file_obj is not None:
                         print(translate("ファイルアップロード検出: 型={0}").format(type(file_obj).__name__))
 
+                        # 正規のファイルオブジェクトか、パスとして扱える型かを確認
                         if hasattr(file_obj, 'name'):
                             prompt_queue_file_path = file_obj.name
                             print(translate("アップロードファイルパス保存: {0}").format(prompt_queue_file_path))
-                        else:
+                        elif isinstance(file_obj, (str, bytes, os.PathLike)):
                             prompt_queue_file_path = file_obj
                             print(translate("アップロードファイルデータ保存: {0}").format(file_obj))
+                        else:
+                            # bool などの予期しない型の場合は無効として扱う
+                            prompt_queue_file_path = None
+                            print(translate("無効なアップロードオブジェクトを受信: 型={0}").format(type(file_obj).__name__))
                     else:
                         prompt_queue_file_path = None
-                        print("ファイルアップロード解除")
+                        print(translate("ファイルアップロード解除"))
 
                     return file_obj
 
@@ -6291,7 +6303,7 @@ with block:
             print(translate("プロンプトキューファイル: {0}").format(queue_file_path))
 
             # ファイルパスが有効かチェック
-            if queue_file_path and os.path.exists(queue_file_path):
+            if queue_file_path and isinstance(queue_file_path, (str, bytes, os.PathLike)) and os.path.exists(queue_file_path):
                 print(translate("プロンプトキューファイルの内容を読み込みます: {0}").format(queue_file_path))
                 try:
                     with open(queue_file_path, 'r', encoding='utf-8') as f:
