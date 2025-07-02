@@ -3741,7 +3741,14 @@ with block:
         inputs=[output_dir],
         outputs=[output_dir, path_display])
     # よく使う設定管理イベント
-    def save_favorite_handler(name, prompt_val, l1, l2, l3, scales, use_lora_val, lora_mode_val, use_ref, ti, hi, lw, li, c2x, c4x, cpost, teacache_val, rand_seed, seed_val, steps_val, gs_val, gpu_mem, out_dir):
+    def save_favorite_handler(name, prompt_val, l1, l2, l3, scales, use_lora_val,
+                              lora_mode_val, use_ref, ti, hi, lw, li, c2x, c4x,
+                              cpost, teacache_val, rand_seed, seed_val,
+                              steps_val, gs_val, gpu_mem, out_dir,
+                              res_val, cfg_val, use_prompt_cache_val,
+                              save_input_images_val, save_settings_on_start_val,
+                              alarm_on_completion_val, log_enabled_val,
+                              log_folder_val):
         settings = {
             "prompt": prompt_val,
             "lora1": l1,
@@ -3764,7 +3771,15 @@ with block:
             "steps": steps_val,
             "gs": gs_val,
             "gpu_memory_preservation": gpu_mem,
-            "output_folder": out_dir
+            "output_folder": out_dir,
+            "resolution": res_val,
+            "cfg": cfg_val,
+            "use_prompt_cache": use_prompt_cache_val,
+            "save_input_images": save_input_images_val,
+            "save_settings_on_start": save_settings_on_start_val,
+            "alarm_on_completion": alarm_on_completion_val,
+            "log_enabled": log_enabled_val,
+            "log_folder": log_folder_val
         }
         msg = save_favorite(name, settings)
         choices = [f["name"] for f in load_favorites().get("favorites", [])]
@@ -3820,6 +3835,14 @@ with block:
                     fav.get("gs", 10.0),
                     fav.get("gpu_memory_preservation", 6),
                     fav.get("output_folder", "outputs"),
+                    fav.get("resolution", 640),
+                    fav.get("cfg", 1),
+                    fav.get("use_prompt_cache", True),
+                    fav.get("save_input_images", False),
+                    fav.get("save_settings_on_start", False),
+                    fav.get("alarm_on_completion", True),
+                    fav.get("log_enabled", False),
+                    fav.get("log_folder", "logs"),
                     adv_group_upd,
                     ref_img_upd,
                     ref_info_upd,
@@ -3827,7 +3850,7 @@ with block:
                     lora_dropdown_upd,
                     lora_preset_upd
                 )
-        return [gr.update()]*27
+        return [gr.update()]*36
 
     def delete_favorite_handler(sel_name):
         result = delete_favorite(sel_name)
@@ -3845,7 +3868,10 @@ with block:
                target_index, history_index, latent_window_size, latent_index,
                use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
                use_teacache, use_random_seed, seed, steps, gs,
-               gpu_memory_preservation, output_dir],
+               gpu_memory_preservation, output_dir,
+               resolution, cfg, use_prompt_cache, save_input_images,
+               save_settings_on_start, alarm_on_completion,
+               log_enabled, log_folder],
         outputs=[fav_message, fav_dropdown]
     )
     fav_apply_btn.click(
@@ -3856,7 +3882,11 @@ with block:
                  target_index, history_index, latent_window_size, latent_index,
                  use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
                  use_teacache, use_random_seed, seed, steps, gs,
-                 gpu_memory_preservation, output_dir, advanced_kisekae_group,
+                 gpu_memory_preservation, output_dir,
+                 resolution, cfg, use_prompt_cache, save_input_images,
+                 save_settings_on_start, alarm_on_completion,
+                 log_enabled, log_folder,
+                 advanced_kisekae_group,
                  reference_image, reference_image_info, lora_upload_group,
                  lora_dropdown_group, lora_preset_group]
     )
