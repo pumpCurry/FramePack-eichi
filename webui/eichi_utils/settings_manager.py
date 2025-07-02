@@ -150,6 +150,7 @@ def get_default_app_settings(current_lang="ja"):
         
         # パフォーマンス設定
         "use_teacache": True,
+        "use_prompt_cache": True,
         "gpu_memory_preservation": 6,
         "use_vae_cache": False,
         
