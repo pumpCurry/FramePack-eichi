@@ -4547,13 +4547,17 @@ with block:
 
                     if file_obj is not None:
                         print(translate("ファイルアップロード検出: 型={0}").format(type(file_obj).__name__))
-
+                        # 正規のファイルオブジェクトか文字列パスかを確認
                         if hasattr(file_obj, 'name'):
                             prompt_queue_file_path = file_obj.name
                             print(translate("アップロードファイルパス保存: {0}").format(prompt_queue_file_path))
-                        else:
+                        elif isinstance(file_obj, (str, bytes, os.PathLike)):
                             prompt_queue_file_path = file_obj
                             print(translate("アップロードファイルデータ保存: {0}").format(file_obj))
+                        else:
+                            # bool など予期せぬ型は無効として扱う
+                            prompt_queue_file_path = None
+                            print(translate("無効なアップロードオブジェクトを受信: 型={0}").format(type(file_obj).__name__))
                     else:
                         prompt_queue_file_path = None
                         print(translate("ファイルアップロード解除"))
