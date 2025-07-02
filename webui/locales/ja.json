@@ -527,6 +527,8 @@
   "Next Latents": "Next Latents",
   "Use TeaCache": "TeaCacheを使用",
   "Faster speed, but often makes hands and fingers slightly worse.": "速度は速くなりますが、手や指の表現が若干劣化する可能性があります。",
+  "Use Prompt Cache": "プロンプトキャッシュを使用",
+  "Cache encoded prompts to disk for reuse after restart.": "エンコード済みプロンプトをディスクに保存し、再起動後も再利用します。",
   "VAEキャッシュを使用": "VAEキャッシュを使用",
   "デコードを1フレームずつ処理し、速度向上（メモリ使用量増加。VRAM24GB以上推奨。それ以下の場合、メモリスワップで逆に遅くなります）": "デコードを1フレームずつ処理し、速度向上（メモリ使用量増加。VRAM24GB以上推奨。それ以下の場合、メモリスワップで逆に遅くなります）",
   "Use Random Seed": "ランダムシードを使用",

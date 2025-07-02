@@ -383,7 +383,7 @@ def get_image_queue_files():
 # ワーカー関数
 @torch.no_grad()
 def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
-           gpu_memory_preservation, use_teacache, lora_files=None, lora_files2=None, lora_scales_text="0.8,0.8,0.8",
+           gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files=None, lora_files2=None, lora_scales_text="0.8,0.8,0.8",
            output_dir=None, save_input_images=False, use_lora=False, fp8_optimization=False, resolution=640,
            latent_window_size=9, latent_index=0, use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
            lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
@@ -430,7 +430,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...'))))
     
     # モデルや中間ファイルなどのキャッシュ利用フラグ
-    use_cached_files = use_cache_files
+    use_cached_files = use_prompt_cache
     
     try:
         # LoRA 設定 - ディレクトリ選択モードをサポート
@@ -802,7 +802,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
         use_cache = (cached_prompt == prompt and cached_n_prompt == n_prompt and
                      cached_llama_vec is not None and cached_llama_vec_n is not None)
 
-        if use_cache_files and not use_cache:
+        if use_prompt_cache and not use_cache:
             disk_cache = prompt_cache.load_from_cache(prompt, n_prompt)
             if disk_cache:
                 print(translate("ファイルキャッシュからテキストエンコード結果を読み込みます"))
@@ -822,7 +822,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 cached_llama_attention_mask = llama_attention_mask
                 cached_llama_attention_mask_n = llama_attention_mask_n
 
-                if use_cache_files:
+                if use_prompt_cache:
                     prompt_cache.save_to_cache(prompt, n_prompt, {
                         'llama_vec': llama_vec.cpu(),
                         'llama_vec_n': llama_vec_n.cpu(),
@@ -831,6 +831,8 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                         'llama_attention_mask': llama_attention_mask.cpu(),
                         'llama_attention_mask_n': llama_attention_mask_n.cpu()
                     })
+
+
         
         if use_cache:
             # キャッシュを使用
@@ -1844,7 +1846,7 @@ def check_metadata_on_checkbox_change(should_copy, image_path):
     """チェックボックスの状態が変更された時に画像からメタデータを抽出する関数"""
     return update_from_image_metadata(image_path, should_copy)
 
-def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache,
+def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_prompt_cache,
             lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_directory=None,
             save_input_images=False, batch_count=1, use_random_seed=False, latent_window_size=9, latent_index=0,
             use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
@@ -2045,6 +2047,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             'steps': steps,
             'cfg': cfg,
             'use_teacache': use_teacache,
+            'use_prompt_cache': use_prompt_cache,
             'gpu_memory_preservation': gpu_memory_preservation,
             'gs': gs,
             'latent_window_size': latent_window_size,
@@ -3299,7 +3302,10 @@ with block:
             
             # endframe_ichiと同じ順序で設定項目を配置
             # TeaCacheとランダムシード設定
+
             use_teacache = gr.Checkbox(label=translate('Use TeaCache'), value=saved_app_settings.get("use_teacache", True) if saved_app_settings else True, info=translate('Faster speed, but often makes hands and fingers slightly worse.'), elem_classes="saveable-setting")
+
+            use_prompt_cache = gr.Checkbox(label=translate('Use Prompt Cache'), value=saved_app_settings.get("use_prompt_cache", True) if saved_app_settings else True, info=translate('Cache encoded prompts to disk for reuse after restart.'), elem_classes="saveable-setting")
             
             # Use Random Seedの初期値
             use_random_seed = gr.Checkbox(label=translate("Use Random Seed"), value=use_random_seed_default)
@@ -3434,6 +3440,7 @@ with block:
                 steps_val,
                 cfg_val,
                 use_teacache_val,
+                use_prompt_cache_val,
                 gpu_memory_preservation_val,
                 gs_val,
                 latent_window_size_val,
@@ -3456,6 +3463,7 @@ with block:
                     'steps': steps_val,
                     'cfg': cfg_val,
                     'use_teacache': use_teacache_val,
+                    'use_prompt_cache': use_prompt_cache_val,
                     'gpu_memory_preservation': gpu_memory_preservation_val,
                     'gs': gs_val,
                     'latent_window_size': latent_window_size_val,
@@ -3527,18 +3535,19 @@ with block:
                 updates.append(gr.update(value=default_settings.get("steps", 25)))  # 2
                 updates.append(gr.update(value=default_settings.get("cfg", 1)))  # 3
                 updates.append(gr.update(value=default_settings.get("use_teacache", True)))  # 4
-                updates.append(gr.update(value=default_settings.get("gpu_memory_preservation", 6)))  # 5
-                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 6
-                updates.append(gr.update(value=default_settings.get("latent_window_size", 9)))  # 7
-                updates.append(gr.update(value=default_settings.get("latent_index", 0)))  # 8
-                updates.append(gr.update(value=default_settings.get("use_clean_latents_2x", True)))  # 9
-                updates.append(gr.update(value=default_settings.get("use_clean_latents_4x", True)))  # 10
-                updates.append(gr.update(value=default_settings.get("use_clean_latents_post", True)))  # 11
-                updates.append(gr.update(value=default_settings.get("target_index", 1)))  # 12
-                updates.append(gr.update(value=default_settings.get("history_index", 16)))  # 13
-                updates.append(gr.update(value=default_settings.get("save_input_images", False)))  # 14
-                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 15
-                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 16
+                updates.append(gr.update(value=default_settings.get("use_prompt_cache", True)))  # 5
+                updates.append(gr.update(value=default_settings.get("gpu_memory_preservation", 6)))  # 6
+                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 7
+                updates.append(gr.update(value=default_settings.get("latent_window_size", 9)))  # 8
+                updates.append(gr.update(value=default_settings.get("latent_index", 0)))  # 9
+                updates.append(gr.update(value=default_settings.get("use_clean_latents_2x", True)))  # 10
+                updates.append(gr.update(value=default_settings.get("use_clean_latents_4x", True)))  # 11
+                updates.append(gr.update(value=default_settings.get("use_clean_latents_post", True)))  # 12
+                updates.append(gr.update(value=default_settings.get("target_index", 1)))  # 13
+                updates.append(gr.update(value=default_settings.get("history_index", 16)))  # 14
+                updates.append(gr.update(value=default_settings.get("save_input_images", False)))  # 15
+                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 16
+                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 17
 
                 # ログ設定 (17番目め18番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
@@ -3559,7 +3568,7 @@ with block:
                 # ログ設定を適用 (既存のログファイルを閉じて、設定に従って再設定)
                 disable_logging()  # 既存のログを閉じる
                 
-                # 設定状態メッセージ (18番目の要素)
+                # 設定状態メッセージ (20番目の要素)
                 updates.append(translate("設定をデフォルトに戻しました"))
                 
                 return updates
@@ -3616,7 +3625,7 @@ with block:
         for preset in load_presets()["presets"]:
             if preset["name"] == preset_name:
                 prompt_text = preset["prompt"]
-                if use_cache_files:
+                if use_prompt_cache:
                     if prompt_cache.load_from_cache(prompt_text, ""):
                         ph = preset.get("prompt_hash") or prompt_cache.prompt_hash(prompt_text, "")
                         print(translate("キャッシュを使用できます: {0}").format(ph))
@@ -3864,7 +3873,7 @@ with block:
     )
     
     # 生成開始・中止のイベント
-    ips = [input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache,
+    ips = [input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_prompt_cache,
            lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_dir, save_input_images,
            batch_count, use_random_seed, latent_window_size, latent_index,
            use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
@@ -3883,6 +3892,7 @@ with block:
             steps,
             cfg,
             use_teacache,
+            use_prompt_cache,
             gpu_memory_preservation,
             gs,
             latent_window_size,
@@ -3910,21 +3920,22 @@ with block:
             steps,                # 2
             cfg,                  # 3
             use_teacache,         # 4
-            gpu_memory_preservation, # 5
-            gs,                   # 6
-            latent_window_size,   # 7
-            latent_index,         # 8
-            use_clean_latents_2x, # 9
-            use_clean_latents_4x, # 10
-            use_clean_latents_post, # 11
-            target_index,         # 12
-            history_index,        # 13
-            save_input_images,    # 14
-            save_settings_on_start, # 15
-            alarm_on_completion,  # 16
-            log_enabled,          # 17
-            log_folder,           # 18
-            settings_status       # 19
+            use_prompt_cache,     # 5
+            gpu_memory_preservation, # 6
+            gs,                   # 7
+            latent_window_size,   # 8
+            latent_index,         # 9
+            use_clean_latents_2x, # 10
+            use_clean_latents_4x, # 11
+            use_clean_latents_post, # 12
+            target_index,         # 13
+            history_index,        # 14
+            save_input_images,    # 15
+            save_settings_on_start, # 16
+            alarm_on_completion,  # 17
+            log_enabled,          # 18
+            log_folder,           # 19
+            settings_status       # 20
         ]
     )
     
