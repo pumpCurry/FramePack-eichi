@@ -144,7 +144,7 @@ from eichi_utils.lora_preset_manager import (
     load_lora_preset,
     get_preset_names
 )
-from eichi_utils import prompt_cache
+from eichi_utils import prompt_cache, lora_state_cache
 from eichi_utils.favorite_settings_manager import load_favorites, save_favorite, delete_favorite
 
 import gradio as gr
@@ -2631,6 +2631,22 @@ with block:
                     value=True,
                     info=translate("メモリ使用量を削減し速度を改善（PyTorch 2.1以上が必要）")
                 )
+
+            # LoRA設定キャッシュ
+            with gr.Row():
+                lora_cache_checkbox = gr.Checkbox(
+                    label=translate("LoRAの設定を再起動時再利用する"),
+                    value=False,
+                    info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
+                )
+
+            def update_lora_cache(value):
+                lora_state_cache.set_cache_enabled(value)
+                return None
+
+            lora_cache_checkbox.change(
+                fn=update_lora_cache, inputs=[lora_cache_checkbox], outputs=[]
+            )
 
             # 埋め込みプロンプト機能 - 参照用に定義（表示はLoRA設定の下で行う）
             # グローバル変数として定義し、後で他の場所から参照できるようにする

@@ -6,6 +6,7 @@ import os
 import torch
 from tqdm import tqdm
 from .lora_utils import merge_lora_to_state_dict
+from eichi_utils import lora_state_cache
 
 # 国際化対応
 from locales.i18n_extended import translate as _
@@ -15,7 +16,8 @@ def load_and_apply_lora(
     lora_paths,
     lora_scales=None,
     fp8_enabled=False,
-    device=None
+    device=None,
+    cache_enabled=False
 ):
     """
     LoRA重みをロードして重みに適用する
@@ -26,6 +28,7 @@ def load_and_apply_lora(
         lora_scales: LoRAの適用強度のリスト
         fp8_enabled: FP8最適化の有効/無効
         device: 計算に使用するデバイス
+        cache_enabled: キャッシュが有効な場合、マージ済み状態辞書を保存/再利用
 
     Returns:
         LoRAが適用されたモデルの状態辞書
@@ -46,6 +49,16 @@ def load_and_apply_lora(
     if device is None:
         device = torch.device("cpu") # CPUに fall back
 
+    cache_key = None
+    if cache_enabled:
+        cache_key = lora_state_cache.generate_cache_key(
+            model_files, lora_paths, lora_scales, fp8_enabled
+        )
+        cached = lora_state_cache.load_from_cache(cache_key)
+        if cached is not None:
+            print(_("LoRAのFP8状態をキャッシュから読み込みました"))
+            return cached
+
     for lora_path, lora_scale in zip(lora_paths, lora_scales):
         print(_("LoRAを読み込み中: {0} (スケール: {1})").format(os.path.basename(lora_path), lora_scale))
 
@@ -54,6 +67,10 @@ def load_and_apply_lora(
 
     # LoRAをマージ
     merged_state_dict = merge_lora_to_state_dict(model_files, lora_paths, lora_scales, fp8_enabled, device)
+
+    if cache_enabled and cache_key is not None:
+        lora_state_cache.save_to_cache(cache_key, merged_state_dict)
+        print(_("LoRAのFP8状態をキャッシュに保存しました"))
 
     # # LoRAが適用されたことを示すフラグを設定
     # model._lora_applied = True
