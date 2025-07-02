@@ -6334,51 +6334,64 @@ with block:
                 print(translate("プロンプトキュー無効: ファイルが正しくアップロードされていません"))
 
         # process関数のジェネレータを返す - 明示的に全ての引数を渡す
-        yield from process(
-            input_image=input_image,
-            prompt=prompt,
-            n_prompt=n_prompt,
-            seed=seed,
-            total_second_length=total_second_length,
-            latent_window_size=latent_window_size,
-            steps=steps,
-            cfg=cfg,
-            gs=gs,
-            rs=rs,
-            gpu_memory_preservation=gpu_memory_preservation,
-            use_teacache=use_teacache,
-            use_random_seed=use_random_seed,
-            mp4_crf=mp4_crf,
-            all_padding_value=all_padding_value,
-            end_frame=end_frame,
-            end_frame_strength=end_frame_strength,
-            frame_size_setting=frame_size_setting,
-            keep_section_videos=keep_section_videos,
-            lora_files=lora_files,
-            lora_files2=lora_files2,
-            lora_files3=lora_files3,
-            lora_scales_text=lora_scales_text,
-            output_dir=output_dir,
-            save_section_frames=save_section_frames,
-            section_settings=section_settings,
-            use_all_padding=use_all_padding,
-            use_lora=use_lora,
-            lora_mode=lora_mode,
-            lora_dropdown1=lora_dropdown1,
-            lora_dropdown2=lora_dropdown2,
-            lora_dropdown3=lora_dropdown3,
-            save_tensor_data=save_tensor_data,
-            tensor_data_input=tensor_data_input,
-            fp8_optimization=fp8_optimization,
-            resolution=resolution_value,
-            batch_count=batch_count,
-            frame_save_mode=frame_save_mode,  # frame_save_modeを追加
-            use_vae_cache=use_vae_cache,
-            use_queue=bool(queue_enabled),  # 確実にブール値として渡す
-            prompt_queue_file=prompt_queue_file,
-            save_settings_on_start=actual_save_settings_value,  # 値取得後の自動保存パラメータを追加
-            alarm_on_completion=actual_alarm_value  # 値取得後のアラームパラメータを追加
-        )
+        try:
+            yield from process(
+                input_image=input_image,
+                prompt=prompt,
+                n_prompt=n_prompt,
+                seed=seed,
+                total_second_length=total_second_length,
+                latent_window_size=latent_window_size,
+                steps=steps,
+                cfg=cfg,
+                gs=gs,
+                rs=rs,
+                gpu_memory_preservation=gpu_memory_preservation,
+                use_teacache=use_teacache,
+                use_random_seed=use_random_seed,
+                mp4_crf=mp4_crf,
+                all_padding_value=all_padding_value,
+                end_frame=end_frame,
+                end_frame_strength=end_frame_strength,
+                frame_size_setting=frame_size_setting,
+                keep_section_videos=keep_section_videos,
+                lora_files=lora_files,
+                lora_files2=lora_files2,
+                lora_files3=lora_files3,
+                lora_scales_text=lora_scales_text,
+                output_dir=output_dir,
+                save_section_frames=save_section_frames,
+                section_settings=section_settings,
+                use_all_padding=use_all_padding,
+                use_lora=use_lora,
+                lora_mode=lora_mode,
+                lora_dropdown1=lora_dropdown1,
+                lora_dropdown2=lora_dropdown2,
+                lora_dropdown3=lora_dropdown3,
+                save_tensor_data=save_tensor_data,
+                tensor_data_input=tensor_data_input,
+                fp8_optimization=fp8_optimization,
+                resolution=resolution_value,
+                batch_count=batch_count,
+                frame_save_mode=frame_save_mode,  # frame_save_modeを追加
+                use_vae_cache=use_vae_cache,
+                use_queue=bool(queue_enabled),  # 確実にブール値として渡す
+                prompt_queue_file=prompt_queue_file,
+                save_settings_on_start=actual_save_settings_value,  # 値取得後の自動保存パラメータを追加
+                alarm_on_completion=actual_alarm_value  # 値取得後のアラームパラメータを追加
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield (
+                None,
+                gr.update(visible=False),
+                translate("エラー: {0}").format(str(e)),
+                '',
+                gr.update(interactive=True),
+                gr.update(interactive=False),
+                gr.update(),
+            )
 
     # 実行ボタンのイベント
     # UIから渡されるパラメーターリスト
