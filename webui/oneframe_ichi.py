@@ -3716,13 +3716,15 @@ with block:
         inputs=[output_dir],
         outputs=[output_dir, path_display])
     # よく使う設定管理イベント
-    def save_favorite_handler(name, prompt_val, l1, l2, l3, scales, use_ref, ti, hi, lw, li, c2x, c4x, cpost, teacache_val, rand_seed, seed_val, steps_val, gs_val, gpu_mem, out_dir):
+    def save_favorite_handler(name, prompt_val, l1, l2, l3, scales, use_lora_val, lora_mode_val, use_ref, ti, hi, lw, li, c2x, c4x, cpost, teacache_val, rand_seed, seed_val, steps_val, gs_val, gpu_mem, out_dir):
         settings = {
             "prompt": prompt_val,
             "lora1": l1,
             "lora2": l2,
             "lora3": l3,
             "lora_scales": scales,
+            "use_lora": use_lora_val,
+            "lora_mode": lora_mode_val,
             "use_reference_image": use_ref,
             "target_index": ti,
             "history_index": hi,
@@ -3746,13 +3748,39 @@ with block:
     def apply_favorite_handler(sel_name):
         for fav in load_favorites().get("favorites", []):
             if fav.get("name") == sel_name:
+                use_lora_val = fav.get("use_lora", False)
+                lora_mode_val = fav.get("lora_mode", translate("ディレクトリから選択"))
+                use_ref = fav.get("use_reference_image", False)
+
+                # LoRA関連の表示設定
+                if use_lora_val:
+                    is_upload = lora_mode_val == translate("ファイルアップロード")
+                    lora_mode_upd = gr.update(value=lora_mode_val, visible=True)
+                    lora_upload_upd = gr.update(visible=is_upload)
+                    lora_dropdown_upd = gr.update(visible=not is_upload)
+                    lora_preset_upd = gr.update(visible=not is_upload)
+                    lora_scales_upd = gr.update(value=fav.get("lora_scales", "0.8,0.8,0.8"), visible=True)
+                else:
+                    lora_mode_upd = gr.update(value=lora_mode_val, visible=False)
+                    lora_upload_upd = gr.update(visible=False)
+                    lora_dropdown_upd = gr.update(visible=False)
+                    lora_preset_upd = gr.update(visible=False)
+                    lora_scales_upd = gr.update(value=fav.get("lora_scales", "0.8,0.8,0.8"), visible=False)
+
+                # Kisekae関連の表示設定
+                ref_img_upd = gr.update(visible=use_ref)
+                adv_group_upd = gr.update(visible=use_ref)
+                ref_info_upd = gr.update(visible=use_ref)
+
                 return (
                     fav.get("prompt", ""),
+                    use_lora_val,
+                    lora_mode_upd,
                     fav.get("lora1", translate("なし")),
                     fav.get("lora2", translate("なし")),
                     fav.get("lora3", translate("なし")),
-                    fav.get("lora_scales", "0.8,0.8,0.8"),
-                    fav.get("use_reference_image", False),
+                    lora_scales_upd,
+                    use_ref,
                     fav.get("target_index", 1),
                     fav.get("history_index", 16),
                     fav.get("latent_window_size", 9),
@@ -3766,9 +3794,15 @@ with block:
                     fav.get("steps", 25),
                     fav.get("gs", 10.0),
                     fav.get("gpu_memory_preservation", 6),
-                    fav.get("output_folder", "outputs")
+                    fav.get("output_folder", "outputs"),
+                    adv_group_upd,
+                    ref_img_upd,
+                    ref_info_upd,
+                    lora_upload_upd,
+                    lora_dropdown_upd,
+                    lora_preset_upd
                 )
-        return [gr.update()]*20
+        return [gr.update()]*27
 
     def delete_favorite_handler(sel_name):
         result = delete_favorite(sel_name)
@@ -3781,13 +3815,25 @@ with block:
 
     fav_save_btn.click(
         fn=save_favorite_handler,
-        inputs=[fav_name, prompt, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_scales_text, use_reference_image, target_index, history_index, latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post, use_teacache, use_random_seed, seed, steps, gs, gpu_memory_preservation, output_dir],
+        inputs=[fav_name, prompt, lora_dropdown1, lora_dropdown2, lora_dropdown3,
+               lora_scales_text, use_lora, lora_mode, use_reference_image,
+               target_index, history_index, latent_window_size, latent_index,
+               use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
+               use_teacache, use_random_seed, seed, steps, gs,
+               gpu_memory_preservation, output_dir],
         outputs=[fav_message, fav_dropdown]
     )
     fav_apply_btn.click(
         fn=apply_favorite_handler,
         inputs=[fav_dropdown],
-        outputs=[prompt, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_scales_text, use_reference_image, target_index, history_index, latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post, use_teacache, use_random_seed, seed, steps, gs, gpu_memory_preservation, output_dir]
+        outputs=[prompt, use_lora, lora_mode, lora_dropdown1, lora_dropdown2,
+                 lora_dropdown3, lora_scales_text, use_reference_image,
+                 target_index, history_index, latent_window_size, latent_index,
+                 use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
+                 use_teacache, use_random_seed, seed, steps, gs,
+                 gpu_memory_preservation, output_dir, advanced_kisekae_group,
+                 reference_image, reference_image_info, lora_upload_group,
+                 lora_dropdown_group, lora_preset_group]
     )
     fav_delete_btn.click(
         fn=delete_favorite_handler,
