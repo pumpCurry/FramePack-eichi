@@ -19,8 +19,16 @@ def get_output_folder_path(folder_name=None):
     """出力フォルダの絶対パスを取得する"""
     # eichi_utils直下からwebuiフォルダに移動
     webui_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if not folder_name or not folder_name.strip():
+
+    # ブール値やNoneが入り込んだ場合は空文字列に変換
+    if isinstance(folder_name, bool) or folder_name is None:
+        folder_name = ""
+
+    # 文字列化してから空判定を行う
+    folder_name = str(folder_name)
+    if not folder_name.strip():
         folder_name = "outputs"
+
     return os.path.join(webui_path, folder_name)
 
 def initialize_settings():
@@ -62,6 +70,17 @@ def load_settings():
                 for key, value in default_settings.items():
                     if key not in settings:
                         settings[key] = value
+
+                # 出力フォルダ名を正規化
+                folder_name = settings.get('output_folder', 'outputs')
+                if isinstance(folder_name, bool) or folder_name is None:
+                    folder_name = 'outputs'
+                else:
+                    folder_name = str(folder_name)
+                    if not folder_name.strip():
+                        folder_name = 'outputs'
+                settings['output_folder'] = folder_name
+
                 return settings
         except Exception as e:
             print(translate("設定読み込みエラー: {0}").format(e))
