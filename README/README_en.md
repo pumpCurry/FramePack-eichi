@@ -422,6 +422,7 @@ First, you need to install the original FramePack.
 
 3. Necessary models will be automatically downloaded during the first launch (approximately 30GB).
    If you already have downloaded models, place them in the `framepack\webui\hf_download` folder.
+   Download progress for each model is displayed; please wait for completion.
 
 4. At this point, it will work, but processing will be slower if acceleration libraries (Xformers, Flash Attn, Sage Attn) are not installed.
    ```

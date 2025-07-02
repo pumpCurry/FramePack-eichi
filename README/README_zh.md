@@ -416,6 +416,7 @@ RTX 50系列（RTX 5070Ti、RTX 5080、RTX 5090等）需要特殊設置：
 
 3. 首次啟動時會自動下載所需模型（約30GB）。
    如果已有下載好的模型，請放置在`framepack\webui\hf_download`資料夾中。
+   下載期間會顯示各模型的進度，請耐心等待直至完成。
 
 4. 此時可以運行，但如果未安裝加速庫（Xformers、Flash Attn、Sage Attn），處理速度會較慢。
    ```
