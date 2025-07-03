@@ -470,9 +470,9 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                             print(translate("{name}を再試行: {path}").format(name=dropdown_name, path=lora_path_retry))
                             if os.path.exists(lora_path_retry):
                                 current_lora_paths.append(lora_path_retry)
-                                    print(translate("{name}を選択 (パス修正後): {path}").format(name=dropdown_name, path=lora_path_retry))
-                                else:
-                                    print(translate("選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
+                                print(translate("{name}を選択 (パス修正後): {path}").format(name=dropdown_name, path=lora_path_retry))
+                            else:
+                                print(translate("選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
             else:
                 # ファイルアップロードモードの場合
                 # 全LoRAファイルを収集
