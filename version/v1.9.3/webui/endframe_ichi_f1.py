@@ -107,6 +107,7 @@ from eichi_utils.keyframe_handler_extended import extended_mode_length_change_ha
 import gradio as gr
 # UI関連モジュールのインポート
 from eichi_utils.ui_styles import get_app_css
+from eichi_utils import safe_path_join
 import torch
 import einops
 import safetensors.torch as sf
@@ -696,9 +697,8 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 # ドロップダウンの値を取得
                 for dropdown in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
                     if dropdown is not None and dropdown != translate("なし") and dropdown != 0:
-                        # なし以外が選択されている場合、パスを生成
                         lora_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lora')
-                        lora_path = os.path.join(lora_dir, dropdown)
+                        lora_path = safe_path_join(lora_dir, dropdown)
                         if os.path.exists(lora_path):
                             current_lora_paths.append(lora_path)
                             print(translate("[INFO] LoRAファイルを追加: {0}").format(lora_path))
@@ -1834,8 +1834,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             # 各ドロップダウンの値を処理
             for dropdown, label in zip([lora_dropdown1, lora_dropdown2, lora_dropdown3], ["LoRA1", "LoRA2", "LoRA3"]):
                 if dropdown is not None and dropdown != translate("なし") and dropdown != 0:
-                    # 選択あり
-                    file_path = os.path.join(lora_dir, dropdown)
+                    file_path = safe_path_join(lora_dir, dropdown)
                     if os.path.exists(file_path):
                         lora_paths.append(file_path)
                         print(translate("[INFO] {0}選択: {1}").format(label, dropdown))
