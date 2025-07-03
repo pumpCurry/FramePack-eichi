@@ -24,16 +24,23 @@ def get_cache_dir():
 def generate_cache_key(model_files, lora_paths, lora_scales, fp8_enabled):
     """Generate a unique key from model/LoRA files and settings."""
     items = []
+
+    # model files are order independent
     for path in sorted(model_files or []):
         if os.path.exists(path):
             items.append(path)
             items.append(str(os.path.getmtime(path)))
-    for path in sorted(lora_paths or []):
-        if os.path.exists(path):
-            items.append(path)
-            items.append(str(os.path.getmtime(path)))
-    if lora_scales is not None:
-        items.extend([str(s) for s in lora_scales])
+
+    # keep LoRA paths paired with their scale values when sorting
+    if lora_paths:
+        scales = lora_scales or [None] * len(lora_paths)
+        for path, scale in sorted(zip(lora_paths, scales), key=lambda x: x[0]):
+            if os.path.exists(path):
+                items.append(path)
+                items.append(str(os.path.getmtime(path)))
+                if scale is not None:
+                    items.append(str(scale))
+
     items.append('fp8' if fp8_enabled else 'no_fp8')
     key_str = '|'.join(items)
     return hashlib.sha256(key_str.encode('utf-8')).hexdigest()
