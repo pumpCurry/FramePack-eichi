@@ -811,9 +811,11 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
         use_cache = (cached_prompt == prompt and cached_n_prompt == n_prompt and
                      cached_llama_vec is not None and cached_llama_vec_n is not None)
 
+        # 条件: 1) プロンプトキャッシュ機能が有効 2) まだメモリキャッシュが利用できない
         if use_prompt_cache and not use_cache:
             disk_cache = prompt_cache.load_from_cache(prompt, n_prompt)
             if disk_cache:
+                # 既存のディスクキャッシュを利用
                 print(translate("ファイルキャッシュからテキストエンコード結果を読み込みます"))
                 llama_vec = disk_cache['llama_vec']
                 llama_vec_n = disk_cache['llama_vec_n']
@@ -830,16 +832,6 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 cached_clip_l_pooler_n = clip_l_pooler_n
                 cached_llama_attention_mask = llama_attention_mask
                 cached_llama_attention_mask_n = llama_attention_mask_n
-
-                if use_prompt_cache:
-                    prompt_cache.save_to_cache(prompt, n_prompt, {
-                        'llama_vec': llama_vec.cpu(),
-                        'llama_vec_n': llama_vec_n.cpu(),
-                        'clip_l_pooler': clip_l_pooler.cpu(),
-                        'clip_l_pooler_n': clip_l_pooler_n.cpu(),
-                        'llama_attention_mask': llama_attention_mask.cpu(),
-                        'llama_attention_mask_n': llama_attention_mask_n.cpu()
-                    })
 
 
         
@@ -937,6 +929,17 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 cached_clip_l_pooler_n = clip_l_pooler_n
                 cached_llama_attention_mask = llama_attention_mask
                 cached_llama_attention_mask_n = llama_attention_mask_n
+
+                # ディスクキャッシュへの保存
+                if use_prompt_cache:
+                    prompt_cache.save_to_cache(prompt, n_prompt, {
+                        'llama_vec': llama_vec.cpu(),
+                        'llama_vec_n': llama_vec_n.cpu(),
+                        'clip_l_pooler': clip_l_pooler.cpu(),
+                        'clip_l_pooler_n': clip_l_pooler_n.cpu(),
+                        'llama_attention_mask': llama_attention_mask.cpu(),
+                        'llama_attention_mask_n': llama_attention_mask_n.cpu()
+                    })
                 
             except Exception as e:
                 print(translate("テキストエンコードエラー: {0}").format(e))
