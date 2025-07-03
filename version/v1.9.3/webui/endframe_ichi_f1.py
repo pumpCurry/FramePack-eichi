@@ -108,6 +108,7 @@ import gradio as gr
 # UI関連モジュールのインポート
 from eichi_utils.ui_styles import get_app_css
 from eichi_utils import safe_path_join
+from eichi_utils.error_utils import log_and_continue
 import torch
 import einops
 import safetensors.torch as sf
@@ -272,6 +273,7 @@ def get_image_queue_files():
     return image_files
 
 @torch.no_grad()
+@log_and_continue("worker error")
 def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, image_strength=1.0, keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, save_latent_frames=False, save_last_section_frames=False):
 
     # フレーム保存フラグのタイプと値を確認（必ずブール値であるべき）

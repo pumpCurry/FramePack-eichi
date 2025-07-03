@@ -20,4 +20,4 @@ def test_safe_path_join_accepts_str(tmp_path):
     base = tmp_path
     fname = "sample.safetensors"
     path = safe_path_join(base, fname)
-    assert path == os.path.join(base, fname)
+    assert path == tmp_path / fname

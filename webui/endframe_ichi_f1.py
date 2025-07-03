@@ -132,6 +132,7 @@ from PIL import Image
 from diffusers import AutoencoderKLHunyuanVideo
 from transformers import LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer
 from eichi_utils import safe_path_join
+from eichi_utils.error_utils import log_and_continue
 from diffusers_helper.hunyuan import encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake
 from diffusers_helper.utils import save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw, resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge, generate_timestamp
 from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
@@ -1425,7 +1426,7 @@ def get_current_lora_settings(use_lora, lora_mode, lora_dropdown1, lora_dropdown
                 try:
                     src_path = lora_file.name
                     original_filename = os.path.basename(src_path)
-                    dest_path = os.path.join(lora_dir, original_filename)
+                    dest_path = safe_path_join(lora_dir, original_filename)
                     
                     # Handle filename conflicts
                     if os.path.exists(dest_path):
@@ -1436,7 +1437,7 @@ def get_current_lora_settings(use_lora, lora_mode, lora_dropdown1, lora_dropdown
                             counter = 1
                             while os.path.exists(dest_path):
                                 new_filename = f"{name}_copy{counter}{ext}"
-                                dest_path = os.path.join(lora_dir, new_filename)
+                                dest_path = safe_path_join(lora_dir, new_filename)
                                 counter += 1
                             original_filename = os.path.basename(dest_path)
                             print(translate("   📄 Renamed to avoid conflict: {0}").format(original_filename))
@@ -1523,7 +1524,7 @@ def scan_lora_directory():
         for filename in os.listdir(lora_dir):
             if filename.endswith(('.safetensors', '.pt', '.bin')):
                 # Validate file is readable
-                file_path = os.path.join(lora_dir, filename)
+                file_path = safe_path_join(lora_dir, filename)
                 if os.path.isfile(file_path) and os.access(file_path, os.R_OK):
                     choices.append(filename)
     except Exception as e:
@@ -2480,6 +2481,7 @@ def get_image_queue_files():
     return image_files
 
 @torch.no_grad()
+@log_and_continue("worker error")
 def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, image_strength=1.0, keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, frame_save_mode=None):
 
     # frame_save_modeに基づいてフラグを設定

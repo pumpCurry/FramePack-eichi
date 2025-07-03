@@ -1104,7 +1104,7 @@ def worker(
                     )
 
                     if dropdown_value and dropdown_value != translate("なし"):
-                        lora_path = os.path.join(lora_dir, dropdown_value)
+                        lora_path = safe_path_join(lora_dir, dropdown_value)
                         print(
                             translate("[DEBUG] {name}のロード試行: パス={path}").format(
                                 name=dropdown_name, path=lora_path
@@ -1130,7 +1130,7 @@ def worker(
                                 )
                             else:
                                 # 直接ファイル名だけで試行
-                                lora_path_retry = os.path.join(
+                                lora_path_retry = safe_path_join(
                                     lora_dir, os.path.basename(str(dropdown_value))
                                 )
                                 print(

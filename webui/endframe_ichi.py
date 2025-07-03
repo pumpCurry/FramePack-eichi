@@ -122,6 +122,7 @@ from eichi_utils.lora_preset_manager import (
 )
 from eichi_utils import lora_state_cache
 from eichi_utils import safe_path_join
+from eichi_utils.error_utils import log_and_continue
 
 # キーフレーム処理モジュールをインポート
 from eichi_utils.keyframe_handler import (
@@ -376,6 +377,7 @@ def set_generation_stopped(stopped=True):
         print(translate("生成中断フラグが設定されました"))
 
 @torch.no_grad()
+@log_and_continue("worker error")
 def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, alarm_on_completion=False):
     # グローバル変数を使用
     global vae_cache_enabled, current_prompt, generation_stopped, current_batch_data, transformer_model
