@@ -1,4 +1,5 @@
 @echo off
+echo %~nx0 : 起動開始....
 
 call environment.bat
 

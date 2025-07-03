@@ -1,6 +1,7 @@
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
+print(f"{os.path.basename(__file__)} : 起動開始....")
 
 # Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
 import asyncio
