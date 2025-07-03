@@ -189,7 +189,7 @@ from diffusers_helper.gradio.progress_bar import make_progress_bar_css, make_pro
 from eichi_utils.ui_styles import get_app_css
 from transformers import SiglipImageProcessor, SiglipVisionModel
 from diffusers_helper.clip_vision import hf_clip_vision_encode
-from diffusers_helper.bucket_tools import find_nearest_bucket
+from diffusers_helper.bucket_tools import find_nearest_bucket, SAFE_RESOLUTIONS
 
 from eichi_utils.transformer_manager import TransformerManager
 from eichi_utils.text_encoder_manager import TextEncoderManager
@@ -2431,7 +2431,7 @@ with block:
             # 解像度設定（画像の直下に）
             resolution = gr.Dropdown(
                 label=translate("解像度"),
-                choices=list(range(384, 3841, 64)),
+                choices=SAFE_RESOLUTIONS,
                 value=saved_app_settings.get("resolution", 640) if saved_app_settings else 640,
                 info=translate("出力画像の基準解像度。640推奨。高解像度は高負荷・高メモリ消費"),
                 elem_classes="saveable-setting"
