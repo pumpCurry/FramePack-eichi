@@ -107,7 +107,7 @@ from eichi_utils.keyframe_handler_extended import extended_mode_length_change_ha
 import gradio as gr
 # UI関連モジュールのインポート
 from eichi_utils.ui_styles import get_app_css
-from eichi_utils import safe_path_join
+from eichi_utils.path_utils import safe_path_join, ensure_dir
 from eichi_utils.error_utils import log_and_continue
 import torch
 import einops
@@ -383,6 +383,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         print(translate("デフォルト出力フォルダを使用: {0}").format(outputs_folder))
 
     # フォルダが存在しない場合は作成
+    outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
 
     # 処理時間計測の開始

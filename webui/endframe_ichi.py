@@ -121,7 +121,7 @@ from eichi_utils.lora_preset_manager import (
     get_preset_names
 )
 from eichi_utils import lora_state_cache
-from eichi_utils import safe_path_join
+from eichi_utils.path_utils import safe_path_join, ensure_dir
 from eichi_utils.error_utils import log_and_continue
 
 # キーフレーム処理モジュールをインポート
@@ -617,6 +617,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         print(translate("デフォルト出力フォルダを使用: {0}").format(outputs_folder))
 
     # フォルダが存在しない場合は作成
+    outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
 
     # 処理時間計測の開始

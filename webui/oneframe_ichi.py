@@ -145,7 +145,7 @@ from eichi_utils.lora_preset_manager import (
     get_preset_names
 )
 from eichi_utils import prompt_cache, lora_state_cache
-from eichi_utils import safe_path_join
+from eichi_utils.path_utils import safe_path_join, ensure_dir
 from eichi_utils.error_utils import log_and_continue
 from eichi_utils.favorite_settings_manager import load_favorites, save_favorite, delete_favorite
 
@@ -432,7 +432,8 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     else:
         # 出力フォルダはwebui内のoutputsに固定
         outputs_folder = os.path.join(webui_folder, 'outputs')
-    
+
+    outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
     
     # プログレスバーの初期化
@@ -1994,6 +1995,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("デフォルト出力フォルダを使用: {0}").format(outputs_folder))
 
     # フォルダが存在しない場合は作成
+    outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
     
     # 出力ディレクトリを設定

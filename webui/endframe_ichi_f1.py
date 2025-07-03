@@ -131,7 +131,7 @@ import math
 from PIL import Image
 from diffusers import AutoencoderKLHunyuanVideo
 from transformers import LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer
-from eichi_utils import safe_path_join
+from eichi_utils.path_utils import safe_path_join, ensure_dir
 from eichi_utils.error_utils import log_and_continue
 from diffusers_helper.hunyuan import encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake
 from diffusers_helper.utils import save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw, resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge, generate_timestamp
@@ -2567,6 +2567,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         print(translate("デフォルト出力フォルダを使用: {0}").format(outputs_folder))
 
     # フォルダが存在しない場合は作成
+    outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
 
     # 処理時間計測の開始
