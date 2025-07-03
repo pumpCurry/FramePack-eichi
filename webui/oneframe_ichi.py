@@ -2226,7 +2226,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 
             # ワーカー実行 - 詳細設定パラメータを含む（キュー機能対応）
             async_run(worker, current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
-                     gpu_memory_preservation, use_teacache, lora_files, lora_files2, lora_scales_text,
+                     gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
                      output_dir, save_input_images, use_lora, fp8_optimization, resolution,
                      current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
                      lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
