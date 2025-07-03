@@ -2882,9 +2882,9 @@ with block:
                     with gr.Group(visible=False) as lora_dropdown_group:
                         # LoRAドロップダウン
                         none_choice = translate("なし")
-                        lora_dropdown1 = gr.Dropdown(label=translate("LoRA1"), choices=[none_choice], value=none_choice, allow_custom_value=True)
-                        lora_dropdown2 = gr.Dropdown(label=translate("LoRA2"), choices=[none_choice], value=none_choice, allow_custom_value=True)
-                        lora_dropdown3 = gr.Dropdown(label=translate("LoRA3"), choices=[none_choice], value=none_choice, allow_custom_value=True)
+                        lora_dropdown1 = gr.Dropdown(label=translate("LoRA1"), choices=[none_choice], value=none_choice, allow_custom_value=False)
+                        lora_dropdown2 = gr.Dropdown(label=translate("LoRA2"), choices=[none_choice], value=none_choice, allow_custom_value=False)
+                        lora_dropdown3 = gr.Dropdown(label=translate("LoRA3"), choices=[none_choice], value=none_choice, allow_custom_value=False)
                         
                         # ドロップダウン更新ボタン（下に配置）
                         lora_scan_button = gr.Button(value=translate("LoRAフォルダを再スキャン"), variant="secondary")
@@ -3792,6 +3792,25 @@ with block:
                 lora_mode_val = fav.get("lora_mode", translate("ディレクトリから選択"))
                 use_ref = fav.get("use_reference_image", False)
 
+                message_parts = []
+                # 現在のLoRA候補を取得
+                lora_choices = scan_lora_directory() if has_lora_support else [translate("なし")]
+
+                def validate_lora(val):
+                    none_val = translate("なし")
+                    if not val or val == none_val:
+                        return none_val
+                    if val not in lora_choices:
+                        message_parts.append(translate("LoRAファイル '{0}' が見つかりません").format(val))
+                        return none_val
+                    return val
+
+                lora1_val = validate_lora(fav.get("lora1", translate("なし")))
+                lora2_val = validate_lora(fav.get("lora2", translate("なし")))
+                lora3_val = validate_lora(fav.get("lora3", translate("なし")))
+
+                message = "\n".join(message_parts) if message_parts else translate("設定を読み込みました")
+
                 # LoRA関連の表示設定
                 if use_lora_val:
                     is_upload = lora_mode_val == translate("ファイルアップロード")
@@ -3813,12 +3832,13 @@ with block:
                 ref_info_upd = gr.update(visible=use_ref)
 
                 return (
+                    message,
                     fav.get("prompt", ""),
                     use_lora_val,
                     lora_mode_upd,
-                    fav.get("lora1", translate("なし")),
-                    fav.get("lora2", translate("なし")),
-                    fav.get("lora3", translate("なし")),
+                    lora1_val,
+                    lora2_val,
+                    lora3_val,
                     lora_scales_upd,
                     use_ref,
                     fav.get("target_index", 1),
@@ -3850,7 +3870,7 @@ with block:
                     lora_dropdown_upd,
                     lora_preset_upd
                 )
-        return [gr.update()]*36
+        return [gr.update()]*37
 
     def delete_favorite_handler(sel_name):
         result = delete_favorite(sel_name)
@@ -3877,7 +3897,7 @@ with block:
     fav_apply_btn.click(
         fn=apply_favorite_handler,
         inputs=[fav_dropdown],
-        outputs=[prompt, use_lora, lora_mode, lora_dropdown1, lora_dropdown2,
+        outputs=[fav_message, prompt, use_lora, lora_mode, lora_dropdown1, lora_dropdown2,
                  lora_dropdown3, lora_scales_text, use_reference_image,
                  target_index, history_index, latent_window_size, latent_index,
                  use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
