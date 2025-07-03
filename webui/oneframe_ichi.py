@@ -3895,6 +3895,11 @@ with block:
         choices = [f["name"] for f in load_favorites().get("favorites", [])]
         return gr.update(choices=choices)
 
+    def update_fav_name(selected_name):
+        if isinstance(selected_name, tuple) and len(selected_name) > 0:
+            selected_name = selected_name[0]
+        return gr.update(value=selected_name)
+
     fav_save_btn.click(
         fn=save_favorite_handler,
         inputs=[fav_name, prompt, lora_dropdown1, lora_dropdown2, lora_dropdown3,
@@ -3934,6 +3939,12 @@ with block:
         fn=reload_favorites_handler,
         inputs=[],
         outputs=[fav_dropdown]
+    )
+
+    fav_dropdown.change(
+        fn=update_fav_name,
+        inputs=[fav_dropdown],
+        outputs=[fav_name]
     )
     
     # 生成開始・中止のイベント
