@@ -194,6 +194,12 @@ print(translate('High-VRAM Mode: {0}').format(high_vram))
 from eichi_utils.model_downloader import ModelDownloader
 ModelDownloader().download_original()
 
+def _norm_dropdown(val):
+    """Return a clean str or None from a Gr.Dropdown value."""
+    if val in (None, False, True, 0, "0", 0.0) or val == translate("なし"):
+        return None
+    return str(val)
+
 # グローバルなモデル状態管理インスタンスを作成（モデルは実際に使用するまでロードしない）
 transformer_manager = TransformerManager(device=gpu, high_vram_mode=high_vram, use_f1_model=False)
 text_encoder_manager = TextEncoderManager(device=gpu, high_vram_mode=high_vram)
@@ -515,6 +521,11 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                         print(translate("\u25c6 LoRA {0}: {1} (デフォルトスケール: {2})").format(i+1, os.path.basename(path), scale))
         
         # -------- LoRA 設定 START ---------
+
+        # sanitise raw UI values (can be bool when allow_custom_value=True)
+        lora_dropdown1 = _norm_dropdown(lora_dropdown1)
+        lora_dropdown2 = _norm_dropdown(lora_dropdown2)
+        lora_dropdown3 = _norm_dropdown(lora_dropdown3)
         # UI設定のuse_loraフラグ値を保存
         original_use_lora = use_lora
         print(f"[DEBUG] UI設定のuse_loraフラグの値: {original_use_lora}")
