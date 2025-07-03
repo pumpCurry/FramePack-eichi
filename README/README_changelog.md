@@ -7,6 +7,8 @@
 ### 2025-07-03: バージョン1.9.x – Path safety refactor & robust logging
 - パス結合を共通関数 `safe_path_join()` 経由に統一し、不正値によるクラッシュを回避
 - `log_and_continue()` デコレータでワーカー処理の例外をログに残して継続
+### 2025-07-03  v1.9.x-3
+* add `ensure_dir()` – converts bool/None/'' to default path, prevents os.makedirs TypeError.
 
 ### 2025-05-22: バージョン1.9.4 ※正式リリース版
 - **設定保存機能の実装**:

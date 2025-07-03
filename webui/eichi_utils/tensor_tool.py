@@ -136,7 +136,7 @@ from eichi_utils.preset_manager import (
     save_preset,
     delete_preset,
 )
-from eichi_utils import safe_path_join
+from eichi_utils.path_utils import safe_path_join, ensure_dir
 
 # 拡張キーフレーム処理モジュールをインポート
 from eichi_utils.keyframe_handler_extended import extended_mode_length_change_handler
@@ -366,6 +366,7 @@ print(translate("設定から入力フォルダを読み込み: {0}").format(inp
 
 # 出力フォルダのフルパスを生成
 outputs_folder = get_output_folder_path(output_folder_name)
+outputs_folder = ensure_dir(outputs_folder, "outputs")
 os.makedirs(outputs_folder, exist_ok=True)
 
 # 入力フォルダも存在確認して作成
@@ -526,6 +527,7 @@ def worker(
         print(translate("デフォルト出力フォルダを使用: {0}").format(outputs_folder))
 
     # フォルダが存在しない場合は作成
+    outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
 
     # 処理時間計測の開始

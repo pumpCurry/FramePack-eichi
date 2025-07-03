@@ -1,6 +1,17 @@
 import os
 from pathlib import Path
 
+def ensure_dir(dir_val, default_name="outputs") -> Path:
+    """Convert to ``Path`` and fall back to ``default_name`` for falsy values."""
+
+    if (
+        isinstance(dir_val, (str, os.PathLike))
+        and str(dir_val).strip()
+        and str(dir_val) != "なし"
+    ):
+        return Path(dir_val)
+    return Path(default_name)
+
 def safe_path_join(base: os.PathLike, *parts: str) -> Path:
     """Join path components while gracefully handling invalid values.
 
