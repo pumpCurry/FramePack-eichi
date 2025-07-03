@@ -109,6 +109,7 @@ from eichi_utils.lora_preset_manager import (
     load_lora_preset,
     get_preset_names
 )
+from eichi_utils import safe_path_join
 
 # キーフレーム処理モジュールをインポート
 from eichi_utils.keyframe_handler import (
@@ -1028,18 +1029,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         if lora_mode == translate("ディレクトリから選択") and has_lora_support:
             # ディレクトリからドロップダウンで選択されたLoRAが1つでもあるか確認
             has_selected_lora = False
-            for dropdown in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
-                dropdown_value = dropdown.value if hasattr(dropdown, 'value') else dropdown
-                
-                # 通常の値が0や0.0などの数値の場合の特別処理（GradioのUIの問題によるもの）
-                if dropdown_value == 0 or dropdown_value == "0" or dropdown_value == 0.0:
-                    # 数値の0を"なし"として扱う
-                    dropdown_value = translate("なし")
-                
-                # 型チェックと文字列変換を追加
-                if not isinstance(dropdown_value, str) and dropdown_value is not None:
-                    dropdown_value = str(dropdown_value)
-                
+            for dropdown_value in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
                 if dropdown_value and dropdown_value != translate("なし"):
                     has_selected_lora = True
                     break
@@ -1188,25 +1178,19 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     ))
                     
                     if dropdown_value and dropdown_value != translate("なし"):
-                        lora_path = os.path.join(lora_dir, dropdown_value)
+                        lora_path = safe_path_join(lora_dir, str(dropdown_value))
                         print(translate("[DEBUG] {name}のロード試行: パス={path}").format(name=dropdown_name, path=lora_path))
                         if os.path.exists(lora_path):
                             current_lora_paths.append(lora_path)
                             print(translate("[INFO] {name}を選択: {path}").format(name=dropdown_name, path=lora_path))
                         else:
-                            # パスを修正して再試行（単なるファイル名の場合）
-                            if os.path.dirname(lora_path) == lora_dir and not os.path.isabs(dropdown_value):
-                                # すでに正しく構築されているので再試行不要
-                                print(translate("[WARN] 選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
+                            lora_path_retry = safe_path_join(lora_dir, os.path.basename(str(dropdown_value)))
+                            print(translate("[DEBUG] {name}を再試行: {path}").format(name=dropdown_name, path=lora_path_retry))
+                            if os.path.exists(lora_path_retry):
+                                current_lora_paths.append(lora_path_retry)
+                                print(translate("[INFO] {name}を選択 (パス修正後): {path}").format(name=dropdown_name, path=lora_path_retry))
                             else:
-                                # 直接ファイル名だけで試行
-                                lora_path_retry = os.path.join(lora_dir, os.path.basename(str(dropdown_value)))
-                                print(translate("[DEBUG] {name}を再試行: {path}").format(name=dropdown_name, path=lora_path_retry))
-                                if os.path.exists(lora_path_retry):
-                                    current_lora_paths.append(lora_path_retry)
-                                    print(translate("[INFO] {name}を選択 (パス修正後): {path}").format(name=dropdown_name, path=lora_path_retry))
-                                else:
-                                    print(translate("[WARN] 選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
+                                print(translate("[WARN] 選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
             else:
                 # ファイルアップロードモード
                 print(translate("[INFO] LoRA読み込み方式: ファイルアップロード"))
@@ -2712,8 +2696,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     dropdown_value = str(dropdown_value)
                 
                 if dropdown_value and dropdown_value != translate("なし"):
-                    lora_path = os.path.join(lora_dir, dropdown_value)
-                    # よりわかりやすい表記に
+                    lora_path = safe_path_join(lora_dir, dropdown_value)
                     model_name = f"LoRA{dropdown_name[-1]}: {dropdown_value}"
                     selected_lora_names.append(model_name)
             

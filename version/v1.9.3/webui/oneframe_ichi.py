@@ -139,6 +139,7 @@ from eichi_utils.lora_preset_manager import (
 
 import gradio as gr
 from eichi_utils.ui_styles import get_app_css
+from eichi_utils import safe_path_join
 import torch
 import einops
 import safetensors.torch as sf
@@ -452,25 +453,19 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 for dropdown_idx, dropdown_value in enumerate([lora_dropdown1, lora_dropdown2, lora_dropdown3]):
                     dropdown_name = f"LoRA{dropdown_idx+1}"
                     if dropdown_value and dropdown_value != translate("なし"):
-                        lora_path = os.path.join(lora_dir, dropdown_value)
+                        lora_path = safe_path_join(lora_dir, dropdown_value)
                         print(translate("\u25c6 {name}のロード試行: パス={path}").format(name=dropdown_name, path=lora_path))
                         if os.path.exists(lora_path):
                             current_lora_paths.append(lora_path)
                             print(translate("\u25c6 {name}を選択: {path}").format(name=dropdown_name, path=lora_path))
                         else:
-                            # パスを修正して再試行（単なるファイル名の場合）
-                            if os.path.dirname(lora_path) == lora_dir and not os.path.isabs(dropdown_value):
-                                # すでに正しく構築されているので再試行不要
-                                pass
+                            lora_path_retry = safe_path_join(lora_dir, os.path.basename(str(dropdown_value)))
+                            print(translate("\u25c6 {name}を再試行: {path}").format(name=dropdown_name, path=lora_path_retry))
+                            if os.path.exists(lora_path_retry):
+                                current_lora_paths.append(lora_path_retry)
+                                print(translate("\u25c6 {name}を選択 (パス修正後): {path}").format(name=dropdown_name, path=lora_path_retry))
                             else:
-                                # 直接ファイル名だけで試行
-                                lora_path_retry = os.path.join(lora_dir, os.path.basename(str(dropdown_value)))
-                                print(translate("\u25c6 {name}を再試行: {path}").format(name=dropdown_name, path=lora_path_retry))
-                                if os.path.exists(lora_path_retry):
-                                    current_lora_paths.append(lora_path_retry)
-                                    print(translate("\u25c6 {name}を選択 (パス修正後): {path}").format(name=dropdown_name, path=lora_path_retry))
-                                else:
-                                    print(translate("\u25c6 選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
+                                print(translate("\u25c6 選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
             else:
                 # ファイルアップロードモードの場合
                 # 全LoRAファイルを収集
