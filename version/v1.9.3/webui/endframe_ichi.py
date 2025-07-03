@@ -110,6 +110,7 @@ from eichi_utils.lora_preset_manager import (
     get_preset_names
 )
 from eichi_utils import safe_path_join
+from eichi_utils.error_utils import log_and_continue
 
 # キーフレーム処理モジュールをインポート
 from eichi_utils.keyframe_handler import (
@@ -301,6 +302,7 @@ os.makedirs(input_dir, exist_ok=True)
 # キーフレーム処理関数は keyframe_handler.py に移動済み
 
 @torch.no_grad()
+@log_and_continue("worker error")
 def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, save_latent_frames=False, save_last_section_frames=False, use_vae_cache=False, use_queue=False, prompt_queue_file=None):
     # グローバル変数を使用
     global vae_cache_enabled, current_prompt

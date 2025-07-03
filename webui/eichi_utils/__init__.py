@@ -14,3 +14,4 @@ from .vae_settings import (
     get_current_vae_settings_display
 )
 from .path_utils import safe_path_join
+from .error_utils import log_and_continue

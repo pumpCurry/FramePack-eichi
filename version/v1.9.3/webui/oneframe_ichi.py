@@ -140,6 +140,7 @@ from eichi_utils.lora_preset_manager import (
 import gradio as gr
 from eichi_utils.ui_styles import get_app_css
 from eichi_utils import safe_path_join
+from eichi_utils.error_utils import log_and_continue
 import torch
 import einops
 import safetensors.torch as sf
@@ -373,6 +374,7 @@ def get_image_queue_files():
 
 # ワーカー関数
 @torch.no_grad()
+@log_and_continue("worker error")
 def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
            gpu_memory_preservation, use_teacache, lora_files=None, lora_files2=None, lora_scales_text="0.8,0.8,0.8",
            output_dir=None, use_lora=False, fp8_optimization=False, resolution=640,

@@ -1,8 +1,16 @@
 import os
+from pathlib import Path
 
-def safe_path_join(base, *parts):
-    """Join path components only for valid non-empty strings."""
+def safe_path_join(base: os.PathLike, *parts: str) -> Path:
+    """Join path components while gracefully handling invalid values.
+
+    Falsy values such as ``False`` or ``"なし"`` are skipped and any non-string
+    parts are coerced to ``str`` before joining.
+    """
+
+    base_path = Path(base)
     for p in parts:
-        if isinstance(p, str) and p and p not in {"0", "なし"}:
-            base = os.path.join(base, p)
-    return base
+        if p in (None, False, True, 0, "0", 0.0, "", "なし"):
+            continue
+        base_path = base_path / str(p)
+    return base_path
