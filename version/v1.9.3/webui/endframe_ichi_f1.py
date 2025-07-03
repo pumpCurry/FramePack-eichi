@@ -2498,7 +2498,7 @@ with block:
                     with gr.Column(scale=2):
                         resolution = gr.Dropdown(
                             label=translate("解像度"),
-                            choices=[512, 640, 768, 960, 1080, 1280, 1536, 1920],
+                            choices=[384, 512, 640, 768, 960, 1080, 1280, 1536, 1920, 2160],
                             value=640,
                             info=translate("出力動画の基準解像度。640推奨。高解像度は高負荷・高メモリ消費")
                         )
