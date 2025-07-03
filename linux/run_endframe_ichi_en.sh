@@ -1,4 +1,5 @@
 #!/bin/bash
+echo "$(basename "$0") : 起動開始...."
 # English Endframe Execution Script
 # Note: Unofficial support - no warranty
 

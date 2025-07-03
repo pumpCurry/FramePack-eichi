@@ -1,4 +1,5 @@
 #!/bin/bash
+echo "$(basename "$0") : 起動開始...."
 
 # スクリプトのあるディレクトリを取得
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"

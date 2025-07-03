@@ -1,4 +1,5 @@
 #!/bin/bash
+echo "$(basename "$0") : 起動開始...."
 # Traditional Chinese Oneframe Execution Script
 # Note: Unofficial support - no warranty
 
