@@ -28,3 +28,17 @@ def test_cache_key_order_insensitive(tmp_path):
     ], [str(b), str(a)], [1.0, 0.5], False)
 
     assert key1 == key2
+
+
+def test_cache_key_accepts_path_objects(tmp_path):
+    model = tmp_path / "model.safetensors"
+    model.write_text("m")
+    lora = tmp_path / "lora.safetensors"
+    lora.write_text("l")
+
+    key = lora_state_cache.generate_cache_key([
+        model
+    ], [lora], [0.5], True)
+
+    assert isinstance(key, str)
+    assert len(key) == 64

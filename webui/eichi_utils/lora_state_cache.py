@@ -26,7 +26,7 @@ def generate_cache_key(model_files, lora_paths, lora_scales, fp8_enabled):
     items = []
 
     # model files are order independent
-    for path in sorted(model_files or []):
+    for path in sorted([str(p) for p in (model_files or [])]):
         if os.path.exists(path):
             items.append(path)
             items.append(str(os.path.getmtime(path)))
@@ -34,7 +34,8 @@ def generate_cache_key(model_files, lora_paths, lora_scales, fp8_enabled):
     # keep LoRA paths paired with their scale values when sorting
     if lora_paths:
         scales = lora_scales or [None] * len(lora_paths)
-        for path, scale in sorted(zip(lora_paths, scales), key=lambda x: x[0]):
+        pairs = [(str(p), s) for p, s in zip(lora_paths, scales)]
+        for path, scale in sorted(pairs, key=lambda x: x[0]):
             if os.path.exists(path):
                 items.append(path)
                 items.append(str(os.path.getmtime(path)))
