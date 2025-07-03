@@ -206,7 +206,7 @@ class TransformerManager:
             if self.transformer is not None:
                 self.current_state['is_loaded'] = False
                 # モデルの参照を削除
-                del self.transformer
+                self.transformer = None
                 # 明示的にガベージコレクションを実行
                 import gc
                 gc.collect()
