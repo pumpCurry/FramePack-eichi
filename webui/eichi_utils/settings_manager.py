@@ -273,6 +273,9 @@ def get_default_app_settings_oichi():
         
         # 最適化設定
         "fp8_optimization": True,
+
+        # LoRAキャッシュ設定
+        "lora_cache": False,
         
         # バッチ設定
         "batch_count": 1,
