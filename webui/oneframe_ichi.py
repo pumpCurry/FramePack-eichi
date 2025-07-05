@@ -2061,6 +2061,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             'steps': steps,
             'cfg': cfg,
             'use_teacache': use_teacache,
+            'fp8_optimization': fp8_optimization,
+            'lora_cache': lora_cache_checkbox,
             'use_prompt_cache': use_prompt_cache,
             'gpu_memory_preservation': gpu_memory_preservation,
             'gs': gs,
@@ -2413,6 +2415,10 @@ css = get_app_css()  # eichi_utilsのスタイルを使用
 # アプリケーション起動時に保存された設定を読み込む
 saved_app_settings = load_app_settings_oichi()
 
+# Apply LoRA cache setting at startup
+if saved_app_settings:
+    lora_state_cache.set_cache_enabled(saved_app_settings.get("lora_cache", False))
+
 # 読み込んだ設定をログに出力
 if saved_app_settings:
     pass
@@ -2645,7 +2651,7 @@ with block:
             with gr.Row():
                 fp8_optimization = gr.Checkbox(
                     label=translate("FP8 最適化"),
-                    value=True,
+                    value=saved_app_settings.get("fp8_optimization", True) if saved_app_settings else True,
                     info=translate("メモリ使用量を削減し速度を改善（PyTorch 2.1以上が必要）")
                 )
 
@@ -2653,7 +2659,7 @@ with block:
             with gr.Row():
                 lora_cache_checkbox = gr.Checkbox(
                     label=translate("LoRAの設定を再起動時再利用する"),
-                    value=False,
+                    value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
                     info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
                 )
 
@@ -3454,6 +3460,8 @@ with block:
                 steps_val,
                 cfg_val,
                 use_teacache_val,
+                fp8_optimization_val,
+                lora_cache_val,
                 use_prompt_cache_val,
                 gpu_memory_preservation_val,
                 gs_val,
@@ -3477,6 +3485,8 @@ with block:
                     'steps': steps_val,
                     'cfg': cfg_val,
                     'use_teacache': use_teacache_val,
+                    'fp8_optimization': fp8_optimization_val,
+                    'lora_cache': lora_cache_val,
                     'use_prompt_cache': use_prompt_cache_val,
                     'gpu_memory_preservation': gpu_memory_preservation_val,
                     'gs': gs_val,
@@ -3549,19 +3559,21 @@ with block:
                 updates.append(gr.update(value=default_settings.get("steps", 25)))  # 2
                 updates.append(gr.update(value=default_settings.get("cfg", 1)))  # 3
                 updates.append(gr.update(value=default_settings.get("use_teacache", True)))  # 4
-                updates.append(gr.update(value=default_settings.get("use_prompt_cache", True)))  # 5
-                updates.append(gr.update(value=default_settings.get("gpu_memory_preservation", 6)))  # 6
-                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 7
-                updates.append(gr.update(value=default_settings.get("latent_window_size", 9)))  # 8
-                updates.append(gr.update(value=default_settings.get("latent_index", 0)))  # 9
-                updates.append(gr.update(value=default_settings.get("use_clean_latents_2x", True)))  # 10
-                updates.append(gr.update(value=default_settings.get("use_clean_latents_4x", True)))  # 11
-                updates.append(gr.update(value=default_settings.get("use_clean_latents_post", True)))  # 12
-                updates.append(gr.update(value=default_settings.get("target_index", 1)))  # 13
-                updates.append(gr.update(value=default_settings.get("history_index", 16)))  # 14
-                updates.append(gr.update(value=default_settings.get("save_input_images", False)))  # 15
-                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 16
-                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 17
+                updates.append(gr.update(value=default_settings.get("fp8_optimization", True)))  # 5
+                updates.append(gr.update(value=default_settings.get("lora_cache", False)))  # 6
+                updates.append(gr.update(value=default_settings.get("use_prompt_cache", True)))  # 7
+                updates.append(gr.update(value=default_settings.get("gpu_memory_preservation", 6)))  # 8
+                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 9
+                updates.append(gr.update(value=default_settings.get("latent_window_size", 9)))  #10
+                updates.append(gr.update(value=default_settings.get("latent_index", 0)))  #11
+                updates.append(gr.update(value=default_settings.get("use_clean_latents_2x", True)))  #12
+                updates.append(gr.update(value=default_settings.get("use_clean_latents_4x", True)))  #13
+                updates.append(gr.update(value=default_settings.get("use_clean_latents_post", True)))  #14
+                updates.append(gr.update(value=default_settings.get("target_index", 1)))  #15
+                updates.append(gr.update(value=default_settings.get("history_index", 16)))  #16
+                updates.append(gr.update(value=default_settings.get("save_input_images", False)))  #17
+                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  #18
+                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  #19
 
                 # ログ設定 (17番目め18番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
@@ -3757,7 +3769,7 @@ with block:
     # よく使う設定管理イベント
     def save_favorite_handler(name, prompt_val, l1, l2, l3, scales, use_lora_val,
                               lora_mode_val, use_ref, ti, hi, lw, li, c2x, c4x,
-                              cpost, teacache_val, rand_seed, seed_val,
+                              cpost, teacache_val, fp8_opt_val, lora_cache_val, rand_seed, seed_val,
                               steps_val, gs_val, gpu_mem, out_dir,
                               res_val, cfg_val, use_prompt_cache_val,
                               save_input_images_val, save_settings_on_start_val,
@@ -3780,6 +3792,8 @@ with block:
             "use_clean_latents_4x": c4x,
             "use_clean_latents_post": cpost,
             "use_teacache": teacache_val,
+            "fp8_optimization": fp8_opt_val,
+            "lora_cache": lora_cache_val,
             "use_random_seed": rand_seed,
             "seed": seed_val,
             "steps": steps_val,
@@ -3805,6 +3819,7 @@ with block:
                 use_lora_val = fav.get("use_lora", False)
                 lora_mode_val = fav.get("lora_mode", translate("ディレクトリから選択"))
                 use_ref = fav.get("use_reference_image", False)
+                lora_state_cache.set_cache_enabled(fav.get("lora_cache", False))
 
                 message_parts = []
                 # 現在のLoRA候補を取得
@@ -3863,6 +3878,8 @@ with block:
                     fav.get("use_clean_latents_4x", True),
                     fav.get("use_clean_latents_post", True),
                     fav.get("use_teacache", True),
+                    fav.get("fp8_optimization", True),
+                    fav.get("lora_cache", False),
                     fav.get("use_random_seed", True),
                     fav.get("seed", 0),
                     fav.get("steps", 25),
@@ -3884,7 +3901,7 @@ with block:
                     lora_dropdown_upd,
                     lora_preset_upd
                 )
-        return [gr.update()]*37
+        return [gr.update()]*39
 
     def delete_favorite_handler(sel_name):
         result = delete_favorite(sel_name)
@@ -3906,7 +3923,8 @@ with block:
                lora_scales_text, use_lora, lora_mode, use_reference_image,
                target_index, history_index, latent_window_size, latent_index,
                use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
-               use_teacache, use_random_seed, seed, steps, gs,
+               use_teacache, fp8_optimization, lora_cache_checkbox,
+               use_random_seed, seed, steps, gs,
                gpu_memory_preservation, output_dir,
                resolution, cfg, use_prompt_cache, save_input_images,
                save_settings_on_start, alarm_on_completion,
@@ -3920,7 +3938,8 @@ with block:
                  lora_dropdown3, lora_scales_text, use_reference_image,
                  target_index, history_index, latent_window_size, latent_index,
                  use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
-                 use_teacache, use_random_seed, seed, steps, gs,
+                 use_teacache, fp8_optimization, lora_cache_checkbox,
+                 use_random_seed, seed, steps, gs,
                  gpu_memory_preservation, output_dir,
                  resolution, cfg, use_prompt_cache, save_input_images,
                  save_settings_on_start, alarm_on_completion,
@@ -3949,7 +3968,7 @@ with block:
     
     # 生成開始・中止のイベント
     ips = [input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_prompt_cache,
-           lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_dir, save_input_images,
+           lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, lora_cache_checkbox, resolution, output_dir, save_input_images,
            batch_count, use_random_seed, latent_window_size, latent_index,
            use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3, use_rope_batch,
@@ -3967,6 +3986,8 @@ with block:
             steps,
             cfg,
             use_teacache,
+            fp8_optimization,
+            lora_cache_checkbox,
             use_prompt_cache,
             gpu_memory_preservation,
             gs,
@@ -3995,22 +4016,24 @@ with block:
             steps,                # 2
             cfg,                  # 3
             use_teacache,         # 4
-            use_prompt_cache,     # 5
-            gpu_memory_preservation, # 6
-            gs,                   # 7
-            latent_window_size,   # 8
-            latent_index,         # 9
-            use_clean_latents_2x, # 10
-            use_clean_latents_4x, # 11
-            use_clean_latents_post, # 12
-            target_index,         # 13
-            history_index,        # 14
-            save_input_images,    # 15
-            save_settings_on_start, # 16
-            alarm_on_completion,  # 17
-            log_enabled,          # 18
-            log_folder,           # 19
-            settings_status       # 20
+            fp8_optimization,     # 5
+            lora_cache_checkbox,  # 6
+            use_prompt_cache,     # 7
+            gpu_memory_preservation, # 8
+            gs,                   # 9
+            latent_window_size,   #10
+            latent_index,         #11
+            use_clean_latents_2x, #12
+            use_clean_latents_4x, #13
+            use_clean_latents_post, #14
+            target_index,         #15
+            history_index,        #16
+            save_input_images,    #17
+            save_settings_on_start, #18
+            alarm_on_completion,  #19
+            log_enabled,          #20
+            log_folder,           #21
+            settings_status       #22
         ]
     )
     
