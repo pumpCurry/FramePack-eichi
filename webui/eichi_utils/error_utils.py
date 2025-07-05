@@ -4,7 +4,13 @@ import traceback
 logger = logging.getLogger("eichi")
 if not logger.handlers:
     logger.setLevel(logging.INFO)
-    logger.addHandler(logging.FileHandler("eichi.log", encoding="utf-8"))
+    handler = logging.FileHandler("eichi.log", encoding="utf-8")
+    formatter = logging.Formatter(
+        fmt="[%(asctime)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 
 def log_and_continue(msg: str = "Unhandled exception"):
