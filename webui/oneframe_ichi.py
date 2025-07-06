@@ -2977,6 +2977,10 @@ with block:
                         """./loraディレクトリからLoRAモデルファイルを検索する関数"""
                         lora_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lora')
                         choices = []
+
+                        # 現在の作業ディレクトリとLoRAディレクトリのパスを表示
+                        print(translate("現在の作業ディレクトリ: {0}").format(os.getcwd()))
+                        print(translate("LoRAディレクトリパス: {0}").format(lora_dir))
                         
                         # ディレクトリが存在しない場合は作成
                         if not os.path.exists(lora_dir):
