@@ -2073,13 +2073,18 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     if save_settings_on_start and batch_count > 0:
         print(translate("=== 現在の設定を自動保存します ==="))
         # 現在のUIの値を収集してアプリケーション設定として保存
+        # Gradioオブジェクトから値を取得（直接値が渡る場合も考慮）
+        lora_cache_val = lora_cache_checkbox
+        if hasattr(lora_cache_checkbox, 'value'):
+            lora_cache_val = bool(lora_cache_checkbox.value)
+
         current_settings = {
             'resolution': resolution,
             'steps': steps,
             'cfg': cfg,
             'use_teacache': use_teacache,
             'fp8_optimization': fp8_optimization,
-            'lora_cache': lora_cache_checkbox,
+            'lora_cache': lora_cache_val,
             'use_prompt_cache': use_prompt_cache,
             'gpu_memory_preservation': gpu_memory_preservation,
             'gs': gs,
