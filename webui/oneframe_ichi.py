@@ -3998,7 +3998,7 @@ with block:
     
     # 生成開始・中止のイベント
     ips = [input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_prompt_cache,
-           lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, lora_cache_checkbox, resolution, output_dir, save_input_images,
+           lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_dir, save_input_images,
            save_before_input_images, batch_count, use_random_seed, latent_window_size, latent_index,
            use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3, use_rope_batch,
