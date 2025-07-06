@@ -20,17 +20,23 @@ def prompt_hash(prompt: str, n_prompt: str) -> str:
 def load_from_cache(prompt: str, n_prompt: str):
     """Load cached tensors from disk if available."""
     cache_file = os.path.join(get_cache_dir(), prompt_hash(prompt, n_prompt) + '.pt')
+    print(f"Looking for prompt cache: {cache_file}")
     if os.path.exists(cache_file):
         try:
-            return torch.load(cache_file)
+            data = torch.load(cache_file)
+            print("Prompt cache hit")
+            return data
         except Exception:
+            print("Failed to load prompt cache")
             return None
+    print("Prompt cache miss")
     return None
 
 
 def save_to_cache(prompt: str, n_prompt: str, data: dict):
     """Save tensors to disk cache."""
     cache_file = os.path.join(get_cache_dir(), prompt_hash(prompt, n_prompt) + '.pt')
+    print(f"Saving prompt cache: {cache_file}")
     try:
         torch.save(data, cache_file)
     except Exception as e:
