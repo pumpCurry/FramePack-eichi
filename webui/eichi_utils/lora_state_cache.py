@@ -50,17 +50,23 @@ def generate_cache_key(model_files, lora_paths, lora_scales, fp8_enabled):
 def load_from_cache(cache_key):
     """Load cached state dict if available."""
     cache_file = os.path.join(get_cache_dir(), cache_key + '.pt')
+    print(f"Looking for LoRA state cache: {cache_file}")
     if os.path.exists(cache_file):
         try:
-            return torch.load(cache_file)
+            data = torch.load(cache_file)
+            print("LoRA state cache hit")
+            return data
         except Exception as e:
             print(f"Failed to load LoRA state cache: {e}")
+            return None
+    print("LoRA state cache miss")
     return None
 
 
 def save_to_cache(cache_key, state_dict):
     """Save state dict to cache."""
     cache_file = os.path.join(get_cache_dir(), cache_key + '.pt')
+    print(f"Saving LoRA state cache: {cache_file}")
     try:
         torch.save(state_dict, cache_file)
     except Exception as e:
