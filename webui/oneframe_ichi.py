@@ -967,12 +967,14 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             llama_vec, llama_attention_mask = crop_or_pad_yield_mask(llama_vec, length=512)
             llama_vec_n, llama_attention_mask_n = crop_or_pad_yield_mask(llama_vec_n, length=512)
         
-        # データ型変換
-        llama_vec = llama_vec.to(transformer.dtype)
-        llama_vec_n = llama_vec_n.to(transformer.dtype)
-        clip_l_pooler = clip_l_pooler.to(transformer.dtype)
-        clip_l_pooler_n = clip_l_pooler_n.to(transformer.dtype)
-        image_encoder_last_hidden_state = image_encoder_last_hidden_state.to(transformer.dtype)
+        # データ型変換とデバイス移動
+        llama_vec = llama_vec.to(device=gpu, dtype=transformer.dtype)
+        llama_vec_n = llama_vec_n.to(device=gpu, dtype=transformer.dtype)
+        clip_l_pooler = clip_l_pooler.to(device=gpu, dtype=transformer.dtype)
+        clip_l_pooler_n = clip_l_pooler_n.to(device=gpu, dtype=transformer.dtype)
+        llama_attention_mask = llama_attention_mask.to(gpu)
+        llama_attention_mask_n = llama_attention_mask_n.to(gpu)
+        image_encoder_last_hidden_state = image_encoder_last_hidden_state.to(device=gpu, dtype=transformer.dtype)
         
         # endframe_ichiと同様に、テキストエンコーダーのメモリを完全に解放
         if not high_vram:
@@ -3996,7 +3998,7 @@ with block:
     
     # 生成開始・中止のイベント
     ips = [input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_prompt_cache,
-           lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, lora_cache_checkbox, resolution, output_dir, save_input_images,
+           lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_dir, save_input_images,
            save_before_input_images, batch_count, use_random_seed, latent_window_size, latent_index,
            use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3, use_rope_batch,
