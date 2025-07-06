@@ -68,6 +68,8 @@ except ImportError:
 # 設定管理のインポートと読み込み
 from eichi_utils.settings_manager import load_app_settings_f1
 saved_app_settings = load_app_settings_f1()
+if saved_app_settings:
+    lora_state_cache.set_cache_enabled(saved_app_settings.get("lora_cache", False))
 
 # 読み込んだ設定をログに出力
 if saved_app_settings:
@@ -4769,7 +4771,7 @@ with block:
             with gr.Row():
                 lora_cache_checkbox = gr.Checkbox(
                     label=translate("LoRAの設定を再起動時再利用する"),
-                    value=False,
+                    value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
                     info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
                 )
 

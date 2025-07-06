@@ -3159,6 +3159,8 @@ css = get_app_css()
 # アプリケーション起動時に保存された設定を読み込む
 from eichi_utils.settings_manager import load_app_settings
 saved_app_settings = load_app_settings()
+if saved_app_settings:
+    lora_state_cache.set_cache_enabled(saved_app_settings.get("lora_cache", False))
 
 block = gr.Blocks(css=css).queue()
 with block:
@@ -3576,7 +3578,7 @@ with block:
             with gr.Row():
                 lora_cache_checkbox = gr.Checkbox(
                     label=translate("LoRAの設定を再起動時再利用する"),
-                    value=False,
+                    value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
                     info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
                 )
 
