@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
 print(f"{os.path.basename(__file__)} : 起動開始....")
@@ -394,7 +395,7 @@ def get_image_queue_files():
 @log_and_continue("worker error")
 def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
            gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files=None, lora_files2=None, lora_scales_text="0.8,0.8,0.8",
-           output_dir=None, save_input_images=False, use_lora=False, fp8_optimization=False, resolution=640,
+           output_dir=None, save_input_images=False, save_before_input_images=False, use_lora=False, fp8_optimization=False, resolution=640,
            latent_window_size=9, latent_index=0, use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
            lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
            batch_index=None, use_queue=False, prompt_queue_file=None,
@@ -436,6 +437,20 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
 
     outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
+
+    if save_before_input_images:
+        for p, suffix in [
+            (input_image, 'input_orig'),
+            (reference_image, 'reference_orig'),
+            (input_mask, 'input_mask_orig'),
+            (reference_mask, 'reference_mask_orig'),
+        ]:
+            if isinstance(p, str) and os.path.exists(p):
+                try:
+                    ext = os.path.splitext(p)[1]
+                    shutil.copy2(p, os.path.join(outputs_folder, f'{job_id}_{suffix}{ext}'))
+                except Exception as e:
+                    print(translate("入力画像のコピーに失敗しました: {0}").format(e))
     
     # プログレスバーの初期化
     stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...'))))
@@ -1861,7 +1876,7 @@ def check_metadata_on_checkbox_change(should_copy, image_path):
 
 def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_prompt_cache,
             lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_directory=None,
-            save_input_images=False, batch_count=1, use_random_seed=False, latent_window_size=9, latent_index=0,
+            save_input_images=False, save_before_input_images=False, batch_count=1, use_random_seed=False, latent_window_size=9, latent_index=0,
             use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
             lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
             use_rope_batch=False, use_queue=False, prompt_queue_file=None,
@@ -2074,6 +2089,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             'target_index': target_index,
             'history_index': history_index,
             'save_input_images': save_input_images,
+            'save_before_input_images': save_before_input_images,
             'save_settings_on_start': save_settings_on_start,
             'alarm_on_completion': alarm_on_completion
         }
@@ -2233,7 +2249,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             # ワーカー実行 - 詳細設定パラメータを含む（キュー機能対応）
             async_run(worker, current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
                      gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
-                     output_dir, save_input_images, use_lora, fp8_optimization, resolution,
+                     output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, resolution,
                      current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
                      lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
                      batch_index, use_queue, prompt_queue_file,
@@ -3374,9 +3390,16 @@ with block:
                     )
 
                 save_input_images = gr.Checkbox(
-                    label=translate("入力画像を保存"),
+                    label=translate("計算時入力画像を保存"),
                     value=saved_app_settings.get("save_input_images", False) if saved_app_settings else False,
                     info=translate("チェックをオンにすると、入力画像と参照画像を出力フォルダに保存します。"),
+                    elem_classes="saveable-setting"
+                )
+
+                save_before_input_images = gr.Checkbox(
+                    label=translate("計算前入力画像を保存"),
+                    value=saved_app_settings.get("save_before_input_images", False) if saved_app_settings else False,
+                    info=translate("チェックをオンにすると、処理前の入力画像と参照画像を出力フォルダに保存します。"),
                     elem_classes="saveable-setting"
                 )
             
@@ -3473,6 +3496,7 @@ with block:
                 target_index_val,
                 history_index_val,
                 save_input_images_val,
+                save_before_input_images_val,
                 save_settings_on_start_val,
                 alarm_on_completion_val,
                 # ログ設定項目
@@ -3498,6 +3522,7 @@ with block:
                     'target_index': target_index_val,
                     'history_index': history_index_val,
                     'save_input_images': save_input_images_val,
+                    'save_before_input_images': save_before_input_images_val,
                     'save_settings_on_start': save_settings_on_start_val,
                     'alarm_on_completion': alarm_on_completion_val
                 }
@@ -3572,8 +3597,9 @@ with block:
                 updates.append(gr.update(value=default_settings.get("target_index", 1)))  #15
                 updates.append(gr.update(value=default_settings.get("history_index", 16)))  #16
                 updates.append(gr.update(value=default_settings.get("save_input_images", False)))  #17
-                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  #18
-                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  #19
+                updates.append(gr.update(value=default_settings.get("save_before_input_images", False)))  #18
+                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  #19
+                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  #20
 
                 # ログ設定 (17番目め18番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
@@ -3772,7 +3798,7 @@ with block:
                               cpost, teacache_val, fp8_opt_val, lora_cache_val, rand_seed, seed_val,
                               steps_val, gs_val, gpu_mem, out_dir,
                               res_val, cfg_val, use_prompt_cache_val,
-                              save_input_images_val, save_settings_on_start_val,
+                              save_input_images_val, save_before_input_images_val, save_settings_on_start_val,
                               alarm_on_completion_val, log_enabled_val,
                               log_folder_val):
         settings = {
@@ -3804,6 +3830,7 @@ with block:
             "cfg": cfg_val,
             "use_prompt_cache": use_prompt_cache_val,
             "save_input_images": save_input_images_val,
+            "save_before_input_images": save_before_input_images_val,
             "save_settings_on_start": save_settings_on_start_val,
             "alarm_on_completion": alarm_on_completion_val,
             "log_enabled": log_enabled_val,
@@ -3890,6 +3917,7 @@ with block:
                     fav.get("cfg", 1),
                     fav.get("use_prompt_cache", True),
                     fav.get("save_input_images", False),
+                    fav.get("save_before_input_images", False),
                     fav.get("save_settings_on_start", False),
                     fav.get("alarm_on_completion", True),
                     fav.get("log_enabled", False),
@@ -3901,7 +3929,7 @@ with block:
                     lora_dropdown_upd,
                     lora_preset_upd
                 )
-        return [gr.update()]*39
+        return [gr.update()]*40
 
     def delete_favorite_handler(sel_name):
         result = delete_favorite(sel_name)
@@ -3926,7 +3954,7 @@ with block:
                use_teacache, fp8_optimization, lora_cache_checkbox,
                use_random_seed, seed, steps, gs,
                gpu_memory_preservation, output_dir,
-               resolution, cfg, use_prompt_cache, save_input_images,
+               resolution, cfg, use_prompt_cache, save_input_images, save_before_input_images,
                save_settings_on_start, alarm_on_completion,
                log_enabled, log_folder],
         outputs=[fav_message, fav_dropdown]
@@ -3941,7 +3969,7 @@ with block:
                  use_teacache, fp8_optimization, lora_cache_checkbox,
                  use_random_seed, seed, steps, gs,
                  gpu_memory_preservation, output_dir,
-                 resolution, cfg, use_prompt_cache, save_input_images,
+                 resolution, cfg, use_prompt_cache, save_input_images, save_before_input_images,
                  save_settings_on_start, alarm_on_completion,
                  log_enabled, log_folder,
                  advanced_kisekae_group,
@@ -3969,7 +3997,7 @@ with block:
     # 生成開始・中止のイベント
     ips = [input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_prompt_cache,
            lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, lora_cache_checkbox, resolution, output_dir, save_input_images,
-           batch_count, use_random_seed, latent_window_size, latent_index,
+           save_before_input_images, batch_count, use_random_seed, latent_window_size, latent_index,
            use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3, use_rope_batch,
            use_queue, prompt_queue_file,  # キュー機能パラメータを追加
@@ -3999,6 +4027,7 @@ with block:
             target_index,
             history_index,
             save_input_images,
+            save_before_input_images,
             save_settings_on_start,
             alarm_on_completion,
             log_enabled,
@@ -4029,11 +4058,12 @@ with block:
             target_index,         #15
             history_index,        #16
             save_input_images,    #17
+            save_before_input_images, #18
             save_settings_on_start, #18
-            alarm_on_completion,  #19
-            log_enabled,          #20
-            log_folder,           #21
-            settings_status       #22
+            alarm_on_completion,  #20
+            log_enabled,          #21
+            log_folder,           #22
+            settings_status       #23
         ]
     )
     
