@@ -286,6 +286,9 @@ def get_default_app_settings_oichi():
         # キュー設定
         "use_queue": False,
 
+        # 参照画像長辺合わせ
+        "reference_long_edge": False,
+
         # 自動保存・アラーム設定
         "save_input_images": False,
         "save_before_input_images": False,
