@@ -214,6 +214,21 @@ def _norm_dropdown(val):
         return None
     return str(val)
 
+def resize_and_pad_with_edge_color(image_np, target_width, target_height):
+    """Resize image to fit within target size and pad using edge color."""
+    pil_image = Image.fromarray(image_np)
+    ow, oh = pil_image.size
+    scale = min(target_width / ow, target_height / oh)
+    new_w = int(round(ow * scale))
+    new_h = int(round(oh * scale))
+    resized = pil_image.resize((new_w, new_h), Image.LANCZOS)
+    edge_color = resized.getpixel((0, 0))
+    padded = Image.new(resized.mode, (target_width, target_height), edge_color)
+    paste_x = (target_width - new_w) // 2
+    paste_y = (target_height - new_h) // 2
+    padded.paste(resized, (paste_x, paste_y))
+    return np.array(padded)
+
 # グローバルなモデル状態管理インスタンスを作成（モデルは実際に使用するまでロードしない）
 transformer_manager = TransformerManager(device=gpu, high_vram_mode=high_vram, use_f1_model=False)
 text_encoder_manager = TextEncoderManager(device=gpu, high_vram_mode=high_vram)
@@ -401,7 +416,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
            batch_index=None, use_queue=False, prompt_queue_file=None,
            # Kisekaeichi関連のパラメータ
            use_reference_image=False, reference_image=None, 
-           target_index=1, history_index=13, input_mask=None, reference_mask=None):
+           target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None):
     
     # モデル変数をグローバルとして宣言（遅延ロード用）
     global vae, text_encoder, text_encoder_2, transformer, image_encoder
@@ -708,7 +723,10 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     ref_image_np = ref_image_np[:, :, :3]
                 
                 # 同じサイズにリサイズ（入力画像と同じ解像度を使用）
-                ref_image_np = resize_and_center_crop(ref_image_np, target_width=width, target_height=height)
+                if reference_long_edge:
+                    ref_image_np = resize_and_pad_with_edge_color(ref_image_np, target_width=width, target_height=height)
+                else:
+                    ref_image_np = resize_and_center_crop(ref_image_np, target_width=width, target_height=height)
                 ref_image_pt = torch.from_numpy(ref_image_np).float() / 127.5 - 1
                 ref_image_pt = ref_image_pt.permute(2, 0, 1)[None, :, None]
 
@@ -1330,7 +1348,10 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                         if reference_mask is not None:
                             reference_mask_img = Image.open(reference_mask).convert('L')
                             reference_mask_np = np.array(reference_mask_img)
-                            reference_mask_resized = Image.fromarray(reference_mask_np).resize((width_latent, height_latent), Image.BILINEAR)
+                            if reference_long_edge:
+                                reference_mask_resized = resize_and_pad_with_edge_color(reference_mask_np, target_width=width_latent, target_height=height_latent)
+                            else:
+                                reference_mask_resized = Image.fromarray(reference_mask_np).resize((width_latent, height_latent), Image.BILINEAR)
                             reference_mask_tensor = torch.from_numpy(np.array(reference_mask_resized)).float() / 255.0
                             reference_mask_tensor = reference_mask_tensor.to(clean_latents.device)[None, None, None, :, :]
                             
@@ -1883,8 +1904,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
             use_rope_batch=False, use_queue=False, prompt_queue_file=None,
             # Kisekaeichi 関連のパラメータ
-            use_reference_image=False, reference_image=None, 
-            target_index=1, history_index=13, input_mask=None, reference_mask=None,
+            use_reference_image=False, reference_image=None,
+            target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None,
             save_settings_on_start=False, alarm_on_completion=True):
     global stream
     global batch_stopped, user_abort, user_abort_notified
@@ -2262,7 +2283,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                      batch_index, use_queue, prompt_queue_file,
                      # Kisekaeichi関連パラメータを追加
                      use_reference_image, reference_image,
-                     target_index, history_index, input_mask, reference_mask)
+                     target_index, history_index, reference_long_edge, input_mask, reference_mask)
         except Exception as e:
             import traceback
         
@@ -2796,6 +2817,12 @@ with block:
                         reference_mask_info = gr.Markdown(
                             translate("白い部分を適用、黒い部分を無視（グレースケール画像）")
                         )
+
+                reference_long_edge = gr.Checkbox(
+                    label=translate("参照画像を長辺合わせにする"),
+                    value=saved_app_settings.get("reference_long_edge", False) if saved_app_settings else False,
+                    elem_classes="saveable-setting"
+                )
             
             # 着せ替え設定の表示/非表示を切り替える関数
             def toggle_kisekae_settings(use_reference):
@@ -3506,6 +3533,7 @@ with block:
                 use_clean_latents_post_val,
                 target_index_val,
                 history_index_val,
+                reference_long_edge_val,
                 save_input_images_val,
                 save_before_input_images_val,
                 save_settings_on_start_val,
@@ -3532,6 +3560,7 @@ with block:
                     'use_clean_latents_post': use_clean_latents_post_val,
                     'target_index': target_index_val,
                     'history_index': history_index_val,
+                    'reference_long_edge': reference_long_edge_val,
                     'save_input_images': save_input_images_val,
                     'save_before_input_images': save_before_input_images_val,
                     'save_settings_on_start': save_settings_on_start_val,
@@ -3607,10 +3636,11 @@ with block:
                 updates.append(gr.update(value=default_settings.get("use_clean_latents_post", True)))  #14
                 updates.append(gr.update(value=default_settings.get("target_index", 1)))  #15
                 updates.append(gr.update(value=default_settings.get("history_index", 16)))  #16
-                updates.append(gr.update(value=default_settings.get("save_input_images", False)))  #17
-                updates.append(gr.update(value=default_settings.get("save_before_input_images", False)))  #18
-                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  #19
-                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  #20
+                updates.append(gr.update(value=default_settings.get("reference_long_edge", False)))  #17
+                updates.append(gr.update(value=default_settings.get("save_input_images", False)))  #18
+                updates.append(gr.update(value=default_settings.get("save_before_input_images", False)))  #19
+                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  #20
+                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  #21
 
                 # ログ設定 (17番目め18番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
@@ -4013,8 +4043,8 @@ with block:
            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3, use_rope_batch,
            use_queue, prompt_queue_file,  # キュー機能パラメータを追加
            # Kisekaeichi関連パラメータを追加
-           use_reference_image, reference_image, 
-           target_index, history_index, input_mask, reference_mask,
+           use_reference_image, reference_image,
+           target_index, history_index, reference_long_edge, input_mask, reference_mask,
            save_settings_on_start, alarm_on_completion]  # 設定保存パラメータを追加
     
     # 設定保存ボタンのクリックイベント
@@ -4037,6 +4067,7 @@ with block:
             use_clean_latents_post,
             target_index,
             history_index,
+            reference_long_edge,
             save_input_images,
             save_before_input_images,
             save_settings_on_start,
@@ -4068,13 +4099,14 @@ with block:
             use_clean_latents_post, #14
             target_index,         #15
             history_index,        #16
-            save_input_images,    #17
-            save_before_input_images, #18
-            save_settings_on_start, #18
-            alarm_on_completion,  #20
-            log_enabled,          #21
-            log_folder,           #22
-            settings_status       #23
+            reference_long_edge,  #17
+            save_input_images,    #18
+            save_before_input_images, #19
+            save_settings_on_start, #20
+            alarm_on_completion,  #21
+            log_enabled,          #22
+            log_folder,           #23
+            settings_status       #24
         ]
     )
     
@@ -4087,5 +4119,4 @@ block.launch(
     server_name=args.server,
     server_port=args.port,
     share=args.share,
-    inbrowser=args.inbrowser,
-)
+    inbrowser=args.inbrowser,)
