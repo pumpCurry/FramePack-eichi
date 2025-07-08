@@ -207,4 +207,14 @@ def get_app_css():
     .group-border {
         border: solid 1px;
     }
+
+    /* v2 ハンバーガーメニューの表示位置と背景を修正 */
+    #menu, #menu button, #menu_toggle, #close-menu {
+        position: relative;
+        z-index: 2000;
+    }
+    #menu {
+        background-color: var(--panel-background-fill, #222);
+        border: 1px solid var(--border-color-primary, #444);
+    }
     """
