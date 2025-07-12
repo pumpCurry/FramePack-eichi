@@ -299,6 +299,7 @@
   "Quick List": "快速列表",
   "Start Generation": "開始生成",
   "End Generation": "結束生成",
+  "この生成で打ち切り": "在此生成後停止",
   "Use TeaCache": "使用 TeaCache",
   "Faster speed, but often makes hands and fingers slightly worse.": "加快速度，但可能會稍微影響手部和手指的效果。",
   "Use Random Seed": "使用隨機種子",

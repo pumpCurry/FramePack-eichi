@@ -299,6 +299,7 @@
   "Quick List": "Быстрый список",
   "Start Generation": "Начать генерацию",
   "End Generation": "Остановить генерацию",
+  "この生成で打ち切り": "Остановить после текущей генерации",
   "Use TeaCache": "Использовать TeaCache",
   "Faster speed, but often makes hands and fingers slightly worse.": "Быстрее, но часто ухудшает качество рук и пальцев.",
   "Use Random Seed": "Использовать случайный Seed",
