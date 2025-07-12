@@ -238,6 +238,7 @@ else:
 
 # グローバル変数
 batch_stopped = False  # バッチ処理の停止フラグ
+stop_after_current = False  # 現在の生成完了後に停止するフラグ
 queue_enabled = False  # キュー機能の有効/無効フラグ
 queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
@@ -2502,6 +2503,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
+    stop_after_current = False
 
     # frame_save_modeから save_latent_frames と save_last_section_frames を算出
     save_latent_frames = False
@@ -2732,6 +2734,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
     # バッチ処理の全体停止用フラグ
     batch_stopped = False
+    stop_after_current = False
 
     # 元のシード値を保存（バッチ処理用）
     original_seed = seed
@@ -2751,12 +2754,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(value=seed)
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(value=seed)
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update()
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
     stream = AsyncStream()
 
@@ -2770,6 +2773,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             '',
             gr.update(interactive=True),
             gr.update(interactive=False, value=translate("End Generation")),
+            gr.update(interactive=False),
             gr.update()
         )
         return
@@ -2786,6 +2790,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 '',
                 gr.update(interactive=True),
                 gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False),
                 gr.update()
             )
             break
@@ -2838,7 +2843,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update()
+            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
         # バッチインデックスに応じてSEED値を設定
         # ランダムシード使用判定を再度実施
@@ -2874,13 +2879,16 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         if batch_stopped:
             print(translate("バッチ処理が中断されました。worker関数の実行をキャンセルします。"))
             # 中断メッセージをUIに表示
-            yield (gr.skip(),
-                   gr.update(visible=False),
-                   translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index, batch_count),
-                   '',
-                   gr.update(interactive=True),
-                   gr.update(interactive=False, value=translate("End Generation")),
-                   gr.update())
+            yield (
+                gr.skip(),
+                gr.update(visible=False),
+                translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index, batch_count),
+                '',
+                gr.update(interactive=True),
+                gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False),
+                gr.update()
+            )
             break
 
         # GPUメモリの設定値を出力し、正しい型に変換
@@ -3051,6 +3059,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     gr.update(),
                     gr.update(interactive=False),
                     gr.update(interactive=True),
+                    gr.update(interactive=True),
                     gr.update(),
                 )
 
@@ -3089,7 +3098,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 if current_seed_info not in desc:
                     desc = desc + "\n\n" + current_seed_info
                 # preview_imageを明示的に設定
-                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update()
+                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
             if flag == 'end':
                 # このバッチの処理が終了
@@ -3107,6 +3116,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         '',
                         gr.update(interactive=True),
                         gr.update(interactive=False, value=translate("End Generation")),
+                        gr.update(interactive=False),
                         gr.update()
                     )
                 else:
@@ -3118,6 +3128,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         next_batch_message,
                         '',
                         gr.update(interactive=False),
+                        gr.update(interactive=True),
                         gr.update(interactive=True),
                         gr.update()
                     )
@@ -3143,6 +3154,17 @@ def end_process():
 
     # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
     return gr.update(value=translate("停止処理中..."))
+
+def end_after_current_process():
+    """現在の生成完了後に停止する処理"""
+    global batch_stopped, stop_after_current
+
+    if not stop_after_current:
+        batch_stopped = True
+        stop_after_current = True
+        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+
+    return gr.update(value=translate("停止処理中..."), interactive=False)
 
 # 既存のQuick Prompts（初期化時にプリセットに変換されるので、互換性のために残す）
 quick_prompts = [
@@ -3565,6 +3587,7 @@ with block:
             with gr.Row():
                 start_button = gr.Button(value=translate("Start Generation"))
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
+                stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
 
             # FP8最適化設定
             with gr.Row():
@@ -6137,7 +6160,7 @@ with block:
 
         if not is_valid:
             # 画像が無い場合はエラーメッセージを表示して終了
-            yield None, gr.update(visible=False), translate("エラー: 画像が選択されていません"), error_message, gr.update(interactive=True), gr.update(interactive=False), gr.update()
+            yield None, gr.update(visible=False), translate("エラー: 画像が選択されていません"), error_message, gr.update(interactive=True), gr.update(interactive=False), gr.update(interactive=False), gr.update()
             return
 
         # 自動保存機能: actual_save_settings_valueがTrueの場合、現在の設定を保存
@@ -6367,6 +6390,7 @@ with block:
                 '',
                 gr.update(interactive=True),
                 gr.update(interactive=False),
+                gr.update(interactive=False),
                 gr.update(),
             )
 
@@ -6374,8 +6398,9 @@ with block:
     # UIから渡されるパラメーターリスト
     ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, end_frame, end_frame_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, section_settings, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_vae_cache, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion]
     
-    start_button.click(fn=validate_and_process, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, seed])
-    end_button.click(fn=end_process, outputs=[end_button])
+    start_button.click(fn=validate_and_process, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed])
+    end_button.click(fn=end_process, outputs=[end_button, stop_after_button])
+    stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button])
 
     # キーフレーム画像変更時のイベント登録
     # セクション0（赤枚)からの自動コピー処理
