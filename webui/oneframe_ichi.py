@@ -153,7 +153,10 @@ from eichi_utils.favorite_settings_manager import load_favorites, save_favorite,
 
 import gradio as gr
 from eichi_utils.ui_styles import get_app_css
+
+print(translate("PyTorchを読み込んでいます..."))
 import torch
+print(translate("完了."))
 import einops
 import safetensors.torch as sf
 import numpy as np
