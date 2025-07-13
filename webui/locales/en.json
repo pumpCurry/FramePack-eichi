@@ -320,6 +320,7 @@
   "バッチ処理が中断されました（バッチ開始前）": "Batch processing was interrupted (before batch start)",
   "バッチ処理が中断されました": "Batch processing was interrupted",
   "End Generation": "End Generation",
+  "この生成で打ち切り": "Stop After Current Generation",
   "バッチ処理がユーザーによって中止されました": "Batch processing was cancelled by user",
   "バッチ処理が中止されました。": "Batch processing was cancelled.",
   "バッチ処理: {0}/{1}（プロンプトキュー行を優先: {2}/{3}）": "Batch processing: {0}/{1} (Prioritizing prompt queue line: {2}/{3})",
