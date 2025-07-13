@@ -2116,6 +2116,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             'use_clean_latents_post': use_clean_latents_post,
             'target_index': target_index,
             'history_index': history_index,
+            'reference_long_edge': reference_long_edge,
             'save_input_images': save_input_images,
             'save_before_input_images': save_before_input_images,
             'save_settings_on_start': save_settings_on_start,
@@ -2739,6 +2740,14 @@ with block:
                 label=translate("参照画像を使用"),
                 value=False
             )
+
+            # 参照画像を長辺合わせにするかどうか
+            reference_long_edge = gr.Checkbox(
+                label=translate("参照画像を長辺合わせにする"),
+                value=saved_app_settings.get("reference_long_edge", False) if saved_app_settings else False,
+                elem_classes="saveable-setting",
+                visible=False
+            )
             
             # 参照画像の入力
             reference_image = gr.Image(
@@ -2818,11 +2827,7 @@ with block:
                             translate("白い部分を適用、黒い部分を無視（グレースケール画像）")
                         )
 
-                reference_long_edge = gr.Checkbox(
-                    label=translate("参照画像を長辺合わせにする"),
-                    value=saved_app_settings.get("reference_long_edge", False) if saved_app_settings else False,
-                    elem_classes="saveable-setting"
-                )
+
             
             # 着せ替え設定の表示/非表示を切り替える関数
             def toggle_kisekae_settings(use_reference):
@@ -2834,6 +2839,7 @@ with block:
                     gr.update(visible=use_reference),  # reference_image
                     gr.update(visible=use_reference),  # advanced_kisekae_group
                     gr.update(visible=use_reference),  # reference_image_info
+                    gr.update(visible=use_reference),  # reference_long_edge
                     gr.update(value=target_index_value),  # target_index
                     gr.update(value=history_index_value)  # history_index
                 ]
@@ -2842,7 +2848,7 @@ with block:
             use_reference_image.change(
                 toggle_kisekae_settings,
                 inputs=[use_reference_image],
-                outputs=[reference_image, advanced_kisekae_group, reference_image_info, target_index, history_index]
+                outputs=[reference_image, advanced_kisekae_group, reference_image_info, reference_long_edge, target_index, history_index]
             )
             
             # 詳細設定アコーディオン - 埋め込みプロンプト機能の直後に配置
@@ -3835,7 +3841,7 @@ with block:
         outputs=[output_dir, path_display])
     # よく使う設定管理イベント
     def save_favorite_handler(name, prompt_val, l1, l2, l3, scales, use_lora_val,
-                              lora_mode_val, use_ref, ti, hi, lw, li, c2x, c4x,
+                              lora_mode_val, use_ref, ti, hi, ref_le, lw, li, c2x, c4x,
                               cpost, teacache_val, fp8_opt_val, lora_cache_val, rand_seed, seed_val,
                               steps_val, gs_val, gpu_mem, out_dir,
                               res_val, cfg_val, use_prompt_cache_val,
@@ -3853,6 +3859,7 @@ with block:
             "use_reference_image": use_ref,
             "target_index": ti,
             "history_index": hi,
+            "reference_long_edge": ref_le,
             "latent_window_size": lw,
             "latent_index": li,
             "use_clean_latents_2x": c2x,
@@ -3940,6 +3947,7 @@ with block:
                     use_ref,
                     fav.get("target_index", 1),
                     fav.get("history_index", 16),
+                    fav.get("reference_long_edge", False),
                     fav.get("latent_window_size", 9),
                     fav.get("latent_index", 0),
                     fav.get("use_clean_latents_2x", True),
@@ -3970,7 +3978,7 @@ with block:
                     lora_dropdown_upd,
                     lora_preset_upd
                 )
-        return [gr.update()]*40
+        return [gr.update()]*41
 
     def delete_favorite_handler(sel_name):
         result = delete_favorite(sel_name)
@@ -3990,7 +3998,7 @@ with block:
         fn=save_favorite_handler,
         inputs=[fav_name, prompt, lora_dropdown1, lora_dropdown2, lora_dropdown3,
                lora_scales_text, use_lora, lora_mode, use_reference_image,
-               target_index, history_index, latent_window_size, latent_index,
+               target_index, history_index, reference_long_edge, latent_window_size, latent_index,
                use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
                use_teacache, fp8_optimization, lora_cache_checkbox,
                use_random_seed, seed, steps, gs,
@@ -4005,7 +4013,7 @@ with block:
         inputs=[fav_dropdown],
         outputs=[fav_message, prompt, use_lora, lora_mode, lora_dropdown1, lora_dropdown2,
                  lora_dropdown3, lora_scales_text, use_reference_image,
-                 target_index, history_index, latent_window_size, latent_index,
+                 target_index, history_index, reference_long_edge, latent_window_size, latent_index,
                  use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
                  use_teacache, fp8_optimization, lora_cache_checkbox,
                  use_random_seed, seed, steps, gs,
