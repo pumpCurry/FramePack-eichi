@@ -192,6 +192,7 @@ current_processing_config_name = None  # For video file naming
 current_batch_progress = {"current": 0, "total": 0}  # Batch progress tracking
 queue_ui_settings = None  # Captured UI settings for queue processing
 pending_lora_config_data = None  # For delayed LoRA configuration loading
+stop_after_current = False  # Flag to stop after current generation
 
 # Configuration constants for queue display
 CONST_queued_shown_count = 5  # Number of queued items shown in status
@@ -1011,6 +1012,7 @@ def validate_and_process_with_queue_check(*args):
             '<div style="color: red;">Queue processing is running. Please wait for completion or stop the queue.</div>',  # progress_bar
             gr.update(interactive=False, value=translate("队列处理中，手动生成已禁用")),  # start_button
             gr.update(interactive=False),  # end_button
+            gr.update(interactive=False),  # stop_after_button
             gr.update(interactive=False, value=translate("队列处理中...")),  # queue_start_button
             gr.update()  # seed
         )
@@ -1018,24 +1020,24 @@ def validate_and_process_with_queue_check(*args):
         
     # If no queue processing, proceed with normal validation
     for result in validate_and_process(*args):
-        # result is a tuple: (video, preview, desc, progress, start_btn, end_btn, seed)
-        if len(result) >= 6:
-            video, preview, desc, progress, start_btn, end_btn = result[:6]
-            seed_update = result[6] if len(result) > 6 else gr.update()
-            
-            # During manual generation, manage queue start button state
-            if isinstance(start_btn, dict) and not start_btn.get('interactive', True):
-                # Manual generation is running, disable queue start
-                queue_start_state = gr.update(interactive=False, value=translate("手动生成中..."))
-            else:
-                # Manual generation finished, re-enable queue start
-                queue_start_state = gr.update(interactive=True, value=translate("▶️ Start Queue"))
-            
-            # Return 8 outputs to match the expected outputs
-            yield (video, preview, desc, progress, start_btn, end_btn, queue_start_state, seed_update)
+        # result is a tuple: (video, preview, desc, progress, start_btn, end_btn, stop_after_btn, seed)
+        if len(result) >= 7:
+            video, preview, desc, progress, start_btn, end_btn, stop_after_btn = result[:7]
+            seed_update = result[7] if len(result) > 7 else gr.update()
+        
+        # During manual generation, manage queue start button state
+        if isinstance(start_btn, dict) and not start_btn.get('interactive', True):
+            # Manual generation is running, disable queue start
+            queue_start_state = gr.update(interactive=False, value=translate("手动生成中..."))
+        else:
+            # Manual generation finished, re-enable queue start
+            queue_start_state = gr.update(interactive=True, value=translate("▶️ Start Queue"))
+
+        # Return 9 outputs to match the expected outputs
+        yield (video, preview, desc, progress, start_btn, end_btn, stop_after_btn, queue_start_state, seed_update)
         else:
             # Fallback for unexpected result format
-            yield result + (gr.update(),) * (8 - len(result))
+            yield result + (gr.update(),) * (9 - len(result))
 
 def end_process_enhanced():
 
@@ -1050,6 +1052,20 @@ def end_process_enhanced():
     return (
         gr.update(value=translate("停止処理中...")),  # End button (temporary message)
         gr.update(interactive=True, value=translate("▶️ Start Queue"))  # Re-enable queue start
+    )
+
+def end_after_current_process_enhanced():
+    """Stop after the current generation completes"""
+    global batch_stopped, stop_after_current
+
+    if not stop_after_current:
+        batch_stopped = True
+        stop_after_current = True
+        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+
+    return (
+        gr.update(value=translate("停止処理中...")),
+        gr.update(interactive=True, value=translate("▶️ Start Queue"))
     )
   
 # ==============================================================================
@@ -3867,6 +3883,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
+    stop_after_current = False
 
 
     # フレームサイズ設定に応じてlatent_window_sizeを先に調整
@@ -4069,6 +4086,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
     # バッチ処理の全体停止用フラグ
     batch_stopped = False
+    stop_after_current = False
 
     # 元のシード値を保存（バッチ処理用）
     original_seed = seed
@@ -4088,12 +4106,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(value=seed)
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update(value=seed)
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update()
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
 
     stream = AsyncStream()
 
@@ -4107,6 +4125,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             '',
             gr.update(interactive=True),
             gr.update(interactive=False, value=translate("End Generation")),
+            gr.update(interactive=False),
             gr.update()
         )
         return
@@ -4172,7 +4191,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update()
+            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
 
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
@@ -4333,12 +4352,13 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 batch_output_filename = data
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (
-                    batch_output_filename if batch_output_filename is not None else gr.skip(), 
-                    gr.update(value=None, visible=False), 
-                    gr.update(), 
-                    gr.update(), 
-                    gr.update(interactive=False), 
-                    gr.update(interactive=True), 
+                    batch_output_filename if batch_output_filename is not None else gr.skip(),
+                    gr.update(value=None, visible=False),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(interactive=False),
+                    gr.update(interactive=True),
+                    gr.update(interactive=False),
                     gr.update(),
                 )
 
@@ -4349,7 +4369,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     batch_info = translate("バッチ処理: {0}/{1} - ").format(batch_index + 1, batch_count)
                     desc = batch_info + desc
                 # preview_imageを明示的に設定
-                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update()
+                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
 
             if flag == 'end':
 
@@ -4380,6 +4400,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         '',
                         gr.update(interactive=True),
                         gr.update(interactive=False, value=translate("End Generation")),
+                        gr.update(interactive=False),
                         gr.update()
                     )
                     # 最後のバッチが終わったので終了
@@ -4395,6 +4416,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         '',
                         gr.update(interactive=False),
                         gr.update(interactive=True),
+                        gr.update(interactive=False),
                         gr.update()
                     )
                     # バッチループの内側で使用される変数を次のバッチ用に更新する
@@ -4758,6 +4780,7 @@ with block:
             with gr.Row():
                 start_button = gr.Button(value=translate("Start Generation"))
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
+                stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
 
             # FP8最適化設定
             with gr.Row():
@@ -6068,7 +6091,7 @@ with block:
 
         if not is_valid:
             # 画像が無い場合はエラーメッセージを表示して終了
-            yield None, gr.update(visible=False), translate("エラー: 画像が選択されていません"), error_message, gr.update(interactive=True), gr.update(interactive=False), gr.update()
+            yield None, gr.update(visible=False), translate("エラー: 画像が選択されていません"), error_message, gr.update(interactive=True), gr.update(interactive=False), gr.update(interactive=False), gr.update()
             return
 
         # 画像がある場合は通常の処理を実行
@@ -6208,8 +6231,9 @@ with block:
     #  [35]batch_count, [36]frame_save_mode, [37]use_queue, [38]prompt_queue_file, [39]save_settings_on_start, [40]alarm_on_completion
     ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, image_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, section_settings, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion]
 
-    start_button.click(fn=validate_and_process_with_queue_check, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, queue_start_button, seed])
-    end_button.click(fn=end_process_enhanced, outputs=[end_button,queue_start_button])
+    start_button.click(fn=validate_and_process_with_queue_check, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, queue_start_button, seed])
+    end_button.click(fn=end_process_enhanced, outputs=[end_button, stop_after_button, queue_start_button])
+    stop_after_button.click(fn=end_after_current_process_enhanced, outputs=[stop_after_button, queue_start_button])
 
     # F1モードではセクション機能とキーフレームコピー機能を削除済み
 
