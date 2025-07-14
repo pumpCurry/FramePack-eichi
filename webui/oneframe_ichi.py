@@ -15,6 +15,7 @@ user_abort_notified = False
 
 # バッチ処理とキュー機能用グローバル変数
 batch_stopped = False  # バッチ処理中断フラグ
+stop_after_current = False  # 現在の生成完了後に停止するフラグ
 
 # テキストエンコード結果のキャッシュ用グローバル変数を初期化
 cached_prompt = None
@@ -363,6 +364,7 @@ os.makedirs(outputs_folder, exist_ok=True)
 # グローバル変数
 g_frame_size_setting = "1フレーム"
 batch_stopped = False  # バッチ処理中断フラグ
+stop_after_current = False  # 現在の生成完了後に停止するフラグ
 queue_enabled = False  # キュー機能の有効/無効フラグ
 queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューのファイルパス
@@ -1911,7 +1913,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None,
             save_settings_on_start=False, alarm_on_completion=True):
     global stream
-    global batch_stopped, user_abort, user_abort_notified
+    global batch_stopped, stop_after_current, user_abort, user_abort_notified
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files
 
     # 新たな処理開始時にグローバルフラグをリセット
@@ -1920,6 +1922,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     
     # プロセス開始時にバッチ中断フラグをリセット
     batch_stopped = False
+    stop_after_current = False
 
     # バッチ処理回数を確認し、詳細を出力
     # 型チェックしてから変換（数値でない場合はデフォルト値の1を使用）
@@ -2056,10 +2059,11 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # 空の入力画像を生成
         # ここではNoneのままとし、実際のworker関数内でNoneの場合に対応する
     
-    yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update()
+    yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
     
     # バッチ処理用の変数 - 各フラグをリセット
     batch_stopped = False
+    stop_after_current = False
     user_abort = False
     user_abort_notified = False
     
@@ -2081,7 +2085,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(value=seed)
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(value=seed)
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
@@ -2090,7 +2094,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             seed = 31337
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
         # UI更新（値は変更しない）
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update()
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
         original_seed = seed
     
     # 設定の自動保存処理（最初のバッチ開始時のみ）
@@ -2177,6 +2181,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 '',
                 gr.update(interactive=True),
                 gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False),
                 gr.update()
             )
             break
@@ -2186,7 +2191,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update()
+            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
         current_prompt = prompt
@@ -2309,12 +2314,13 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                             gr.update(),
                             gr.update(interactive=False),
                             gr.update(interactive=True),
+                            gr.update(interactive=True),
                             gr.update(value=current_seed),
                         )
                     
                     if flag == 'progress':
                         preview, desc, html = data
-                        yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update()
+                        yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
                     
                     if flag == 'end':
                         # endフラグを受信
@@ -2334,6 +2340,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                                 '',
                                 gr.update(interactive=True, value=translate("Start Generation")),
                                 gr.update(interactive=False, value=translate("End Generation")),
+                                gr.update(interactive=False),
                                 gr.update(value=original_seed),
                             )
                         break
@@ -2351,6 +2358,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                             '',
                             gr.update(interactive=True),
                             gr.update(interactive=False, value=translate("End Generation")),
+                            gr.update(interactive=False),
                             gr.update(value=original_seed),
                         )
                         return
@@ -2394,12 +2402,12 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 pass
             
             # UIをリセット
-            yield None, gr.update(visible=False), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update()
+            yield None, gr.update(visible=False), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False), gr.update()
             return
         except Exception as e:
             import traceback
             # UIをリセット
-            yield None, gr.update(visible=False), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update()
+            yield None, gr.update(visible=False), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False), gr.update()
             return
     
     # すべてのバッチ処理が正常に完了した場合と中断された場合で表示メッセージを分ける
@@ -2413,6 +2421,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     
     # バッチ処理終了後は必ずフラグをリセット
     batch_stopped = False
+    stop_after_current = False
     user_abort = False
     user_abort_notified = False
     
@@ -2457,6 +2466,17 @@ def end_process():
 
     # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
     return gr.update(value=translate("停止処理中..."))
+
+def end_after_current_process():
+    """現在の生成完了後に停止する処理"""
+    global batch_stopped, stop_after_current
+
+    if not stop_after_current:
+        batch_stopped = True
+        stop_after_current = True
+        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+
+    return gr.update(value=translate("停止処理中..."), interactive=False)
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
 
@@ -2694,6 +2714,7 @@ with block:
             with gr.Row():
                 start_button = gr.Button(value=translate("Start Generation"))
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
+                stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
 
             # FP8最適化設定
             with gr.Row():
@@ -4121,8 +4142,9 @@ with block:
         ]
     )
     
-    start_button.click(fn=process, inputs=ips, outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, seed])
-    end_button.click(fn=end_process, outputs=[end_button])
+    start_button.click(fn=process, inputs=ips, outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed])
+    end_button.click(fn=end_process, outputs=[end_button, stop_after_button])
+    stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button])
     
     gr.HTML(f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")}</div>')
 
