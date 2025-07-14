@@ -1928,9 +1928,11 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # 型チェックしてから変換（数値でない場合はデフォルト値の1を使用）
     try:
         batch_count_val = int(batch_count)
-        batch_count = max(1, min(batch_count_val, 100))  # 1〜100の間に制限
+        queue_repeat_count = max(1, min(batch_count_val, 100))  # 1〜100の間に制限
+        batch_count = queue_repeat_count
     except (ValueError, TypeError):
         print(translate("バッチ処理回数が無効です。デフォルト値の1を使用します: {0}").format(batch_count))
+        queue_repeat_count = 1
         batch_count = 1  # デフォルト値
         
     # キュー関連の設定を保存
@@ -2013,12 +2015,12 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("イメージキュー: {0}個の画像ファイルを読み込みました").format(image_queue_count))
 
         if image_queue_count > 0:
-            # 入力画像を使う1回 + 画像ファイル分のバッチ数
-            total_needed_batches = 1 + image_queue_count
+            # 入力画像とキュー画像をqueue_repeat_count回ずつ処理する
+            total_needed_batches = (1 + image_queue_count) * queue_repeat_count
 
             # 設定されたバッチ数より必要数が多い場合は調整
             if total_needed_batches > batch_count:
-                print(translate("画像キュー数+1に合わせてバッチ数を自動調整: {0} → {1}").format(
+                print(translate("画像キュー数+1と繰り返し回数に合わせてバッチ数を自動調整: {0} → {1}").format(
                     batch_count, total_needed_batches))
                 batch_count = total_needed_batches
     
@@ -2158,14 +2160,14 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         elif queue_type == "image" and len(image_queue_files) > 0:
             # イメージキュー情報をログに出力
             print(translate("バッチ処理情報: 合計{0}回").format(batch_count))
-            print(translate("イメージキュー: 有効, 画像ファイル数={0}個").format(len(image_queue_files)))
+            print(translate("イメージキュー: 有効, 画像ファイル数={0}個, 繰り返し回数={1}回").format(len(image_queue_files), queue_repeat_count))
 
             # 各画像ファイルの概要を出力
             print(translate("イメージキュー内容:"))
-            print(translate("   └ バッチ1: 入力画像 (最初のバッチは常に入力画像を使用)"))
-            for i, img_path in enumerate(image_queue_files[:min(batch_count-1, len(image_queue_files))]):
+            print(translate("   └ 入力画像 x {0}").format(queue_repeat_count))
+            for img_path in image_queue_files:
                 img_name = os.path.basename(img_path)
-                print(translate("   └ バッチ{0}: {1}").format(i+2, img_name))
+                print(translate("   └ {0} x {1}").format(img_name, queue_repeat_count))
     else:
         print(translate("バッチ処理情報: 合計{0}回").format(batch_count))
         print(translate("キュー機能: 無効"))
@@ -2217,12 +2219,12 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
             elif queue_type == "image" and len(image_queue_files) > 0:
                 # イメージキューの処理
-                # 最初のバッチは入力画像を使用
-                if batch_index == 0:
+                if batch_index < queue_repeat_count:
+                    # 指定回数までは入力画像を使用
                     print(translate("イメージキュー実行中: バッチ {0}/{1} は入力画像を使用").format(batch_index+1, batch_count))
-                elif batch_index > 0:
-                    # 2回目以降はイメージキューの画像を順番に使用
-                    image_index = batch_index - 1  # 0回目（入力画像）の分を引く
+                else:
+                    # それ以降は各画像をqueue_repeat_count回ずつ処理
+                    image_index = (batch_index - queue_repeat_count) // queue_repeat_count
 
                     if image_index < len(image_queue_files):
                         current_image = image_queue_files[image_index]
