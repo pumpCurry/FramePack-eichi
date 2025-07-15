@@ -406,7 +406,6 @@
   "キュータイプ": "Queue Type",
   "プロンプトキューファイル (.txt) - 1行に1つのプロンプトが記載されたテキストファイル": "Prompt Queue File (.txt) - Text file with one prompt per line",
   "※ ファイル内の各行が別々のプロンプトとして処理されます。\\n※ チェックボックスがオフの場合は無効。\\n※ バッチ処理回数より行数が多い場合は行数分処理されます。\\n※ バッチ処理回数が1でもキュー回数が優先されます。": "※ Each line in the file is processed as a separate prompt.\\n※ Disabled if the checkbox is off.\\n※ If there are more lines than the batch processing count, all lines will be processed.\\n※ Queue count takes priority even if batch processing count is 1.",
-  "※ 1回目はImage画像を使用し、2回目以降は入力フォルダの画像ファイルを名前順に使用します。\\n※ 画像と同名のテキストファイル（例：image1.jpg → image1.txt）があれば、その内容を自動的にプロンプトとして使用します。\\n※ バッチ回数が全画像数を超える場合、残りはImage画像で処理されます。\\n※ バッチ処理回数が1でもキュー回数が優先されます。": "※ The Image is used for the first run, and from the second run onward, image files in the input folder are used in name order.\\n※ If there is a text file with the same name as an image (e.g., image1.jpg → image1.txt), its content will be automatically used as the prompt.\\n※ If the batch count exceeds the total number of images, the remaining batches will be processed using the original Image.\\n※ Queue count takes priority even if batch processing count is 1.",
   "入力フォルダ名": "Input Folder Name",
   "画像ファイルを格納するフォルダ名": "Folder name to store image files",
   "保存及び入力フォルダを開く": "Save and Open Input Folder",
@@ -1040,7 +1039,6 @@
   "プロンプトキュー無効: チェックボックスがオフです": "Prompt queue disabled: Checkbox is off",
   "プロンプトキュー無効: ファイルが正しくアップロードされていません": "Prompt queue disabled: File not uploaded correctly",
   "プロンプトキューファイルに有効なプロンプトがありません": "No valid prompts in prompt queue file",
-
   "Config Queue System": "Config Queue System",
   "Config Name (optional)": "Config Name (optional)",
   "Leave blank for auto-generation": "Leave blank for auto-generation",
@@ -1345,5 +1343,6 @@
   "ファイルアップロード解除": "File upload cleared",
   "🔍 Searching for filename: {0}": "🔍 Searching for filename: {0}",
   "✅ Found by filename: {0}": "✅ Found by filename: {0}",
-  "❌ File not found by filename search: {0}": "❌ File not found by filename search: {0}"
+  "❌ File not found by filename search: {0}": "❌ File not found by filename search: {0}",
+  "※ 1回目はImage画像を使用し、2回目以降は入力フォルダの画像ファイルを修正日時の昇順で使用します。\\n※ 画像と同名のテキストファイル（例：image1.jpg → image1.txt）があれば、その内容を自動的にプロンプトとして使用します。\\n※ バッチ回数が全画像数を超える場合、残りはImage画像で処理されます。\\n※ バッチ処理回数が1でもキュー回数が優先されます。": "* The Image is used for the first run, and from the second run onward, image files in the input folder are used in modification time order (oldest first).\\n* If there is a text file with the same name as an image (e.g., image1.jpg → image1.txt), its content will be automatically used as the prompt.\\n* If the batch count exceeds the total number of images, the remaining batches will be processed using the original Image.\\n* Queue count takes priority even if batch processing count is 1."
 }
