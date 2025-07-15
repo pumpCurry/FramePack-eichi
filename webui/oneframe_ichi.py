@@ -1960,7 +1960,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # 型チェックしてから変換（数値でない場合はデフォルト値の1を使用）
     try:
         batch_count_val = int(batch_count)
-        queue_repeat_count = max(1, min(batch_count_val, 100))  # 1〜100の間に制限
+        queue_repeat_count = max(1, min(batch_count_val, 100000))  # 1〜100000の間に制限
         batch_count = queue_repeat_count
     except (ValueError, TypeError):
         print(translate("バッチ処理回数が無効です。デフォルト値の1を使用します: {0}").format(batch_count))
