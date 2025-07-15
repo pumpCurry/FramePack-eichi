@@ -1943,7 +1943,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             # Kisekaeichi 関連のパラメータ
             use_reference_image=False, reference_image=None,
             target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None,
-            use_reference_queue=False, save_settings_on_start=False, alarm_on_completion=True):
+            reference_batch_count=1, use_reference_queue=False,
+            save_settings_on_start=False, alarm_on_completion=True):
     global stream
     global batch_stopped, stop_after_current, user_abort, user_abort_notified
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
@@ -1967,6 +1968,16 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         queue_repeat_count = 1
         batch_count = 1  # デフォルト値
         
+    # 参照画像用バッチ処理回数を確認
+    try:
+        ref_batch_val = int(reference_batch_count)
+        reference_repeat_count = max(1, min(ref_batch_val, 100000))
+        reference_batch_count = reference_repeat_count
+    except (ValueError, TypeError):
+        print(translate("参照画像用バッチ処理回数が無効です。デフォルト値の1を使用します: {0}").format(reference_batch_count))
+        reference_repeat_count = 1
+        reference_batch_count = 1
+
     # キュー関連の設定を保存
     queue_enabled = bool(use_queue)  # UIからの値をブール型に変換
     
@@ -2067,8 +2078,21 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     else:
         reference_images_list = [None]
 
-    if use_reference_queue and len(reference_images_list) > 1:
-        print(translate("参照画像キュー: {0}個の画像を使用します").format(len(reference_images_list)))
+    base_reference_count = len(reference_images_list)
+
+    if use_reference_queue and base_reference_count > 1:
+        print(translate("参照画像キュー: 有効, 参照画像数={0}個, 繰り返し回数={1}回").format(base_reference_count, reference_repeat_count))
+        for ref_path in reference_queue_files:
+            ref_name = os.path.basename(ref_path)
+            print(translate("   └ {0} x {1}").format(ref_name, reference_repeat_count))
+        if reference_image is not None:
+            print(translate("   └ 入力参照画像 x {0}").format(reference_repeat_count))
+
+    # 参照画像リストを繰り返し回数分拡張
+    expanded_refs = []
+    for img in reference_images_list:
+        expanded_refs.extend([img] * reference_repeat_count)
+    reference_images_list = expanded_refs if expanded_refs else [None]
     
     # 出力フォルダの設定
     global outputs_folder
@@ -2916,9 +2940,18 @@ with block:
                         )
                         open_reference_folder_btn = gr.Button(value="📂 " + translate("保存及び入力フォルダを開く"), size="md")
 
+                    reference_batch_count = gr.Slider(
+                        label=translate("参照画像用バッチ処理回数"),
+                        minimum=1,
+                        maximum=100,
+                        value=1,
+                        step=1,
+                        info=translate("参照画像1枚につき連続生成する回数")
+                    )
+
                     def toggle_reference_queue(val):
                         val = bool(val.value) if hasattr(val, 'value') else bool(val)
-                        return [gr.update(visible=val)]
+                        return [gr.update(visible=val), gr.update(visible=val)]
 
                     def update_reference_folder(folder_name):
                         global reference_input_folder_name_value
@@ -2941,7 +2974,7 @@ with block:
                         open_folder(input_dir)
                         return None
 
-                    use_reference_queue.change(fn=toggle_reference_queue, inputs=[use_reference_queue], outputs=[reference_queue_row])
+                    use_reference_queue.change(fn=toggle_reference_queue, inputs=[use_reference_queue], outputs=[reference_queue_row, reference_batch_count])
                     reference_input_folder_name.change(fn=update_reference_folder, inputs=[reference_input_folder_name], outputs=[reference_input_folder_name])
                     open_reference_folder_btn.click(fn=open_reference_folder, inputs=[], outputs=[gr.Textbox(visible=False)])
 
@@ -2961,14 +2994,15 @@ with block:
                     gr.update(value=target_index_value),  # target_index
                     gr.update(value=history_index_value),  # history_index
                     gr.update(visible=use_reference),  # reference_queue_group
-                    gr.update(visible=False)  # reference_queue_row
+                    gr.update(visible=False),  # reference_queue_row
+                    gr.update(visible=False)  # reference_batch_count
                 ]
             
             # イベントハンドラーの設定
             use_reference_image.change(
                 toggle_kisekae_settings,
                 inputs=[use_reference_image],
-                outputs=[reference_image, advanced_kisekae_group, reference_image_info, reference_long_edge, target_index, history_index, reference_queue_group, reference_queue_row]
+                outputs=[reference_image, advanced_kisekae_group, reference_image_info, reference_long_edge, target_index, history_index, reference_queue_group, reference_queue_row, reference_batch_count]
             )
             
             # 詳細設定アコーディオン - 埋め込みプロンプト機能の直後に配置
@@ -4173,7 +4207,7 @@ with block:
            # Kisekaeichi関連パラメータを追加
            use_reference_image, reference_image,
            target_index, history_index, reference_long_edge, input_mask, reference_mask,
-           use_reference_queue,
+           reference_batch_count, use_reference_queue,
            save_settings_on_start, alarm_on_completion]  # 設定保存パラメータを追加
     
     # 設定保存ボタンのクリックイベント
