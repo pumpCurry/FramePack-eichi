@@ -370,6 +370,8 @@ queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューのファイルパス
 image_queue_files = []  # イメージキューのファイルリスト
 input_folder_name_value = "inputs"  # 入力フォルダの名前（デフォルト値）
+reference_queue_files = []  # 参照画像キューのファイルリスト
+reference_input_folder_name_value = "references"  # 参照画像入力フォルダ名
 
 # イメージキューのための画像ファイルリストを取得する関数（グローバル関数）
 def get_image_queue_files():
@@ -410,6 +412,36 @@ def get_image_queue_files():
     image_queue_files = image_files
     return image_files
 
+# 参照画像キューのための画像ファイルリストを取得する関数
+def get_reference_queue_files():
+    global reference_queue_files
+
+    input_folder = os.path.join(base_path, reference_input_folder_name_value)
+    os.makedirs(input_folder, exist_ok=True)
+
+    image_exts = ['.jpg', '.jpeg', '.png', '.webp', '.bmp']
+    image_files = []
+    file_set = set()
+    for ext in image_exts:
+        pattern = os.path.join(input_folder, '*' + ext)
+        for file in glob.glob(pattern):
+            if file not in file_set:
+                file_set.add(file)
+                image_files.append(file)
+
+        pattern = os.path.join(input_folder, '*' + ext.upper())
+        for file in glob.glob(pattern):
+            if file not in file_set:
+                file_set.add(file)
+                image_files.append(file)
+
+    image_files.sort(key=lambda x: os.path.getmtime(x))
+
+    print(translate("参照画像ディレクトリから画像ファイル{0}個を読み込みました").format(len(image_files)))
+
+    reference_queue_files = image_files
+    return image_files
+
 # ワーカー関数
 @torch.no_grad()
 @log_and_continue("worker error")
@@ -425,7 +457,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     
     # モデル変数をグローバルとして宣言（遅延ロード用）
     global vae, text_encoder, text_encoder_2, transformer, image_encoder
-    global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files
+    global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
     # テキストエンコード結果をキャッシュするグローバル変数
     global cached_prompt, cached_n_prompt, cached_llama_vec, cached_llama_vec_n, cached_clip_l_pooler, cached_clip_l_pooler_n
     global cached_llama_attention_mask, cached_llama_attention_mask_n
@@ -1911,10 +1943,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             # Kisekaeichi 関連のパラメータ
             use_reference_image=False, reference_image=None,
             target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None,
-            save_settings_on_start=False, alarm_on_completion=True):
+            use_reference_queue=False, save_settings_on_start=False, alarm_on_completion=True):
     global stream
     global batch_stopped, stop_after_current, user_abort, user_abort_notified
-    global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files
+    global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
 
     # 新たな処理開始時にグローバルフラグをリセット
     user_abort = False
@@ -2023,6 +2055,20 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 print(translate("画像キュー数+1と繰り返し回数に合わせてバッチ数を自動調整: {0} → {1}").format(
                     batch_count, total_needed_batches))
                 batch_count = total_needed_batches
+
+    # 参照画像キューの処理
+    reference_images_list = []
+    if use_reference_image:
+        if reference_image is not None:
+            reference_images_list.append(reference_image)
+        if use_reference_queue:
+            get_reference_queue_files()
+            reference_images_list.extend(reference_queue_files)
+    else:
+        reference_images_list = [None]
+
+    if use_reference_queue and len(reference_images_list) > 1:
+        print(translate("参照画像キュー: {0}個の画像を使用します").format(len(reference_images_list)))
     
     # 出力フォルダの設定
     global outputs_folder
@@ -2172,7 +2218,13 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("バッチ処理情報: 合計{0}回").format(batch_count))
         print(translate("キュー機能: 無効"))
 
-    for batch_index in range(batch_count):
+    ref_count = len(reference_images_list)
+    total_batches = batch_count * ref_count
+
+    for batch_index_total in range(total_batches):
+        batch_index = batch_index_total % batch_count
+        reference_idx = batch_index_total // batch_count
+        reference_image_current = reference_images_list[reference_idx]
         # 停止フラグが設定されている場合は全バッチ処理を中止
         if batch_stopped:
             print(translate("バッチ処理がユーザーによって中止されました"))
@@ -2256,7 +2308,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         
         if use_rope_batch:
             # RoPE値をインクリメント（最大64まで）
-            new_rope_value = latent_window_size + batch_index
+            new_rope_value = latent_window_size + batch_index_total
             
             # RoPE値が64を超えたら処理を終了
             if new_rope_value > 64:
@@ -2267,7 +2319,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             print(translate("RoPE値: {0}").format(current_latent_window_size))
         else:
             # 通常のバッチ処理：シード値をインクリメント
-            current_seed = original_seed + batch_index
+            current_seed = original_seed + batch_index_total
             if batch_count > 1:
                 print(translate("初期シード値: {0}").format(current_seed))
         
@@ -2279,7 +2331,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             stream = AsyncStream()
             
             # バッチインデックスをジョブIDに含める
-            batch_suffix = f"{batch_index}" if batch_index > 0 else ""
+            batch_suffix = f"{batch_index_total}" if batch_index_total > 0 else ""
             
             # 中断フラグの再確認
             if batch_stopped:
@@ -2293,7 +2345,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                      lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
                      batch_index, use_queue, prompt_queue_file,
                      # Kisekaeichi関連パラメータを追加
-                     use_reference_image, reference_image,
+                     use_reference_image, reference_image_current,
                      target_index, history_index, reference_long_edge, input_mask, reference_mask)
         except Exception as e:
             import traceback
@@ -2327,12 +2379,12 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                     if flag == 'end':
                         # endフラグを受信
                         # バッチ処理中は最後の画像のみを表示
-                        if batch_index == batch_count - 1 or batch_stopped:  # 最後のバッチまたは中断された場合
+                        if batch_index_total == total_batches - 1 or batch_stopped:  # 最後のバッチまたは中断された場合
                             completion_message = ""
                             if batch_stopped:
-                                completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index + 1, batch_count)
+                                completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches)
                             else:
-                                completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(batch_count, batch_count)
+                                completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(total_batches, total_batches)
                             
                             # 完了メッセージでUIを更新
                             yield (
@@ -2351,7 +2403,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                     if stream.input_queue.top() == 'end' or batch_stopped:
                         batch_stopped = True
                         # 処理ループ内での中断検出
-                        print(translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index + 1, batch_count))
+                        print(translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches))
                         # endframe_ichiと同様のシンプルな実装に戻す
                         yield (
                             output_filename if output_filename is not None else gr.skip(),
@@ -2853,6 +2905,46 @@ with block:
                             translate("白い部分を適用、黒い部分を無視（グレースケール画像）")
                         )
 
+                # 参照画像キュー設定
+                with gr.Group(visible=False) as reference_queue_group:
+                    use_reference_queue = gr.Checkbox(label=translate("参照画像キューを使用"), value=False)
+                    with gr.Row(visible=False) as reference_queue_row:
+                        reference_input_folder_name = gr.Textbox(
+                            label=translate("参照入力フォルダ名"),
+                            value=reference_input_folder_name_value,
+                            info=translate("参照画像ファイルを格納するフォルダ名")
+                        )
+                        open_reference_folder_btn = gr.Button(value="📂 " + translate("保存及び入力フォルダを開く"), size="md")
+
+                    def toggle_reference_queue(val):
+                        val = bool(val.value) if hasattr(val, 'value') else bool(val)
+                        return [gr.update(visible=val)]
+
+                    def update_reference_folder(folder_name):
+                        global reference_input_folder_name_value
+                        folder_name = ''.join(c for c in folder_name if c.isalnum() or c in ('_', '-'))
+                        reference_input_folder_name_value = folder_name
+                        print(translate("参照フォルダ名をメモリに保存: {0}").format(folder_name))
+                        return gr.update(value=folder_name)
+
+                    def open_reference_folder():
+                        global reference_input_folder_name_value
+                        settings = load_settings()
+                        settings['reference_folder'] = reference_input_folder_name_value
+                        save_settings(settings)
+                        print(translate("参照フォルダ設定を保存しました: {0}").format(reference_input_folder_name_value))
+                        input_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), reference_input_folder_name_value)
+                        if not os.path.exists(input_dir):
+                            os.makedirs(input_dir, exist_ok=True)
+                            print(translate("参照ディレクトリを作成しました: {0}").format(input_dir))
+                        get_reference_queue_files()
+                        open_folder(input_dir)
+                        return None
+
+                    use_reference_queue.change(fn=toggle_reference_queue, inputs=[use_reference_queue], outputs=[reference_queue_row])
+                    reference_input_folder_name.change(fn=update_reference_folder, inputs=[reference_input_folder_name], outputs=[reference_input_folder_name])
+                    open_reference_folder_btn.click(fn=open_reference_folder, inputs=[], outputs=[gr.Textbox(visible=False)])
+
 
             
             # 着せ替え設定の表示/非表示を切り替える関数
@@ -2867,14 +2959,16 @@ with block:
                     gr.update(visible=use_reference),  # reference_image_info
                     gr.update(visible=use_reference),  # reference_long_edge
                     gr.update(value=target_index_value),  # target_index
-                    gr.update(value=history_index_value)  # history_index
+                    gr.update(value=history_index_value),  # history_index
+                    gr.update(visible=use_reference),  # reference_queue_group
+                    gr.update(visible=False)  # reference_queue_row
                 ]
             
             # イベントハンドラーの設定
             use_reference_image.change(
                 toggle_kisekae_settings,
                 inputs=[use_reference_image],
-                outputs=[reference_image, advanced_kisekae_group, reference_image_info, reference_long_edge, target_index, history_index]
+                outputs=[reference_image, advanced_kisekae_group, reference_image_info, reference_long_edge, target_index, history_index, reference_queue_group, reference_queue_row]
             )
             
             # 詳細設定アコーディオン - 埋め込みプロンプト機能の直後に配置
@@ -4079,6 +4173,7 @@ with block:
            # Kisekaeichi関連パラメータを追加
            use_reference_image, reference_image,
            target_index, history_index, reference_long_edge, input_mask, reference_mask,
+           use_reference_queue,
            save_settings_on_start, alarm_on_completion]  # 設定保存パラメータを追加
     
     # 設定保存ボタンのクリックイベント
