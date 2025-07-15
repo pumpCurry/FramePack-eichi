@@ -588,7 +588,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
     has_any_image = has_any_image or (last_visible_section_image is not None)
     if not has_any_image:
         # UIに直接エラーメッセージを表示
-        stream.output_queue.push(('progress', (None, translate("画像が選択されていません\n生成を開始する前に「Image」欄または表示されている最後のキーフレーム画像に画像をアップロードしてください。これは叡智の始発点となる重要な画像です。"), make_progress_bar_html(0, translate('エラー')))))
+        push_progress(None, translate("画像が選択されていません\n生成を開始する前に「Image」欄または表示されている最後のキーフレーム画像に画像をアップロードしてください。これは叡智の始発点となる重要な画像です。"), 0, translate('エラー'))
         # 処理を終了
         stream.output_queue.push(('end', None))
         return
@@ -624,6 +624,26 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
     # 処理時間計測の開始
     process_start_time = time.time()
+    process_start_dt = datetime.now()
+
+    def push_progress(preview, desc, percent, hint):
+        now = datetime.now()
+        elapsed = now - process_start_dt
+        start_str = process_start_dt.strftime('%H:%M:%S')
+        now_str = now.strftime('%H:%M:%S')
+        elapsed_str = str(elapsed).split('.')[0]
+        if percent and percent > 0:
+            total_secs = elapsed.total_seconds() / (percent / 100)
+            est_dt = process_start_dt + timedelta(seconds=total_secs)
+            est_str = est_dt.strftime('%H:%M:%S')
+        else:
+            est_str = '--:--:--'
+        time_info = f"{start_str}▶{now_str} ({elapsed_str}) ▶{est_str}"
+        if desc:
+            desc = f"{desc}\n{time_info}"
+        else:
+            desc = time_info
+        stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percent, hint))))
 
     # グローバル変数で状態管理しているモデル変数を宣言する
     global transformer, text_encoder, text_encoder_2
@@ -668,7 +688,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
     print(translate("  - 各セクションのフレーム数: 約{0}フレーム (latent_window_size: {1})").format(frame_count, latent_window_size))
     print(translate("  - 合計セクション数: {0}").format(total_sections))
 
-    stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...'))))
+    push_progress(None, '', 0, 'Starting ...')
 
     try:
         # セクション設定の前処理
@@ -829,7 +849,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         # Text encoding
 
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate("Text encoding ...")))))
+        push_progress(None, '', 0, translate("Text encoding ..."))
 
         if not high_vram:
             fake_diffusers_current_device(text_encoder, gpu)  # since we only encode one text - that is one model move and one encode, offload is same time consumption since it is also one load and one encode.
@@ -883,7 +903,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             try:
                 tensor_path = tensor_data_input.name
                 print(translate("テンソルデータを読み込み: {0}").format(os.path.basename(tensor_path)))
-                stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate('Loading tensor data ...')))))
+                push_progress(None, '', 0, translate('Loading tensor data ...'))
 
                 # safetensorsからテンソルを読み込み
                 tensor_dict = sf.load_file(tensor_path)
@@ -910,14 +930,14 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         print(translate("警告: テンソルデータのフレーム数よりも、先頭フレーム削除数が大きく指定されているため、先頭フレーム削除は実施しません。"))
 
                     print(translate("テンソルデータ読み込み成功: shape={0}, dtype={1}").format(uploaded_tensor.shape, uploaded_tensor.dtype))
-                    stream.output_queue.push(('progress', (None, translate('Tensor data loaded successfully!'), make_progress_bar_html(10, translate('Tensor data loaded successfully!')))))
+                    push_progress(None, translate('Tensor data loaded successfully!'), 10, translate('Tensor data loaded successfully!'))
                 else:
                     print(translate("警告: テンソルデータに 'history_latents' キーが見つかりません"))
             except Exception as e:
                 print(translate("テンソルデータ読み込みエラー: {0}").format(e))
                 traceback.print_exc()
 
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate("Image processing ...")))))
+        push_progress(None, '', 0, translate("Image processing ..."))
 
         def preprocess_image(img_path_or_array, resolution=640):
             """Pathまたは画像配列を処理して適切なサイズに変換する"""
@@ -961,7 +981,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         # VAE encoding
 
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate("VAE encoding ...")))))
+        push_progress(None, '', 0, translate("VAE encoding ..."))
 
         if not high_vram:
             load_model_as_complete(vae, target_device=gpu)
@@ -1000,7 +1020,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
             # UI上でテンソルデータの情報を表示
             tensor_info = translate("テンソルデータ ({0}フレーム) を検出しました。動画生成後に後方に結合します。").format(uploaded_tensor.shape[2])
-            stream.output_queue.push(('progress', (None, tensor_info, make_progress_bar_html(10, translate('テンソルデータを後方に結合')))))
+            push_progress(None, tensor_info, 10, translate('テンソルデータを後方に結合'))
 
         # 常に入力画像から通常のエンコーディングを行う
         start_latent = vae_encode(input_image_pt, vae)
@@ -1023,7 +1043,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         # CLIP Vision
 
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate("CLIP Vision encoding ...")))))
+        push_progress(None, '', 0, translate("CLIP Vision encoding ..."))
 
         if not high_vram:
             load_model_as_complete(image_encoder, target_device=gpu)
@@ -1041,7 +1061,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         # Sampling
 
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate("Start sampling ...")))))
+        push_progress(None, '', 0, translate("Start sampling ..."))
 
         rnd = torch.Generator("cpu").manual_seed(seed)
         # latent_window_sizeが4.5の場合は特別に17フレームとする
@@ -1480,7 +1500,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 # セクション情報を追加（現在のセクション/全セクション）
                 section_info = translate('セクション: {0}/{1}').format(i_section+1, total_sections)
                 desc = f"{section_info} " + translate('生成フレーム数: {total_generated_latent_frames}, 動画長: {video_length:.2f} 秒 (FPS-30). 動画が生成中です ...').format(section_info=section_info, total_generated_latent_frames=int(max(0, total_generated_latent_frames * 4 - 3)), video_length=max(0, (total_generated_latent_frames * 4 - 3) / 30))
-                stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
+                push_progress(preview, desc, percentage, hint)
                 return
 
             try:
@@ -1865,13 +1885,13 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
                         print(translate("テンソルデータを後方に結合します: アップロードされたフレーム数 = {uploaded_frames}").format(uploaded_frames=uploaded_frames))
                         # UI上で進捗状況を更新
-                        stream.output_queue.push(('progress', (None, translate("テンソルデータ({uploaded_frames}フレーム)の結合を開始します...").format(uploaded_frames=uploaded_frames), make_progress_bar_html(80, translate('テンソルデータ結合準備')))))
+                        push_progress(None, translate("テンソルデータ({uploaded_frames}フレーム)の結合を開始します...").format(uploaded_frames=uploaded_frames), 80, translate('テンソルデータ結合準備'))
 
                         # テンソルデータを後方に結合する前に、互換性チェック
                         if uploaded_tensor.shape[3] != real_history_latents.shape[3] or uploaded_tensor.shape[4] != real_history_latents.shape[4]:
                             print(translate("警告: テンソルサイズが異なります: アップロード={0}, 現在の生成={1}").format(uploaded_tensor.shape, real_history_latents.shape))
                             print(translate("テンソルサイズの不一致のため、前方結合をスキップします"))
-                            stream.output_queue.push(('progress', (None, translate("テンソルサイズの不一致のため、前方結合をスキップしました"), make_progress_bar_html(85, translate('互換性エラー')))))
+                            push_progress(None, translate("テンソルサイズの不一致のため、前方結合をスキップしました"), 85, translate('互換性エラー'))
                         else:
                             # 生成データの末尾のフレームとテンソルデータの先頭のフレームを補間するフレームを追加する
                             if use_interpolation_section:
@@ -1917,7 +1937,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                         percentage = int(100.0 * current_step / steps)
                                         hint = translate('Sampling {0}/{1}').format(current_step, steps)
                                         desc = "補間データを生成中です ..."
-                                        stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
+                                        push_progress(preview, desc, percentage, hint)
                                         return
 
                                     uploaded_tensor_size = 1 + 2 + 16
@@ -2042,7 +2062,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                 # 進捗状況を更新
                                 chunk_progress = (chunk_idx + 1) / num_chunks * 100
                                 progress_message = translate("テンソルデータ結合中: チャンク {0}/{1} (フレーム {2}-{3}/{4})").format(chunk_idx+1, num_chunks, chunk_start+1, chunk_end, uploaded_frames)
-                                stream.output_queue.push(('progress', (None, progress_message, make_progress_bar_html(int(80 + chunk_progress * 0.1), translate('テンソルデータ処理中')))))
+                                push_progress(None, progress_message, int(80 + chunk_progress * 0.1), translate('テンソルデータ処理中'))
 
                                 # 現在のチャンクを取得
                                 current_chunk = processed_tensor[:, :, chunk_start:chunk_end, :, :]
@@ -2064,7 +2084,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                     # チャンクをデコード
                                     # VAEデコードは時間がかかるため、進行中であることを表示
                                     print(translate("チャンク{0}のVAEデコード開始...").format(chunk_idx+1))
-                                    stream.output_queue.push(('progress', (None, translate("チャンク{0}/{1}のVAEデコード中...").format(chunk_idx+1, num_chunks), make_progress_bar_html(int(80 + chunk_progress * 0.1), translate('デコード処理')))))
+                                    push_progress(None, translate("チャンク{0}/{1}のVAEデコード中...").format(chunk_idx+1, num_chunks), int(80 + chunk_progress * 0.1), translate('デコード処理'))
 
                                     # 明示的にデバイスを合わせる
                                     if current_chunk.device != vae.device:
@@ -2117,7 +2137,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                         # 5チャンクごと、または最後のチャンクで保存
                                         interim_output_filename = os.path.join(outputs_folder, f'{job_id}_combined_interim_{chunk_idx+1}.mp4')
                                         print(translate("中間結果を保存中: チャンク{0}/{1}").format(chunk_idx+1, num_chunks))
-                                        stream.output_queue.push(('progress', (None, translate("中間結果のMP4変換中... (チャンク{0}/{1})").format(chunk_idx+1, num_chunks), make_progress_bar_html(int(85 + chunk_progress * 0.1), translate('MP4保存中')))))
+                                        push_progress(None, translate("中間結果のMP4変換中... (チャンク{0}/{1})").format(chunk_idx+1, num_chunks), int(85 + chunk_progress * 0.1), translate('MP4保存中'))
 
                                         # MP4として保存
                                         save_bcthw_as_mp4(combined_history_pixels, interim_output_filename, fps=30, crf=mp4_crf)
@@ -2141,7 +2161,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                     if torch.cuda.is_available():
                                         print(translate("  - GPU使用量: {0:.2f}GB/{1:.2f}GB").format(torch.cuda.memory_allocated()/1024**3, torch.cuda.get_device_properties(0).total_memory/1024**3))
 
-                                    stream.output_queue.push(('progress', (None, translate("エラー: チャンク{0}の処理に失敗しました - {1}").format(chunk_idx+1, str(e)), make_progress_bar_html(90, translate('エラー')))))
+                                    push_progress(None, translate("エラー: チャンク{0}の処理に失敗しました - {1}").format(chunk_idx+1, str(e)), 90, translate('エラー'))
                                     break
 
                             # 処理完了後に明示的にメモリ解放
@@ -2156,7 +2176,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                             if combined_history_pixels is not None:
                                 # 最終結果の保存
                                 print(translate("最終結果を保存中: 全{0}チャンク完了").format(num_chunks))
-                                stream.output_queue.push(('progress', (None, translate("結合した動画をMP4に変換中..."), make_progress_bar_html(95, translate('最終MP4変換処理')))))
+                                push_progress(None, translate("結合した動画をMP4に変換中..."), 95, translate('最終MP4変換処理'))
 
                                 # 最終的な結合ファイル名
                                 combined_output_filename = os.path.join(outputs_folder, f'{job_id}_combined.mp4')
@@ -2188,7 +2208,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                         print(translate("合計 {0} 個の中間ファイルを削除しました").format(len(deleted_files)))
                                         # 削除ファイル名をユーザーに表示
                                         files_str = ', '.join(deleted_files)
-                                        stream.output_queue.push(('progress', (None, translate("中間ファイルを削除しました: {0}").format(files_str), make_progress_bar_html(97, translate('クリーンアップ完了')))))
+                                        push_progress(None, translate("中間ファイルを削除しました: {0}").format(files_str), 97, translate('クリーンアップ完了'))
                                     else:
                                         print(translate("削除対象の中間ファイルは見つかりませんでした"))
                                 except Exception as e:
@@ -2206,10 +2226,10 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                 print(translate("データサイズ: {0:.2f} MB（制限無し）").format(combined_size_mb))
 
                                 # UI上で完了メッセージを表示
-                                stream.output_queue.push(('progress', (None, translate("テンソルデータ({0}フレーム)と動画({1}フレーム)の結合が完了しました。\n合計フレーム数: {2}フレーム ({3:.2f}秒) - サイズ制限なし").format(uploaded_frames, original_frames, combined_frames, combined_frames / 30), make_progress_bar_html(100, translate('結合完了')))))
+                                push_progress(None, translate("テンソルデータ({0}フレーム)と動画({1}フレーム)の結合が完了しました。\n合計フレーム数: {2}フレーム ({3:.2f}秒) - サイズ制限なし").format(uploaded_frames, original_frames, combined_frames, combined_frames / 30), 100, translate('結合完了'))
                             else:
                                 print(translate("テンソルデータの結合に失敗しました。"))
-                                stream.output_queue.push(('progress', (None, translate("テンソルデータの結合に失敗しました。"), make_progress_bar_html(100, translate('エラー')))))
+                                push_progress(None, translate("テンソルデータの結合に失敗しました。"), 100, translate('エラー'))
 
                             # 正しく結合された動画はすでに生成済みなので、ここでの処理は不要
 
@@ -2233,11 +2253,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                             print(translate("データサイズ: {0:.2f} MB（制限無し）").format(combined_size_mb))
 
                             # UI上で完了メッセージを表示
-                            stream.output_queue.push(('progress', (None, translate("テンソルデータ({0}フレーム)と動画({1}フレーム)の結合が完了しました。\n合計フレーム数: {2}フレーム ({3:.2f}秒)").format(uploaded_frames, original_frames, combined_frames, combined_frames / 30), make_progress_bar_html(100, translate('結合完了')))))
+                            push_progress(None, translate("テンソルデータ({0}フレーム)と動画({1}フレーム)の結合が完了しました。\n合計フレーム数: {2}フレーム ({3:.2f}秒)").format(uploaded_frames, original_frames, combined_frames, combined_frames / 30), 100, translate('結合完了'))
                     except Exception as e:
                         print(translate("テンソルデータ結合中にエラーが発生しました: {0}").format(e))
                         traceback.print_exc()
-                        stream.output_queue.push(('progress', (None, translate("エラー: テンソルデータ結合に失敗しました - {0}").format(str(e)), make_progress_bar_html(100, translate('エラー')))))
+                        push_progress(None, translate("エラー: テンソルデータ結合に失敗しました - {0}").format(str(e)), 100, translate('エラー'))
 
                 # 処理終了時に通知
                 # アラーム再生条件
@@ -2275,7 +2295,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         tensor_size_mb = (tensor_to_save.element_size() * tensor_to_save.nelement()) / (1024 * 1024)
 
                         print(translate("テンソルデータを保存中... shape: {shape}, フレーム数: {frames}, サイズ: {size:.2f} MB").format(shape=tensor_to_save.shape, frames=tensor_to_save.shape[2], size=tensor_size_mb))
-                        stream.output_queue.push(('progress', (None, translate('テンソルデータを保存中... ({frames}フレーム)').format(frames=tensor_to_save.shape[2]), make_progress_bar_html(95, translate('テンソルデータの保存')))))
+                        push_progress(None, translate('テンソルデータを保存中... ({frames}フレーム)').format(frames=tensor_to_save.shape[2]), 95, translate('テンソルデータの保存'))
 
                         # メタデータの準備（フレーム数も含める）
                         metadata = torch.tensor([height, width, tensor_to_save.shape[2]], dtype=torch.int32)
@@ -2290,7 +2310,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         print(translate("テンソルデータを保存しました: {path}").format(path=tensor_file_path))
                         print(translate("保存済みテンソルデータ情報: {frames}フレーム, {size:.2f} MB").format(frames=tensor_to_save.shape[2], size=tensor_size_mb))
                         print(translate("=== テンソルデータ保存処理完了 ==="))
-                        stream.output_queue.push(('progress', (None, translate("テンソルデータが保存されました: {path} ({frames}フレーム, {size:.2f} MB)").format(path=os.path.basename(tensor_file_path), frames=tensor_to_save.shape[2], size=tensor_size_mb), make_progress_bar_html(100, translate('処理完了')))))
+                        push_progress(None, translate("テンソルデータが保存されました: {path} ({frames}フレーム, {size:.2f} MB)").format(path=os.path.basename(tensor_file_path), frames=tensor_to_save.shape[2], size=tensor_size_mb), 100, translate('処理完了'))
 
                         # アップロードされたテンソルデータがあれば、それも結合したものを保存する
                         if tensor_data_input is not None and uploaded_tensor is not None:
@@ -2332,14 +2352,14 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                     print(translate("結合テンソルを保存しました: {path}").format(path=tensor_combined_path))
                                     print(translate("結合テンソル情報: 合計{0}フレーム ({1}+{2}), {3:.2f} MB").format(combined_frames, tensor_to_save.shape[2], uploaded_tensor.shape[2], combined_size_mb))
                                     print(translate("=== テンソルデータ結合処理完了 ==="))
-                                    stream.output_queue.push(('progress', (None, translate("テンソルデータ結合が保存されました: 合計{frames}フレーム").format(frames=combined_frames), make_progress_bar_html(100, translate('結合テンソル保存完了')))))
+                                    push_progress(None, translate("テンソルデータ結合が保存されました: 合計{frames}フレーム").format(frames=combined_frames), 100, translate('結合テンソル保存完了'))
                             except Exception as e:
                                 print(translate("テンソルデータ結合保存エラー: {0}").format(e))
                                 traceback.print_exc()
                     except Exception as e:
                         print(translate("テンソルデータ保存エラー: {0}").format(e))
                         traceback.print_exc()
-                        stream.output_queue.push(('progress', (None, translate("テンソルデータの保存中にエラーが発生しました。"), make_progress_bar_html(100, translate('処理完了')))))
+                        push_progress(None, translate("テンソルデータの保存中にエラーが発生しました。"), 100, translate('処理完了'))
 
                 # 全体の処理時間を計算
                 process_end_time = time.time()
@@ -2366,7 +2386,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     # 通常の完了メッセージ
                     completion_message = translate("すべてのセクション({sections}/{total_sections})が完了しました。全体の処理時間: {time}").format(sections=total_sections, total_sections=total_sections, time=time_str)
 
-                stream.output_queue.push(('progress', (None, completion_message, make_progress_bar_html(100, translate('処理完了')))))
+                push_progress(None, completion_message, 100, translate('処理完了'))
 
                 # 中間ファイルの削除処理
                 if not keep_section_videos:
@@ -2397,7 +2417,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     if deleted_count > 0:
                         print(translate("{0}個の中間ファイルを削除しました。最終ファイルは保存されています: {1}").format(deleted_count, final_video_name))
                         final_message = translate("中間ファイルを削除しました。最終動画と結合動画は保存されています。")
-                        stream.output_queue.push(('progress', (None, final_message, make_progress_bar_html(100, translate('処理完了')))))
+                        push_progress(None, final_message, 100, translate('処理完了'))
 
                 break
 
