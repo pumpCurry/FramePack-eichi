@@ -36,6 +36,7 @@ from diffusers_helper.hf_login import login
 import os
 import random  # ランダムシード生成用
 import time
+from datetime import datetime, timedelta
 import traceback  # ログ出力用
 import yaml
 import argparse
@@ -505,6 +506,28 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
 
+    # 処理時間計測の開始
+    process_start_dt = datetime.now()
+
+    def push_progress(preview, desc, percent, hint):
+        now = datetime.now()
+        elapsed = now - process_start_dt
+        start_str = process_start_dt.strftime('%H:%M:%S')
+        now_str = now.strftime('%H:%M:%S')
+        elapsed_str = str(elapsed).split('.')[0]
+        if percent and percent > 0:
+            total_secs = elapsed.total_seconds() / (percent / 100)
+            est_dt = process_start_dt + timedelta(seconds=total_secs)
+            est_str = est_dt.strftime('%H:%M:%S')
+        else:
+            est_str = '--:--:--'
+        time_info = f"{start_str}▶{now_str} ({elapsed_str}) ▶{est_str}"
+        if desc:
+            desc = f"{desc}\n{time_info}"
+        else:
+            desc = time_info
+        stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percent, hint))))
+
     if save_before_input_images:
         for p, suffix in [
             (input_image, 'input_orig'),
@@ -520,7 +543,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     print(translate("入力画像のコピーに失敗しました: {0}").format(e))
     
     # プログレスバーの初期化
-    stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...'))))
+    push_progress(None, '', 0, 'Starting ...')
     
     # モデルや中間ファイルなどのキャッシュ利用フラグ
     use_cached_files = use_prompt_cache
@@ -647,7 +670,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             raise Exception(translate("transformerのリロードに失敗しました"))
         
         # 入力画像の処理
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Image processing ...'))))
+        push_progress(None, '', 0, 'Image processing ...')
         
         # 入力画像がNoneの場合はデフォルトの黒い画像を作成
         if input_image is None:
@@ -695,7 +718,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
         input_image_pt = input_image_pt.permute(2, 0, 1)[None, :, None]
         
         # VAE エンコーディング
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'VAE encoding ...'))))
+        push_progress(None, '', 0, 'VAE encoding ...')
         
         try:
             # エンコード前のメモリ状態を記録
@@ -762,7 +785,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
         
         if use_reference_image and reference_image is not None:
             print(translate("着せ替え参照画像を処理します: {0}").format(reference_image))
-            stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Processing reference image ...'))))
+            push_progress(None, '', 0, 'Processing reference image ...')
             
             try:
                 # 参照画像をロード
@@ -822,7 +845,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 reference_encoder_output = None
         
         # CLIP Vision エンコーディング
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'CLIP Vision encoding ...'))))
+        push_progress(None, '', 0, 'CLIP Vision encoding ...')
         
         try:
             # 画像エンコーダのロード（未ロードの場合）
@@ -862,7 +885,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             raise e
         
         # テキストエンコーディング
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Text encoding ...'))))
+        push_progress(None, '', 0, 'Text encoding ...')
         
         # イメージキューでカスタムプロンプトを使用しているかどうかを確認
         using_custom_prompt = False
@@ -1056,7 +1079,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             torch.cuda.empty_cache()
         
         # 1フレームモード用の設定
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Start sampling ...'))))
+        push_progress(None, '', 0, 'Start sampling ...')
         
         rnd = torch.Generator("cpu").manual_seed(seed)
         
@@ -1299,7 +1322,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     percentage = int(100.0 * current_step / steps)
                     hint = f'Sampling {current_step}/{steps}'
                     desc = translate('1フレームモード: サンプリング中...')
-                    stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
+                    push_progress(preview, desc, percentage, hint)
                 except KeyboardInterrupt:
                     # KeyboardInterrupt例外を再スローして確実に停止
                     raise
