@@ -2957,9 +2957,10 @@ with block:
             gr.Markdown(translate("参照画像の特徴を入力画像に適用する一枚絵生成機能"))
             
             # 参照画像を使用するかどうかのチェックボックス
+            use_reference_image_default = saved_app_settings.get("use_reference_image", False) if saved_app_settings else False
             use_reference_image = gr.Checkbox(
                 label=translate("参照画像を使用"),
-                value=saved_app_settings.get("use_reference_image", False) if saved_app_settings else False
+                value=use_reference_image_default
             )
 
             # 参照画像を長辺合わせにするかどうか
@@ -2967,7 +2968,7 @@ with block:
                 label=translate("参照画像を長辺合わせにする"),
                 value=saved_app_settings.get("reference_long_edge", True) if saved_app_settings else True,
                 elem_classes="saveable-setting",
-                visible=False
+                visible=use_reference_image_default
             )
             
             # 参照画像の入力
@@ -2976,12 +2977,12 @@ with block:
                 label=translate("参照画像"),
                 type="filepath",
                 interactive=True,
-                visible=False,  # 初期状態では非表示
+                visible=use_reference_image_default,  # 保存設定に基づき初期表示
                 height=320
             )
 
             # 参照画像キュー設定
-            with gr.Group(visible=False) as reference_queue_group:
+            with gr.Group(visible=use_reference_image_default) as reference_queue_group:
                 use_reference_queue = gr.Checkbox(label=translate("参照画像キューを使用"), value=False)
                 with gr.Row(visible=False) as reference_queue_row:
                     reference_input_folder_name = gr.Textbox(
@@ -3031,11 +3032,11 @@ with block:
             # 参照画像の説明
             reference_image_info = gr.Markdown(
                 translate("特徴を抽出する画像（スタイル、服装、背景など）"),
-                visible=False  # 初期状態では非表示
+                visible=use_reference_image_default  # 初期表示を設定
             )
             
             # 高度な設定グループ
-            with gr.Group(visible=False) as advanced_kisekae_group:
+            with gr.Group(visible=use_reference_image_default) as advanced_kisekae_group:
                 gr.Markdown(f"#### " + translate("Kisekaeichi 詳細オプション"))
                 
                 with gr.Row():
