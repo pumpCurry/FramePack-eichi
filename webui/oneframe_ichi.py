@@ -218,6 +218,18 @@ def _norm_dropdown(val):
         return None
     return str(val)
 
+def _to_bool(val):
+    """Convert various truthy inputs to a strict boolean."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes", "on")
+    if isinstance(val, (int, float)):
+        return val != 0
+    if hasattr(val, "value"):
+        return bool(val.value)
+    return bool(val)
+
 def resize_and_pad_with_edge_color(image_np, target_width, target_height):
     """Resize image to fit within target size and pad using edge color."""
     pil_image = Image.fromarray(image_np)
@@ -452,7 +464,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
            lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
            batch_index=None, use_queue=False, prompt_queue_file=None,
            # Kisekaeichi関連のパラメータ
-           use_reference_image=False, reference_image=None, 
+           use_reference_image=False, reference_image=None,
            target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None):
     
     # モデル変数をグローバルとして宣言（遅延ロード用）
@@ -461,6 +473,9 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     # テキストエンコード結果をキャッシュするグローバル変数
     global cached_prompt, cached_n_prompt, cached_llama_vec, cached_llama_vec_n, cached_clip_l_pooler, cached_clip_l_pooler_n
     global cached_llama_attention_mask, cached_llama_attention_mask_n
+
+    # フラグ類は確実にbool化しておく
+    reference_long_edge = _to_bool(reference_long_edge)
 
     # キュー状態のログ出力
     use_queue_flag = bool(use_queue)
@@ -1956,6 +1971,9 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # プロセス開始時にバッチ中断フラグをリセット
     batch_stopped = False
     stop_after_current = False
+
+    # bool値の正規化
+    reference_long_edge = _to_bool(reference_long_edge)
 
     # バッチ処理回数を確認し、詳細を出力
     # 型チェックしてから変換（数値でない場合はデフォルト値の1を使用）
