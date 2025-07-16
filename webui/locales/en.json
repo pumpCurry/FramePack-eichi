@@ -367,6 +367,7 @@
   "バッチ処理ループを中断します": "Interrupting batch processing loop",
   "停止ボタンが押されました。バッチ処理を停止します...": "Stop button was pressed. Stopping batch processing...",
   "停止処理中...": "Stopping in progress...",
+  "打ち切り処理中...": "Abort in progress...",
   "生成モード": "Generation mode",
   "通常：一般的な生成 / ループ：ループ動画用": "Normal: General generation / Loop: For loop videos",
   "1秒 (33フレーム)": "1 second (33 frames)",
