@@ -2864,7 +2864,7 @@ with block:
             # 参照画像を長辺合わせにするかどうか
             reference_long_edge = gr.Checkbox(
                 label=translate("参照画像を長辺合わせにする"),
-                value=saved_app_settings.get("reference_long_edge", False) if saved_app_settings else False,
+                value=saved_app_settings.get("reference_long_edge", True) if saved_app_settings else True,
                 elem_classes="saveable-setting",
                 visible=False
             )
@@ -2878,6 +2878,55 @@ with block:
                 visible=False,  # 初期状態では非表示
                 height=320
             )
+
+            # 参照画像キュー設定
+            with gr.Group(visible=False) as reference_queue_group:
+                use_reference_queue = gr.Checkbox(label=translate("参照画像キューを使用"), value=False)
+                with gr.Row(visible=False) as reference_queue_row:
+                    reference_input_folder_name = gr.Textbox(
+                        label=translate("参照入力フォルダ名"),
+                        value=reference_input_folder_name_value,
+                        info=translate("参照画像ファイルを格納するフォルダ名")
+                    )
+                    open_reference_folder_btn = gr.Button(value="📂 " + translate("保存及び入力フォルダを開く"), size="md")
+
+                reference_batch_count = gr.Slider(
+                    label=translate("参照画像用バッチ処理回数"),
+                    minimum=1,
+                    maximum=100,
+                    value=1,
+                    step=1,
+                    info=translate("参照画像1枚につき連続生成する回数")
+                )
+
+                def toggle_reference_queue(val):
+                    val = bool(val.value) if hasattr(val, 'value') else bool(val)
+                    return [gr.update(visible=val), gr.update(visible=val)]
+
+                def update_reference_folder(folder_name):
+                    global reference_input_folder_name_value
+                    folder_name = ''.join(c for c in folder_name if c.isalnum() or c in ('_', '-'))
+                    reference_input_folder_name_value = folder_name
+                    print(translate("参照フォルダ名をメモリに保存: {0}").format(folder_name))
+                    return gr.update(value=folder_name)
+
+                def open_reference_folder():
+                    global reference_input_folder_name_value
+                    settings = load_settings()
+                    settings['reference_folder'] = reference_input_folder_name_value
+                    save_settings(settings)
+                    print(translate("参照フォルダ設定を保存しました: {0}").format(reference_input_folder_name_value))
+                    input_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), reference_input_folder_name_value)
+                    if not os.path.exists(input_dir):
+                        os.makedirs(input_dir, exist_ok=True)
+                        print(translate("参照ディレクトリを作成しました: {0}").format(input_dir))
+                    get_reference_queue_files()
+                    open_folder(input_dir)
+                    return None
+
+                use_reference_queue.change(fn=toggle_reference_queue, inputs=[use_reference_queue], outputs=[reference_queue_row, reference_batch_count])
+                reference_input_folder_name.change(fn=update_reference_folder, inputs=[reference_input_folder_name], outputs=[reference_input_folder_name])
+                open_reference_folder_btn.click(fn=open_reference_folder, inputs=[], outputs=[gr.Textbox(visible=False)])
             # 参照画像の説明
             reference_image_info = gr.Markdown(
                 translate("特徴を抽出する画像（スタイル、服装、背景など）"),
@@ -2947,54 +2996,6 @@ with block:
                             translate("白い部分を適用、黒い部分を無視（グレースケール画像）")
                         )
 
-                # 参照画像キュー設定
-                with gr.Group(visible=False) as reference_queue_group:
-                    use_reference_queue = gr.Checkbox(label=translate("参照画像キューを使用"), value=False)
-                    with gr.Row(visible=False) as reference_queue_row:
-                        reference_input_folder_name = gr.Textbox(
-                            label=translate("参照入力フォルダ名"),
-                            value=reference_input_folder_name_value,
-                            info=translate("参照画像ファイルを格納するフォルダ名")
-                        )
-                        open_reference_folder_btn = gr.Button(value="📂 " + translate("保存及び入力フォルダを開く"), size="md")
-
-                    reference_batch_count = gr.Slider(
-                        label=translate("参照画像用バッチ処理回数"),
-                        minimum=1,
-                        maximum=100,
-                        value=1,
-                        step=1,
-                        info=translate("参照画像1枚につき連続生成する回数")
-                    )
-
-                    def toggle_reference_queue(val):
-                        val = bool(val.value) if hasattr(val, 'value') else bool(val)
-                        return [gr.update(visible=val), gr.update(visible=val)]
-
-                    def update_reference_folder(folder_name):
-                        global reference_input_folder_name_value
-                        folder_name = ''.join(c for c in folder_name if c.isalnum() or c in ('_', '-'))
-                        reference_input_folder_name_value = folder_name
-                        print(translate("参照フォルダ名をメモリに保存: {0}").format(folder_name))
-                        return gr.update(value=folder_name)
-
-                    def open_reference_folder():
-                        global reference_input_folder_name_value
-                        settings = load_settings()
-                        settings['reference_folder'] = reference_input_folder_name_value
-                        save_settings(settings)
-                        print(translate("参照フォルダ設定を保存しました: {0}").format(reference_input_folder_name_value))
-                        input_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), reference_input_folder_name_value)
-                        if not os.path.exists(input_dir):
-                            os.makedirs(input_dir, exist_ok=True)
-                            print(translate("参照ディレクトリを作成しました: {0}").format(input_dir))
-                        get_reference_queue_files()
-                        open_folder(input_dir)
-                        return None
-
-                    use_reference_queue.change(fn=toggle_reference_queue, inputs=[use_reference_queue], outputs=[reference_queue_row, reference_batch_count])
-                    reference_input_folder_name.change(fn=update_reference_folder, inputs=[reference_input_folder_name], outputs=[reference_input_folder_name])
-                    open_reference_folder_btn.click(fn=open_reference_folder, inputs=[], outputs=[gr.Textbox(visible=False)])
 
 
             
@@ -3814,7 +3815,7 @@ with block:
                 updates.append(gr.update(value=default_settings.get("use_clean_latents_post", True)))  #14
                 updates.append(gr.update(value=default_settings.get("target_index", 1)))  #15
                 updates.append(gr.update(value=default_settings.get("history_index", 16)))  #16
-                updates.append(gr.update(value=default_settings.get("reference_long_edge", False)))  #17
+                updates.append(gr.update(value=default_settings.get("reference_long_edge", True)))  #17
                 updates.append(gr.update(value=default_settings.get("save_input_images", False)))  #18
                 updates.append(gr.update(value=default_settings.get("save_before_input_images", False)))  #19
                 updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  #20
@@ -4119,7 +4120,7 @@ with block:
                     use_ref,
                     fav.get("target_index", 1),
                     fav.get("history_index", 16),
-                    fav.get("reference_long_edge", False),
+                    fav.get("reference_long_edge", True),
                     fav.get("latent_window_size", 9),
                     fav.get("latent_index", 0),
                     fav.get("use_clean_latents_2x", True),
