@@ -1064,7 +1064,7 @@ def end_after_current_process_enhanced():
         print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
 
     return (
-        gr.update(value=translate("停止処理中...")),
+        gr.update(value=translate("打ち切り処理中...")),
         gr.update(interactive=True, value=translate("▶️ Start Queue"))
     )
   

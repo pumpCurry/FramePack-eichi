@@ -3184,7 +3184,7 @@ def end_after_current_process():
         stop_after_current = True
         print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
 
-    return gr.update(value=translate("停止処理中..."), interactive=False)
+    return gr.update(value=translate("打ち切り処理中..."), interactive=False)
 
 # 既存のQuick Prompts（初期化時にプリセットに変換されるので、互換性のために残す）
 quick_prompts = [
