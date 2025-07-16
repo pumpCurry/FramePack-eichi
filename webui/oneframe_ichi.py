@@ -16,6 +16,7 @@ user_abort_notified = False
 # バッチ処理とキュー機能用グローバル変数
 batch_stopped = False  # バッチ処理中断フラグ
 stop_after_current = False  # 現在の生成完了後に停止するフラグ
+stop_after_step = False  # 現在のステップ完了後に停止するフラグ
 
 # テキストエンコード結果のキャッシュ用グローバル変数を初期化
 cached_prompt = None
@@ -1309,23 +1310,30 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 try:
                     preview = d['denoised']
                     preview = vae_decode_fake(preview)
-                    
+
                     preview = (preview * 255.0).detach().cpu().numpy().clip(0, 255).astype(np.uint8)
                     preview = einops.rearrange(preview, 'b c t h w -> (b h) (t w) c')
-                    
+
                     if stream.input_queue.top() == 'end':
-                        # KeyboardInterrupt方式による即座停止
+                        global batch_stopped, user_abort, user_abort_notified
+                        batch_stopped = True
+                        user_abort = True
+                        if not user_abort_notified:
+                            print(translate("\n[INFO] 開始前または現在の処理完了後に停止します..."))
+                            user_abort_notified = True
                         stream.output_queue.push(('end', None))
-                        raise KeyboardInterrupt('User ends the task.')
-                    
+                        return {'user_interrupt': True}
+
+                    if stop_after_step and stream.input_queue.top() != 'end':
+                        stream.input_queue.push('end')
+
                     current_step = d['i'] + 1
                     percentage = int(100.0 * current_step / steps)
                     hint = f'Sampling {current_step}/{steps}'
                     desc = translate('1フレームモード: サンプリング中...')
                     push_progress(preview, desc, percentage, hint)
                 except KeyboardInterrupt:
-                    # KeyboardInterrupt例外を再スローして確実に停止
-                    raise
+                    return {'user_interrupt': True}
                 except Exception as e:
                     import traceback
             
@@ -1985,7 +1993,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             save_settings_on_start=False, alarm_on_completion=True,
             log_enabled=None, log_folder=None):
     global stream
-    global batch_stopped, stop_after_current, user_abort, user_abort_notified
+    global batch_stopped, stop_after_current, stop_after_step, user_abort, user_abort_notified
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
 
     # 新たな処理開始時にグローバルフラグをリセット
@@ -1995,6 +2003,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # プロセス開始時にバッチ中断フラグをリセット
     batch_stopped = False
     stop_after_current = False
+    stop_after_step = False
 
     # bool値の正規化
     reference_long_edge = _to_bool(reference_long_edge)
@@ -2178,6 +2187,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # バッチ処理用の変数 - 各フラグをリセット
     batch_stopped = False
     stop_after_current = False
+    stop_after_step = False
     user_abort = False
     user_abort_notified = False
     
@@ -2488,7 +2498,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         break
                         
                     # ユーザーが中断した場合
-                    if stream.input_queue.top() == 'end' or batch_stopped:
+                    if stream.input_queue.top() == 'end' or (batch_stopped and not stop_after_current):
                         batch_stopped = True
                         # 処理ループ内での中断検出
                         print(translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches))
@@ -2564,6 +2574,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # バッチ処理終了後は必ずフラグをリセット
     batch_stopped = False
     stop_after_current = False
+    stop_after_step = False
     user_abort = False
     user_abort_notified = False
     
@@ -2617,6 +2628,18 @@ def end_after_current_process():
         batch_stopped = True
         stop_after_current = True
         print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+
+    return gr.update(value=translate("停止処理中..."), interactive=False)
+
+def end_after_step_process():
+    """現在のステップ完了後に停止する処理"""
+    global batch_stopped, stop_after_current, stop_after_step
+
+    if not stop_after_step:
+        batch_stopped = True
+        stop_after_current = True
+        stop_after_step = True
+        print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
 
@@ -2857,6 +2880,7 @@ with block:
                 start_button = gr.Button(value=translate("Start Generation"))
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
                 stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
+                stop_step_button = gr.Button(value=translate("このステップで打ち切り"), interactive=False)
 
             # FP8最適化設定
             with gr.Row():
@@ -4370,8 +4394,9 @@ with block:
     )
     
     start_button.click(fn=process, inputs=ips, outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed])
-    end_button.click(fn=end_process, outputs=[end_button, stop_after_button])
+    end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button])
     stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button])
+    stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button])
     
     gr.HTML(f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")}</div>')
 
