@@ -3197,6 +3197,18 @@ def end_after_step_process():
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
 
+def end_after_step_process():
+    """現在のステップ完了後に停止する処理"""
+    global batch_stopped, stop_after_current, stop_after_step
+
+    if not stop_after_step:
+        batch_stopped = True
+        stop_after_current = True
+        stop_after_step = True
+        print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
+
+    return gr.update(value=translate("停止処理中..."), interactive=False)
+
 # 既存のQuick Prompts（初期化時にプリセットに変換されるので、互換性のために残す）
 quick_prompts = [
     'A character doing some simple body movements.',
