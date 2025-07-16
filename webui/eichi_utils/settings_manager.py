@@ -287,7 +287,7 @@ def get_default_app_settings_oichi():
         "use_queue": False,
 
         # 参照画像長辺合わせ
-        "reference_long_edge": False,
+        "reference_long_edge": True,
 
         # 自動保存・アラーム設定
         "save_input_images": False,
