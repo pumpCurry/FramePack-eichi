@@ -4186,6 +4186,16 @@ with block:
                 lora2_val = validate_lora(fav.get("lora2", translate("なし")))
                 lora3_val = validate_lora(fav.get("lora3", translate("なし")))
 
+                # ドロップダウンの値を更新するオブジェクトを準備
+                if use_lora_val and lora_mode_val == translate("ディレクトリから選択"):
+                    lora1_upd = gr.update(value=lora1_val, choices=lora_choices)
+                    lora2_upd = gr.update(value=lora2_val, choices=lora_choices)
+                    lora3_upd = gr.update(value=lora3_val, choices=lora_choices)
+                else:
+                    lora1_upd = gr.update(value=lora1_val)
+                    lora2_upd = gr.update(value=lora2_val)
+                    lora3_upd = gr.update(value=lora3_val)
+
                 message = "\n".join(message_parts) if message_parts else translate("設定を読み込みました")
 
                 # LoRA関連の表示設定
@@ -4213,9 +4223,9 @@ with block:
                     fav.get("prompt", ""),
                     use_lora_val,
                     lora_mode_upd,
-                    lora1_val,
-                    lora2_val,
-                    lora3_val,
+                    lora1_upd,
+                    lora2_upd,
+                    lora3_upd,
                     lora_scales_upd,
                     use_ref,
                     fav.get("target_index", 1),
