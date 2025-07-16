@@ -1959,7 +1959,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             use_reference_image=False, reference_image=None,
             target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None,
             reference_batch_count=1, use_reference_queue=False,
-            save_settings_on_start=False, alarm_on_completion=True):
+            save_settings_on_start=False, alarm_on_completion=True,
+            log_enabled=None, log_folder=None):
     global stream
     global batch_stopped, stop_after_current, user_abort, user_abort_notified
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
@@ -2196,16 +2197,36 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         if hasattr(lora_cache_checkbox, 'value'):
             lora_cache_val = bool(lora_cache_checkbox.value)
 
+        # Gradioオブジェクトの値を正規化
+        log_enabled_val = log_enabled
+        if hasattr(log_enabled, 'value'):
+            log_enabled_val = bool(log_enabled.value)
+
+        log_folder_val = log_folder
+        if hasattr(log_folder, 'value'):
+            log_folder_val = str(log_folder.value)
+
         current_settings = {
-            'resolution': resolution,
+            'prompt': prompt,
+            'lora1': _norm_dropdown(lora_dropdown1),
+            'lora2': _norm_dropdown(lora_dropdown2),
+            'lora3': _norm_dropdown(lora_dropdown3),
+            'lora_scales': lora_scales_text,
+            'use_lora': _to_bool(use_lora),
+            'lora_mode': lora_mode,
+            'use_reference_image': _to_bool(use_reference_image),
+            'use_random_seed': _to_bool(use_random_seed),
+            'seed': seed,
             'steps': steps,
+            'gs': gs,
+            'gpu_memory_preservation': gpu_memory_preservation,
+            'output_folder': output_directory,
+            'resolution': resolution,
             'cfg': cfg,
             'use_teacache': use_teacache,
             'fp8_optimization': fp8_optimization,
             'lora_cache': lora_cache_val,
             'use_prompt_cache': use_prompt_cache,
-            'gpu_memory_preservation': gpu_memory_preservation,
-            'gs': gs,
             'latent_window_size': latent_window_size,
             'latent_index': latent_index,
             'use_clean_latents_2x': use_clean_latents_2x,
@@ -2217,7 +2238,9 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             'save_input_images': save_input_images,
             'save_before_input_images': save_before_input_images,
             'save_settings_on_start': save_settings_on_start,
-            'alarm_on_completion': alarm_on_completion
+            'alarm_on_completion': alarm_on_completion,
+            'log_enabled': log_enabled_val,
+            'log_folder': log_folder_val
         }
         
         # 設定を保存
@@ -2598,8 +2621,8 @@ with block:
     # ここではロードをスキップして、ワーカー関数内で必要になったときにだけロードする
     
     # Use Random Seedの初期値（先に定義して後で使う）
-    use_random_seed_default = True
-    seed_default = random.randint(0, 2**32 - 1) if use_random_seed_default else 31337
+    use_random_seed_default = saved_app_settings.get("use_random_seed", True) if saved_app_settings else True
+    seed_default = saved_app_settings.get("seed", random.randint(0, 2**32 - 1)) if saved_app_settings else random.randint(0, 2**32 - 1)
     
     # eichiのプリセット管理関連のインポート
     from eichi_utils.preset_manager import get_default_startup_prompt, load_presets, save_preset, delete_preset
@@ -2858,7 +2881,7 @@ with block:
             # 参照画像を使用するかどうかのチェックボックス
             use_reference_image = gr.Checkbox(
                 label=translate("参照画像を使用"),
-                value=False
+                value=saved_app_settings.get("use_reference_image", False) if saved_app_settings else False
             )
 
             # 参照画像を長辺合わせにするかどうか
@@ -3098,12 +3121,16 @@ with block:
                     gr.Markdown(f"### " + translate("LoRA設定"))
                     
                     # LoRA使用有無のチェックボックス
-                    use_lora = gr.Checkbox(label=translate("LoRAを使用する"), value=False, info=translate("チェックをオンにするとLoRAを使用します（要16GB VRAM以上）"))
+                    use_lora = gr.Checkbox(
+                        label=translate("LoRAを使用する"),
+                        value=saved_app_settings.get("use_lora", False) if saved_app_settings else False,
+                        info=translate("チェックをオンにするとLoRAを使用します（要16GB VRAM以上）")
+                    )
 
                     # LoRAモード選択（初期状態では非表示）
                     lora_mode = gr.Radio(
                         choices=[translate("ディレクトリから選択"), translate("ファイルアップロード")],
-                        value=translate("ディレクトリから選択"),
+                        value=saved_app_settings.get("lora_mode", translate("ディレクトリから選択")) if saved_app_settings else translate("ディレクトリから選択"),
                         label=translate("LoRA読み込み方式"),
                         visible=False  # 初期状態では非表示（toggle_lora_settingsで制御）
                     )
@@ -3130,9 +3157,24 @@ with block:
                     with gr.Group(visible=False) as lora_dropdown_group:
                         # LoRAドロップダウン
                         none_choice = translate("なし")
-                        lora_dropdown1 = gr.Dropdown(label=translate("LoRA1"), choices=[none_choice], value=none_choice, allow_custom_value=False)
-                        lora_dropdown2 = gr.Dropdown(label=translate("LoRA2"), choices=[none_choice], value=none_choice, allow_custom_value=False)
-                        lora_dropdown3 = gr.Dropdown(label=translate("LoRA3"), choices=[none_choice], value=none_choice, allow_custom_value=False)
+                        lora_dropdown1 = gr.Dropdown(
+                            label=translate("LoRA1"),
+                            choices=[none_choice],
+                            value=saved_app_settings.get("lora1", none_choice) if saved_app_settings else none_choice,
+                            allow_custom_value=False
+                        )
+                        lora_dropdown2 = gr.Dropdown(
+                            label=translate("LoRA2"),
+                            choices=[none_choice],
+                            value=saved_app_settings.get("lora2", none_choice) if saved_app_settings else none_choice,
+                            allow_custom_value=False
+                        )
+                        lora_dropdown3 = gr.Dropdown(
+                            label=translate("LoRA3"),
+                            choices=[none_choice],
+                            value=saved_app_settings.get("lora3", none_choice) if saved_app_settings else none_choice,
+                            allow_custom_value=False
+                        )
                         
                         # ドロップダウン更新ボタン（下に配置）
                         lora_scan_button = gr.Button(value=translate("LoRAフォルダを再スキャン"), variant="secondary")
@@ -3140,7 +3182,7 @@ with block:
                     # スケール値の入力フィールド
                     lora_scales_text = gr.Textbox(
                         label=translate("LoRA適用強度 (カンマ区切り)"),
-                        value="0.8,0.8,0.8",
+                        value=saved_app_settings.get("lora_scales", "0.8,0.8,0.8") if saved_app_settings else "0.8,0.8,0.8",
                         info=translate("各LoRAのスケール値をカンマ区切りで入力 (例: 0.8,0.5,0.3)"),
                         visible=False
                     )
@@ -3501,7 +3543,11 @@ with block:
             )
 
             # プロンプト入力
-            prompt = gr.Textbox(label=translate("プロンプト"), value=get_default_startup_prompt(), lines=6)
+            prompt = gr.Textbox(
+                label=translate("プロンプト"),
+                value=saved_app_settings.get("prompt", get_default_startup_prompt()) if saved_app_settings else get_default_startup_prompt(),
+                lines=6
+            )
             n_prompt = gr.Textbox(label=translate("ネガティブプロンプト"), value='', visible=False)
             
             # プロンプト管理パネル
@@ -3560,8 +3606,15 @@ with block:
             use_prompt_cache = gr.Checkbox(label=translate('Use Prompt Cache'), value=saved_app_settings.get("use_prompt_cache", True) if saved_app_settings else True, info=translate('Cache encoded prompts to disk for reuse after restart.'), elem_classes="saveable-setting")
             
             # Use Random Seedの初期値
-            use_random_seed = gr.Checkbox(label=translate("Use Random Seed"), value=use_random_seed_default)
-            seed = gr.Number(label=translate("Seed"), value=seed_default, precision=0)
+            use_random_seed = gr.Checkbox(
+                label=translate("Use Random Seed"),
+                value=saved_app_settings.get("use_random_seed", use_random_seed_default) if saved_app_settings else use_random_seed_default
+            )
+            seed = gr.Number(
+                label=translate("Seed"),
+                value=saved_app_settings.get("seed", seed_default) if saved_app_settings else seed_default,
+                precision=0
+            )
             
             # ステップ数などの設定を右カラムに配置
             steps = gr.Slider(label=translate("ステップ数"), minimum=1, maximum=100, value=saved_app_settings.get("steps", 25) if saved_app_settings else 25, step=1, info=translate('この値の変更は推奨されません'), elem_classes="saveable-setting")
@@ -3590,7 +3643,7 @@ with block:
                         # フォルダ名だけを入力欄に設定
                         output_dir = gr.Textbox(
                             label=translate("出力フォルダ名"),
-                            value=output_folder_name,  # 設定から読み込んだ値を使用
+                            value=saved_app_settings.get("output_folder", output_folder_name) if saved_app_settings else output_folder_name,
                             info=translate("生成画像の保存先フォルダ名"),
                             placeholder="outputs"
                         )
@@ -4226,7 +4279,8 @@ with block:
            use_reference_image, reference_image,
            target_index, history_index, reference_long_edge, input_mask, reference_mask,
            reference_batch_count, use_reference_queue,
-           save_settings_on_start, alarm_on_completion]  # 設定保存パラメータを追加
+           save_settings_on_start, alarm_on_completion,
+           log_enabled, log_folder]  # 設定保存パラメータを追加
     
     # 設定保存ボタンのクリックイベント
     save_current_settings_btn.click(
