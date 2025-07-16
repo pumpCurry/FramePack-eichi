@@ -239,6 +239,7 @@ else:
 # グローバル変数
 batch_stopped = False  # バッチ処理の停止フラグ
 stop_after_current = False  # 現在の生成完了後に停止するフラグ
+stop_after_step = False  # 現在のステップ完了後に停止するフラグ
 queue_enabled = False  # キュー機能の有効/無効フラグ
 queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
@@ -1482,17 +1483,14 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
                 # 中断要求の安全な処理
                 if stream.input_queue.top() == 'end':
-                    print(translate("ユーザーによる中断要求を検知しています..."))
-                    # 安全な状態保存とリソース準備
-                    current_step = d.get('i', 0) + 1
-                    print(translate("中断時点: ステップ {0}/{1}").format(current_step, steps))
-                    
-                    # 中断通知を先に送信
+                    global batch_stopped
+                    batch_stopped = True
                     stream.output_queue.push(('end', None))
-                    
-                    # リソース状態をクリアしてから例外発生
-                    print(translate("中断処理を実行中..."))
-                    raise KeyboardInterrupt('User ends the task.')
+                    return {'user_interrupt': True}
+
+                # 現在のステップで停止する指示がある場合は次のステップ開始前に終了
+                if stop_after_step and stream.input_queue.top() != 'end':
+                    stream.input_queue.push('end')
 
                 current_step = d['i'] + 1
                 percentage = int(100.0 * current_step / steps)
@@ -2524,7 +2522,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
     stop_after_current = False
-
+    stop_after_step = False
     # frame_save_modeから save_latent_frames と save_last_section_frames を算出
     save_latent_frames = False
     save_last_section_frames = False
@@ -2755,6 +2753,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     # バッチ処理の全体停止用フラグ
     batch_stopped = False
     stop_after_current = False
+    stop_after_step = False
 
     # 元のシード値を保存（バッチ処理用）
     original_seed = seed
@@ -3186,6 +3185,18 @@ def end_after_current_process():
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
 
+def end_after_step_process():
+    """現在のステップ完了後に停止する処理"""
+    global batch_stopped, stop_after_current, stop_after_step
+
+    if not stop_after_step:
+        batch_stopped = True
+        stop_after_current = True
+        stop_after_step = True
+        print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
+
+    return gr.update(value=translate("停止処理中..."), interactive=False)
+
 # 既存のQuick Prompts（初期化時にプリセットに変換されるので、互換性のために残す）
 quick_prompts = [
     'A character doing some simple body movements.',
@@ -3608,6 +3619,7 @@ with block:
                 start_button = gr.Button(value=translate("Start Generation"))
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
                 stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
+                stop_step_button = gr.Button(value=translate("このステップで打ち切り"), interactive=False)
 
             # FP8最適化設定
             with gr.Row():
@@ -6419,8 +6431,9 @@ with block:
     ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, end_frame, end_frame_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, section_settings, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_vae_cache, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion]
     
     start_button.click(fn=validate_and_process, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed])
-    end_button.click(fn=end_process, outputs=[end_button, stop_after_button])
+    end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button])
     stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button])
+    stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button])
 
     # キーフレーム画像変更時のイベント登録
     # セクション0（赤枚)からの自動コピー処理
