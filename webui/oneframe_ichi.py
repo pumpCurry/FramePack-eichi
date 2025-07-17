@@ -32,6 +32,14 @@ queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
 image_queue_files = []  # イメージキューのファイルリスト
 
+# 進捗表示用グローバル変数
+progress_ref_idx = 0
+progress_ref_total = 0
+progress_ref_name = ""
+progress_img_idx = 0
+progress_img_total = 0
+progress_img_name = ""
+
 from diffusers_helper.hf_login import login
 
 import os
@@ -527,11 +535,23 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             est_str = est_dt.strftime('%H:%M:%S')
         else:
             est_str = '--:--:--'
+
+        progress_html = ''
+        try:
+            global progress_ref_idx, progress_ref_total, progress_ref_name
+            global progress_img_idx, progress_img_total, progress_img_name
+            progress_html = (
+                f"<br/><strong>進捗:</strong> 《参考画像 {progress_ref_idx}/{progress_ref_total}》"
+                f"{progress_ref_name} / 《イメージ {progress_img_idx}/{progress_img_total}》{progress_img_name} <br/>"
+            )
+        except Exception:
+            progress_html = ''
+
         time_info = f"{start_str}▶{now_str} ({elapsed_str}) ▶{est_str}"
         if desc:
-            desc = f"{desc}\n{time_info}"
+            desc = f"{progress_html}{desc}\n{time_info}"
         else:
-            desc = time_info
+            desc = f"{progress_html}{time_info}"
         stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percent, hint))))
 
     if save_before_input_images:
@@ -2406,6 +2426,19 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         # 画像数が足りない場合は入力画像に戻る
                         print(translate("イメージキュー実行中: バッチ {0}/{1} は画像数を超えているため入力画像を使用").format(batch_index+1, batch_count))
 
+        # 進捗用グローバル変数を更新
+        global progress_ref_idx, progress_ref_total, progress_ref_name
+        global progress_img_idx, progress_img_total, progress_img_name
+        progress_ref_idx = reference_idx + 1
+        progress_ref_total = ref_count
+        progress_ref_name = os.path.basename(reference_image_current) if isinstance(reference_image_current, str) else translate("入力画像")
+        progress_img_idx = batch_index + 1
+        progress_img_total = batch_count
+        if isinstance(current_image, str):
+            progress_img_name = os.path.basename(current_image)
+        else:
+            progress_img_name = translate("入力画像")
+
         # RoPE値バッチ処理の場合はRoPE値をインクリメント、それ以外は通常のシードインクリメント
         current_seed = original_seed
         current_latent_window_size = latent_window_size
@@ -2486,10 +2519,13 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         # バッチ処理中は最後の画像のみを表示
                         if batch_index_total == total_batches - 1 or batch_stopped:  # 最後のバッチまたは中断された場合
                             completion_message = ""
+                            global progress_ref_idx, progress_ref_total, progress_img_idx, progress_img_total
+                            progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                             if batch_stopped:
                                 completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches)
                             else:
                                 completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(total_batches, total_batches)
+                            completion_message = f"{completion_message} - {progress_summary}"
                             
                             # 完了メッセージでUIを更新
                             yield (
@@ -2511,10 +2547,11 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         # 処理ループ内での中断検出
                         print(translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches))
                         # endframe_ichiと同様のシンプルな実装に戻す
+                        progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                         yield (
                             output_filename if output_filename is not None else gr.skip(),
                             gr.update(visible=False),
-                            translate("バッチ処理が中断されました"),
+                            translate("バッチ処理が中断されました") + f" - {progress_summary}",
                             '',
                             gr.update(interactive=True),
                             gr.update(interactive=False, value=translate("End Generation")),
