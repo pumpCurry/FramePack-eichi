@@ -14,6 +14,7 @@ import os
 import random
 import time
 import subprocess
+import shutil
 import traceback  # ログ出力用
 # クロスプラットフォーム対応のための条件付きインポート
 import yaml
@@ -4650,11 +4651,16 @@ with block:
                     try:
                         if os.name == 'nt':  # Windows
                             os.startfile(input_dir)
-                        elif os.name == 'posix':  # macOS, Linux
-                            if sys.platform == 'darwin':  # macOS
-                                subprocess.Popen(['open', input_dir])
-                            else:  # Linux
-                                subprocess.Popen(['xdg-open', input_dir])
+                        elif os.name == 'posix':
+                            opener = None
+                            if sys.platform == 'darwin' and shutil.which('open'):
+                                opener = 'open'
+                            else:
+                                opener = shutil.which('xdg-open') or shutil.which('open')
+                            if opener:
+                                subprocess.Popen([opener, input_dir])
+                            else:
+                                raise FileNotFoundError('xdg-open/open not found')
                         print(translate("入力フォルダを開きました: {0}").format(input_dir))
                         return translate("設定を保存し、入力フォルダを開きました")
                     except Exception as e:

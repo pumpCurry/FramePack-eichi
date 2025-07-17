@@ -6,6 +6,8 @@
 import os
 import sys
 import datetime
+import subprocess
+import shutil
 from locales.i18n_extended import translate
 
 # グローバル変数
@@ -268,14 +270,17 @@ def open_log_folder():
     
     try:
         if os.name == 'nt':  # Windows
-            import subprocess
             subprocess.Popen(['explorer', folder_path])
-        elif os.name == 'posix':  # Linux/Mac
-            import subprocess
-            try:
-                subprocess.Popen(['xdg-open', folder_path])
-            except:
-                subprocess.Popen(['open', folder_path])
+        elif os.name == 'posix':
+            opener = None
+            if sys.platform == 'darwin' and shutil.which('open'):
+                opener = 'open'
+            else:
+                opener = shutil.which('xdg-open') or shutil.which('open')
+            if opener:
+                subprocess.Popen([opener, folder_path])
+            else:
+                raise FileNotFoundError('xdg-open/open not found')
         print(translate("ログフォルダを開きました: {0}").format(folder_path))
         return True
     except Exception as e:
