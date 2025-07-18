@@ -2581,7 +2581,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         # バッチ処理中は最後の画像のみを表示
                         if batch_index_total == total_batches - 1 or batch_stopped:  # 最後のバッチまたは中断された場合
                             completion_message = ""
-                            global progress_ref_idx, progress_ref_total, progress_img_idx, progress_img_total
                             progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                             if batch_stopped:
                                 completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches)
