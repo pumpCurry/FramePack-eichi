@@ -271,6 +271,7 @@ def open_log_folder():
     try:
         if os.name == 'nt':  # Windows
             subprocess.Popen(['explorer', folder_path])
+            print(translate("ログフォルダを開きました: {0}").format(folder_path))
         elif os.name == 'posix':
             opener = None
             if sys.platform == 'darwin' and shutil.which('open'):
@@ -279,9 +280,11 @@ def open_log_folder():
                 opener = shutil.which('xdg-open') or shutil.which('open')
             if opener:
                 subprocess.Popen([opener, folder_path])
+                print(translate("ログフォルダを開きました: {0}").format(folder_path))
             else:
-                raise FileNotFoundError('xdg-open/open not found')
-        print(translate("ログフォルダを開きました: {0}").format(folder_path))
+                print(translate("xdg-open/open が見つからないため自動でフォルダを開けません: {0}").format(folder_path))
+        else:
+            print(translate("このOSではフォルダを自動で開く機能はサポートされていません: {0}").format(folder_path))
         return True
     except Exception as e:
         print(translate("ログフォルダを開く際にエラーが発生しました: {0}").format(e))

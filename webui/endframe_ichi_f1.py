@@ -4651,6 +4651,7 @@ with block:
                     try:
                         if os.name == 'nt':  # Windows
                             os.startfile(input_dir)
+                            print(translate("入力フォルダを開きました: {0}").format(input_dir))
                         elif os.name == 'posix':
                             opener = None
                             if sys.platform == 'darwin' and shutil.which('open'):
@@ -4659,10 +4660,12 @@ with block:
                                 opener = shutil.which('xdg-open') or shutil.which('open')
                             if opener:
                                 subprocess.Popen([opener, input_dir])
+                                print(translate("入力フォルダを開きました: {0}").format(input_dir))
                             else:
-                                raise FileNotFoundError('xdg-open/open not found')
-                        print(translate("入力フォルダを開きました: {0}").format(input_dir))
-                        return translate("設定を保存し、入力フォルダを開きました")
+                                print(translate("xdg-open/open が見つからないため自動でフォルダを開けません: {0}").format(input_dir))
+                        else:
+                            print(translate("このOSではフォルダを自動で開く機能はサポートされていません: {0}").format(input_dir))
+                        return translate("設定を保存しました")
                     except Exception as e:
                         error_msg = translate("フォルダを開けませんでした: {0}").format(str(e))
                         print(error_msg)
