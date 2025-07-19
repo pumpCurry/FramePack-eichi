@@ -248,6 +248,10 @@ vae_cache_enabled = False  # VAEキャッシュの有効/無効フラグ
 image_queue_files = []  # イメージキューのファイルリスト
 input_folder_name_value = "inputs"  # 入力フォルダ名（デフォルト値）
 
+# Resync support - store last progress state
+last_progress_desc = ""
+last_progress_bar = ""
+
 # イメージキューのための画像ファイルリストを取得する関数（グローバル関数）
 def get_image_queue_files():
     global image_queue_files, input_folder_name_value
@@ -645,7 +649,13 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             desc = f"{desc}\n{time_info}"
         else:
             desc = time_info
-        stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percent, hint))))
+
+        bar_html = make_progress_bar_html(percent, hint)
+        global last_progress_desc, last_progress_bar
+        last_progress_desc = desc
+        last_progress_bar = bar_html
+
+        stream.output_queue.push(('progress', (preview, desc, bar_html)))
 
     # グローバル変数で状態管理しているモデル変数を宣言する
     global transformer, text_encoder, text_encoder_2
@@ -3198,6 +3208,11 @@ def end_after_step_process():
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
 
+def resync_status_handler():
+    """Re-synchronize progress display after page reload."""
+    global last_progress_desc, last_progress_bar
+    return translate("✅ Status resynchronized"), last_progress_desc, last_progress_bar
+
 def end_after_step_process():
     """現在のステップ完了後に停止する処理"""
     global batch_stopped, stop_after_current, stop_after_step
@@ -3641,6 +3656,7 @@ with block:
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
                 stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
                 stop_step_button = gr.Button(value=translate("このステップで打ち切り"), interactive=False)
+                resync_status_btn = gr.Button(value=translate("🔃 Resync Status"), variant="secondary")
 
             # FP8最適化設定
             with gr.Row():
@@ -6455,6 +6471,11 @@ with block:
     end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button])
     stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button])
     stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button])
+    resync_status_btn.click(
+        fn=resync_status_handler,
+        inputs=[],
+        outputs=[progress_desc, progress_bar]
+    )
 
     # キーフレーム画像変更時のイベント登録
     # セクション0（赤枚)からの自動コピー処理
