@@ -32,6 +32,10 @@ queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
 image_queue_files = []  # イメージキューのファイルリスト
 
+# Resync support - store last progress state
+last_progress_desc = ""
+last_progress_bar = ""
+
 # 進捗表示用グローバル変数
 progress_ref_idx = 0
 progress_ref_total = 0
@@ -614,7 +618,13 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             desc = f"{progress_html}{desc}\n{time_info}"
         else:
             desc = f"{progress_html}{time_info}"
-        stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percent, hint))))
+
+        bar_html = make_progress_bar_html(percent, hint)
+        global last_progress_desc, last_progress_bar
+        last_progress_desc = desc
+        last_progress_bar = bar_html
+
+        stream.output_queue.push(('progress', (preview, desc, bar_html)))
 
     if save_before_input_images:
         for p, suffix in [
@@ -2777,6 +2787,11 @@ def end_after_step_process():
             gr.update(interactive=False),
         )
 
+def resync_status_handler():
+    """Re-synchronize progress display after page reload."""
+    global last_progress_desc, last_progress_bar
+    return translate("✅ Status resynchronized"), last_progress_desc, last_progress_bar
+
 css = get_app_css()  # eichi_utilsのスタイルを使用
 
 # アプリケーション起動時に保存された設定を読み込む
@@ -3015,6 +3030,7 @@ with block:
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
                 stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
                 stop_step_button = gr.Button(value=translate("このステップで打ち切り"), interactive=False)
+                resync_status_btn = gr.Button(value=translate("🔃 Resync Status"), variant="secondary")
 
             # FP8最適化設定
             with gr.Row():
@@ -4542,6 +4558,11 @@ with block:
     end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button])
     stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button, end_button])
     stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button, end_button])
+    resync_status_btn.click(
+        fn=resync_status_handler,
+        inputs=[],
+        outputs=[result_message, progress_desc, progress_bar]
+    )
     
     gr.HTML(f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")}</div>')
 

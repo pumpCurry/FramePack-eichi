@@ -543,6 +543,41 @@ def merged_refresh_handler_standardized():
     except Exception as e:
         return translate("❌ Error during refresh: {0}").format(str(e)), gr.update(), gr.update()
 
+def resync_status_handler():
+    try:
+        if config_queue_manager is None:
+            return (
+                translate("❌ Config queue manager not initialized"),
+                gr.update(),
+                gr.update(),
+                gr.update()
+            )
+
+        queue_status = config_queue_manager.get_queue_status()
+        status_text = format_queue_status_with_batch_progress(queue_status)
+
+        if queue_status.get('is_processing'):
+            desc = translate("Queue processing active - Progress UI disabled. Check console for details.")
+            bar = f'<div style="color: blue; font-weight: bold;">{desc}</div>'
+        else:
+            desc = translate("Status: Ready")
+            bar = ''
+
+        return (
+            translate("✅ Status resynchronized"),
+            gr.update(value=status_text),
+            desc,
+            bar
+        )
+
+    except Exception as e:
+        return (
+            translate("❌ Error during resync: {0}").format(str(e)),
+            gr.update(),
+            gr.update(),
+            gr.update()
+        )
+
 # ==============================================================================
 # QUEUE CONTROL HANDLERS
 # ==============================================================================
@@ -1133,6 +1168,8 @@ def create_enhanced_config_queue_ui():
                 enhanced_start_queue_btn = gr.Button(value=translate("▶️ Start Queue"), variant="primary")
             with gr.Column(scale=1):
                 stop_queue_btn = gr.Button(value=translate("⏹️ Stop Queue"), variant="secondary")
+            with gr.Column(scale=1):
+                resync_status_btn = gr.Button(value=translate("🔃 Resync Status"), variant="secondary")
 
 
         # Messages
@@ -1180,6 +1217,7 @@ def create_enhanced_config_queue_ui():
         'enhanced_start_queue_btn': enhanced_start_queue_btn,  # Enhanced start button
         'stop_queue_btn': stop_queue_btn,
         'clear_queue_btn': clear_queue_btn,
+        'resync_status_btn': resync_status_btn,
         'queue_status_display': queue_status_display,
         'config_message': config_message
     }
@@ -1342,6 +1380,17 @@ def setup_enhanced_config_queue_events(components, ui_components):
             components['config_message'],
             components['config_dropdown'],
             components['queue_status_display']
+        ]
+    )
+
+    components['resync_status_btn'].click(
+        fn=resync_status_handler,
+        inputs=[],
+        outputs=[
+            components['config_message'],
+            components['queue_status_display'],
+            ui_components['progress_desc'],
+            ui_components['progress_bar']
         ]
     )
 
