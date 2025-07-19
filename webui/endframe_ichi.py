@@ -3211,7 +3211,9 @@ def end_after_step_process():
 def resync_status_handler():
     """Re-synchronize progress display after page reload."""
     global last_progress_desc, last_progress_bar
-    return translate("✅ Status resynchronized"), last_progress_desc, last_progress_bar
+    # Log message for clarity; UI does not display it directly
+    print(translate("✅ Status resynchronized"))
+    return last_progress_desc, last_progress_bar
 
 def end_after_step_process():
     """現在のステップ完了後に停止する処理"""
