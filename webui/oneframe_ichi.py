@@ -2606,8 +2606,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                                 '',
                                 gr.update(interactive=True, value=translate("Start Generation")),
                                 gr.update(interactive=False, value=translate("End Generation")),
-                                gr.update(interactive=False),
-                                gr.update(interactive=False),
+                                gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                                gr.update(interactive=False, value=translate("このステップで打ち切り")),
                                 gr.update(value=original_seed),
                             )
                         break
@@ -2626,8 +2626,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                             '',
                             gr.update(interactive=True),
                             gr.update(interactive=False, value=translate("End Generation")),
-                            gr.update(interactive=False),
-                            gr.update(interactive=False),
+                            gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                            gr.update(interactive=False, value=translate("このステップで打ち切り")),
                             gr.update(value=original_seed),
                         )
                         return
@@ -2671,12 +2671,12 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 pass
             
             # UIをリセット
-            yield None, gr.update(visible=False), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False), gr.update(interactive=False), gr.update()
+            yield None, gr.update(visible=False), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
             return
         except Exception as e:
             import traceback
             # UIをリセット
-            yield None, gr.update(visible=False), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False), gr.update(interactive=False), gr.update()
+            yield None, gr.update(visible=False), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
             return
     
     # すべてのバッチ処理が正常に完了した場合と中断された場合で表示メッセージを分ける
