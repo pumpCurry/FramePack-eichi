@@ -35,6 +35,8 @@ image_queue_files = []  # イメージキューのファイルリスト
 # Resync support - store last progress state
 last_progress_desc = ""
 last_progress_bar = ""
+last_preview_image = None
+last_output_filename = None
 
 # 進捗表示用グローバル変数
 progress_ref_idx = 0
@@ -620,9 +622,10 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             desc = f"{progress_html}{time_info}"
 
         bar_html = make_progress_bar_html(percent, hint)
-        global last_progress_desc, last_progress_bar
+        global last_progress_desc, last_progress_bar, last_preview_image
         last_progress_desc = desc
         last_progress_bar = bar_html
+        last_preview_image = preview
 
         stream.output_queue.push(('progress', (preview, desc, bar_html)))
 
@@ -2570,6 +2573,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                     
                     if flag == 'file':
                         output_filename = data
+                        global last_output_filename
+                        last_output_filename = data
                         yield (
                             output_filename if output_filename is not None else gr.skip(),
                             gr.update(),
@@ -2597,8 +2602,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                             else:
                                 completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(total_batches, total_batches)
                             completion_message = f"{completion_message} - {progress_summary}"
-                            
+
                             # 完了メッセージでUIを更新
+                            global last_output_filename
+                            last_output_filename = output_filename
                             yield (
                                 output_filename if output_filename is not None else gr.skip(),
                                 gr.update(visible=False),
@@ -2788,9 +2795,63 @@ def end_after_step_process():
         )
 
 def resync_status_handler():
-    """Re-synchronize progress display after page reload."""
-    global last_progress_desc, last_progress_bar
-    return translate("✅ Status resynchronized"), last_progress_desc, last_progress_bar
+    """Resume streaming progress after page reload."""
+    global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
+    global current_seed
+
+    yield (
+        last_output_filename if last_output_filename is not None else gr.skip(),
+        gr.update(visible=last_preview_image is not None, value=last_preview_image),
+        last_progress_desc,
+        last_progress_bar,
+        gr.update(interactive=False),
+        gr.update(interactive=True),
+        gr.update(interactive=True),
+        gr.update(interactive=True),
+        gr.update(value=current_seed),
+    )
+
+    while True:
+        try:
+            flag, data = stream.output_queue.next()
+        except Exception:
+            break
+
+        if flag == 'file':
+            last_output_filename = data
+            yield (
+                last_output_filename if last_output_filename is not None else gr.skip(),
+                gr.update(),
+                gr.update(),
+                gr.update(),
+                gr.update(interactive=False),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(value=current_seed),
+            )
+
+        if flag == 'progress':
+            preview, desc, html = data
+            last_preview_image = preview
+            last_progress_desc = desc
+            last_progress_bar = html
+            yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+
+        if flag == 'end':
+            last_output_filename = last_output_filename or data
+            yield (
+                last_output_filename if last_output_filename is not None else gr.skip(),
+                gr.update(visible=False),
+                last_progress_desc,
+                last_progress_bar,
+                gr.update(interactive=True, value=translate("Start Generation")),
+                gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False),
+                gr.update(interactive=False),
+                gr.update(value=current_seed),
+            )
+            break
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
 
@@ -4561,7 +4622,7 @@ with block:
     resync_status_btn.click(
         fn=resync_status_handler,
         inputs=[],
-        outputs=[result_message, progress_desc, progress_bar]
+        outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, stop_step_button, seed]
     )
     
     gr.HTML(f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")}</div>')
