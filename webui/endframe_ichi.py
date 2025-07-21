@@ -3187,23 +3187,27 @@ def end_process():
 
 def end_after_current_process():
     """現在の生成完了後に停止する処理"""
-    global batch_stopped, stop_after_current
+    global batch_stopped, stop_after_current, stream
 
     if not stop_after_current:
         batch_stopped = True
         stop_after_current = True
+        if stream is not None and stream.input_queue.top() != 'end':
+            stream.input_queue.push('end')
         print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
 
     return gr.update(value=translate("打ち切り処理中..."), interactive=False)
 
 def end_after_step_process():
     """現在のステップ完了後に停止する処理"""
-    global batch_stopped, stop_after_current, stop_after_step
+    global batch_stopped, stop_after_current, stop_after_step, stream
 
     if not stop_after_step:
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
+        if stream is not None and stream.input_queue.top() != 'end':
+            stream.input_queue.push('end')
         print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
@@ -3217,12 +3221,14 @@ def resync_status_handler():
 
 def end_after_step_process():
     """現在のステップ完了後に停止する処理"""
-    global batch_stopped, stop_after_current, stop_after_step
+    global batch_stopped, stop_after_current, stop_after_step, stream
 
     if not stop_after_step:
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
+        if stream is not None and stream.input_queue.top() != 'end':
+            stream.input_queue.push('end')
         print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
 
     return gr.update(value=translate("停止処理中..."), interactive=False)

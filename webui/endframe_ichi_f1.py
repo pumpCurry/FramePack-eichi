@@ -1092,11 +1092,13 @@ def end_process_enhanced():
 
 def end_after_current_process_enhanced():
     """Stop after the current generation completes"""
-    global batch_stopped, stop_after_current
+    global batch_stopped, stop_after_current, stream
 
     if not stop_after_current:
         batch_stopped = True
         stop_after_current = True
+        if stream is not None and stream.input_queue.top() != 'end':
+            stream.input_queue.push('end')
         print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
 
     return (
