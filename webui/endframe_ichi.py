@@ -251,6 +251,8 @@ input_folder_name_value = "inputs"  # 入力フォルダ名（デフォルト値
 # Resync support - store last progress state
 last_progress_desc = ""
 last_progress_bar = ""
+last_preview_image = None
+last_output_filename = None
 
 # イメージキューのための画像ファイルリストを取得する関数（グローバル関数）
 def get_image_queue_files():
@@ -651,9 +653,10 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             desc = time_info
 
         bar_html = make_progress_bar_html(percent, hint)
-        global last_progress_desc, last_progress_bar
+        global last_progress_desc, last_progress_bar, last_preview_image
         last_progress_desc = desc
         last_progress_bar = bar_html
+        last_preview_image = preview
 
         stream.output_queue.push(('progress', (preview, desc, bar_html)))
 
@@ -3081,6 +3084,8 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
             if flag == 'file':
                 batch_output_filename = data
+                global last_output_filename
+                last_output_filename = data
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (
                     batch_output_filename if batch_output_filename is not None else gr.skip(),
@@ -3139,6 +3144,8 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         completion_message = translate("バッチ処理が中止されました（{0}/{1}）").format(batch_index + 1, batch_count)
                     else:
                         completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(batch_count, batch_count)
+                    global last_output_filename
+                    last_output_filename = batch_output_filename
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
                         gr.update(value=None, visible=False),
@@ -3213,11 +3220,60 @@ def end_after_step_process():
     return gr.update(value=translate("停止処理中..."), interactive=False)
 
 def resync_status_handler():
-    """Re-synchronize progress display after page reload."""
-    global last_progress_desc, last_progress_bar
-    # Log message for clarity; UI does not display it directly
-    print(translate("✅ Status resynchronized"))
-    return last_progress_desc, last_progress_bar
+    """Resume streaming progress after page reload."""
+    global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
+    global current_seed
+
+    yield (
+        last_output_filename if last_output_filename is not None else gr.skip(),
+        gr.update(visible=last_preview_image is not None, value=last_preview_image),
+        last_progress_desc,
+        last_progress_bar,
+        gr.update(interactive=False),
+        gr.update(interactive=True),
+        gr.update(interactive=True),
+        gr.update(),
+    )
+
+    while True:
+        try:
+            flag, data = stream.output_queue.next()
+        except Exception:
+            break
+
+        if flag == 'file':
+            last_output_filename = data
+            yield (
+                last_output_filename if last_output_filename is not None else gr.skip(),
+                gr.update(value=None, visible=False),
+                gr.update(),
+                gr.update(),
+                gr.update(interactive=False),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(),
+            )
+
+        if flag == 'progress':
+            preview, desc, html = data
+            last_preview_image = preview
+            last_progress_desc = desc
+            last_progress_bar = html
+            yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+
+        if flag == 'end':
+            last_output_filename = last_output_filename or data
+            yield (
+                last_output_filename if last_output_filename is not None else gr.skip(),
+                gr.update(value=None, visible=False),
+                last_progress_desc,
+                last_progress_bar,
+                gr.update(interactive=True),
+                gr.update(interactive=False),
+                gr.update(interactive=False),
+                gr.update(),
+            )
+            break
 
 def end_after_step_process():
     """現在のステップ完了後に停止する処理"""
@@ -6482,7 +6538,7 @@ with block:
     resync_status_btn.click(
         fn=resync_status_handler,
         inputs=[],
-        outputs=[progress_desc, progress_bar]
+        outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed]
     )
 
     # キーフレーム画像変更時のイベント登録
