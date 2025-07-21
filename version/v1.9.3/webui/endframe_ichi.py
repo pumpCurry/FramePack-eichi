@@ -2845,7 +2845,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             '',
             gr.update(interactive=True),
             gr.update(interactive=False, value=translate("End Generation")),
-            gr.update()
+            gr.update(interactive=False, value=translate("この生成で打ち切り"))
         )
         return
 
@@ -2861,7 +2861,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 '',
                 gr.update(interactive=True),
                 gr.update(interactive=False, value=translate("End Generation")),
-                gr.update()
+                gr.update(interactive=False, value=translate("この生成で打ち切り"))
             )
             break
 
@@ -2954,7 +2954,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 '',
                 gr.update(interactive=True),
                 gr.update(interactive=False, value=translate("End Generation")),
-                gr.update(interactive=False),
+                gr.update(interactive=False, value=translate("この生成で打ち切り")),
                 gr.update()
             )
             break
@@ -3188,7 +3188,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         '',
                         gr.update(interactive=True),
                         gr.update(interactive=False, value=translate("End Generation")),
-                        gr.update(interactive=False),
+                        gr.update(interactive=False, value=translate("この生成で打ち切り")),
                         gr.update()
                     )
                 else:
