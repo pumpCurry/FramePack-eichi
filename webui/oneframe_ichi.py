@@ -37,6 +37,7 @@ last_progress_desc = ""
 last_progress_bar = ""
 last_preview_image = None
 last_output_filename = None
+current_seed = None
 
 # 進捗表示用グローバル変数
 progress_ref_idx = 0
