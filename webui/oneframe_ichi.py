@@ -2604,7 +2604,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                             completion_message = f"{completion_message} - {progress_summary}"
 
                             # 完了メッセージでUIを更新
-                            global last_output_filename
                             last_output_filename = output_filename
                             yield (
                                 output_filename if output_filename is not None else gr.skip(),
