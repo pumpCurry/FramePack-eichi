@@ -12,10 +12,10 @@ def spinner_while_running(message, function, *args, **kwargs):
 
     def spinner():
         while not done.is_set():
+            sys.stdout.write('\r\x1b[2K')  # clear current line
             sys.stdout.write(f"{next(spinner_cycle)} {message}")
             sys.stdout.flush()
             time.sleep(0.1)
-            sys.stdout.write('\r')
 
     spinner_thread = threading.Thread(target=spinner)
     spinner_thread.start()
@@ -24,6 +24,7 @@ def spinner_while_running(message, function, *args, **kwargs):
     finally:
         done.set()
         spinner_thread.join()
+        sys.stdout.write('\r\x1b[2K')  # clear spinner line
         sys.stdout.write("✅")
         sys.stdout.write('\n')
     return result
