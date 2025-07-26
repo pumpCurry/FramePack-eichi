@@ -320,6 +320,7 @@
   "バッチ処理が中断されました（バッチ開始前）": "Batch processing was interrupted (before batch start)",
   "バッチ処理が中断されました": "Batch processing was interrupted",
   "End Generation": "End Generation",
+  "Resume Generation": "Resume Generation",
   "この生成で打ち切り": "Stop After Current Generation",
   "このステップで打ち切り": "Stop After This Step",
   "バッチ処理がユーザーによって中止されました": "Batch processing was cancelled by user",
