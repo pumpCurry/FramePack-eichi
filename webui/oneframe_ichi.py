@@ -3413,22 +3413,40 @@ with block:
                     with gr.Group(visible=False) as lora_dropdown_group:
                         # LoRAドロップダウン
                         none_choice = translate("なし")
+
+                        # Include saved values in the choice list to avoid warnings
+                        lora1_val = saved_app_settings.get("lora1", none_choice) if saved_app_settings else none_choice
+                        lora2_val = saved_app_settings.get("lora2", none_choice) if saved_app_settings else none_choice
+                        lora3_val = saved_app_settings.get("lora3", none_choice) if saved_app_settings else none_choice
+
+                        lora_choices1 = [none_choice]
+                        if lora1_val not in lora_choices1:
+                            lora_choices1.append(lora1_val)
+
+                        lora_choices2 = [none_choice]
+                        if lora2_val not in lora_choices2:
+                            lora_choices2.append(lora2_val)
+
+                        lora_choices3 = [none_choice]
+                        if lora3_val not in lora_choices3:
+                            lora_choices3.append(lora3_val)
+
                         lora_dropdown1 = gr.Dropdown(
                             label=translate("LoRA1"),
-                            choices=[none_choice],
-                            value=saved_app_settings.get("lora1", none_choice) if saved_app_settings else none_choice,
+                            choices=lora_choices1,
+                            value=lora1_val,
                             allow_custom_value=False
                         )
                         lora_dropdown2 = gr.Dropdown(
                             label=translate("LoRA2"),
-                            choices=[none_choice],
-                            value=saved_app_settings.get("lora2", none_choice) if saved_app_settings else none_choice,
+                            choices=lora_choices2,
+                            value=lora2_val,
                             allow_custom_value=False
                         )
                         lora_dropdown3 = gr.Dropdown(
                             label=translate("LoRA3"),
-                            choices=[none_choice],
-                            value=saved_app_settings.get("lora3", none_choice) if saved_app_settings else none_choice,
+                            choices=lora_choices3,
+                            value=lora3_val,
                             allow_custom_value=False
                         )
                         
