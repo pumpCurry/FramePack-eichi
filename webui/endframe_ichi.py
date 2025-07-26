@@ -2541,6 +2541,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     global prompt_queue_file_path
     global vae_cache_enabled
     global image_queue_files
+    global stop_after_current, stop_after_step
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
