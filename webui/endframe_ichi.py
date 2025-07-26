@@ -2541,11 +2541,18 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     global prompt_queue_file_path
     global vae_cache_enabled
     global image_queue_files
+    global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
     stop_after_current = False
     stop_after_step = False
+
+    # 前回の進捗情報をリセット
+    last_progress_desc = ""
+    last_progress_bar = ""
+    last_preview_image = None
+    last_output_filename = None
     # frame_save_modeから save_latent_frames と save_last_section_frames を算出
     save_latent_frames = False
     save_last_section_frames = False
@@ -3208,9 +3215,7 @@ def end_after_current_process():
     if not stop_after_current:
         batch_stopped = True
         stop_after_current = True
-        if stream is not None and stream.input_queue.top() != 'end':
-            stream.input_queue.push('end')
-        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+        print(translate("\n停止ボタンが押されました。現在の処理完了後に停止します..."))
 
     return gr.update(value=translate("打ち切り処理中..."), interactive=False)
 
@@ -3222,8 +3227,6 @@ def end_after_step_process():
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
-        if stream is not None and stream.input_queue.top() != 'end':
-            stream.input_queue.push('end')
         print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
@@ -3729,7 +3732,7 @@ with block:
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
                 stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
                 stop_step_button = gr.Button(value=translate("このステップで打ち切り"), interactive=False)
-                resync_status_btn = gr.Button(value=translate("🔃 Resync Status"), variant="secondary")
+                resume_button = gr.Button(value=translate("Resume Generation"), variant="secondary")
 
             # FP8最適化設定
             with gr.Row():
@@ -6551,7 +6554,7 @@ with block:
     end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button])
     stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button])
     stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button])
-    resync_status_btn.click(
+    resume_button.click(
         fn=resync_status_handler,
         inputs=[],
         outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed]

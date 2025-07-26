@@ -1097,9 +1097,7 @@ def end_after_current_process_enhanced():
     if not stop_after_current:
         batch_stopped = True
         stop_after_current = True
-        if stream is not None and stream.input_queue.top() != 'end':
-            stream.input_queue.push('end')
-        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+        print(translate("\n停止ボタンが押されました。現在の処理完了後に停止します..."))
 
     return (
         gr.update(value=translate("打ち切り処理中...")),
@@ -1171,7 +1169,7 @@ def create_enhanced_config_queue_ui():
             with gr.Column(scale=1):
                 stop_queue_btn = gr.Button(value=translate("⏹️ Stop Queue"), variant="secondary")
             with gr.Column(scale=1):
-                resync_status_btn = gr.Button(value=translate("🔃 Resync Status"), variant="secondary")
+                resume_button = gr.Button(value=translate("Resume Generation"), variant="secondary")
 
 
         # Messages
@@ -1219,7 +1217,7 @@ def create_enhanced_config_queue_ui():
         'enhanced_start_queue_btn': enhanced_start_queue_btn,  # Enhanced start button
         'stop_queue_btn': stop_queue_btn,
         'clear_queue_btn': clear_queue_btn,
-        'resync_status_btn': resync_status_btn,
+        'resume_button': resume_button,
         'queue_status_display': queue_status_display,
         'config_message': config_message
     }
@@ -1385,7 +1383,7 @@ def setup_enhanced_config_queue_events(components, ui_components):
         ]
     )
 
-    components['resync_status_btn'].click(
+    components['resume_button'].click(
         fn=resync_status_handler,
         inputs=[],
         outputs=[
