@@ -216,6 +216,7 @@ print(translate("diffusers_helper.modelsを読み込んでいます..."), end=""
 from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
 print(translate("完了."))
 
+
 # フォルダを開く関数
 def open_folder(folder_path):
     """指定されたフォルダをOSに依存せず開く"""
@@ -244,6 +245,7 @@ def open_folder(folder_path):
     except Exception as e:
         print(translate("フォルダを開く際にエラーが発生しました: {0}").format(e))
         return False
+
 print(translate("diffusers_helper.pipelinesを読み込んでいます..."), end="", flush=True)
 from diffusers_helper.pipelines.k_diffusion_hunyuan import sample_hunyuan
 print(translate("完了."))
@@ -284,6 +286,7 @@ print(translate("eichi_utils.text_encoder_managerを読み込んでいます..."
 from eichi_utils.text_encoder_manager import TextEncoderManager
 print(translate("完了."))
 
+
 free_mem_gb = get_cuda_free_memory_gb(gpu)
 high_vram = free_mem_gb > 100
 
@@ -294,6 +297,7 @@ print(translate('High-VRAM Mode: {0}').format(high_vram))
 print(translate("eichi_utils.model_downloaderを読み込んでいます..."), end="", flush=True)
 from eichi_utils.model_downloader import ModelDownloader
 print(translate("完了."))
+
 ModelDownloader().download_original()
 
 def _norm_dropdown(val):
@@ -3421,22 +3425,40 @@ with block:
                     with gr.Group(visible=False) as lora_dropdown_group:
                         # LoRAドロップダウン
                         none_choice = translate("なし")
+
+                        # Include saved values in the choice list to avoid warnings
+                        lora1_val = saved_app_settings.get("lora1", none_choice) if saved_app_settings else none_choice
+                        lora2_val = saved_app_settings.get("lora2", none_choice) if saved_app_settings else none_choice
+                        lora3_val = saved_app_settings.get("lora3", none_choice) if saved_app_settings else none_choice
+
+                        lora_choices1 = [none_choice]
+                        if lora1_val not in lora_choices1:
+                            lora_choices1.append(lora1_val)
+
+                        lora_choices2 = [none_choice]
+                        if lora2_val not in lora_choices2:
+                            lora_choices2.append(lora2_val)
+
+                        lora_choices3 = [none_choice]
+                        if lora3_val not in lora_choices3:
+                            lora_choices3.append(lora3_val)
+
                         lora_dropdown1 = gr.Dropdown(
                             label=translate("LoRA1"),
-                            choices=[none_choice],
-                            value=saved_app_settings.get("lora1", none_choice) if saved_app_settings else none_choice,
+                            choices=lora_choices1,
+                            value=lora1_val,
                             allow_custom_value=False
                         )
                         lora_dropdown2 = gr.Dropdown(
                             label=translate("LoRA2"),
-                            choices=[none_choice],
-                            value=saved_app_settings.get("lora2", none_choice) if saved_app_settings else none_choice,
+                            choices=lora_choices2,
+                            value=lora2_val,
                             allow_custom_value=False
                         )
                         lora_dropdown3 = gr.Dropdown(
                             label=translate("LoRA3"),
-                            choices=[none_choice],
-                            value=saved_app_settings.get("lora3", none_choice) if saved_app_settings else none_choice,
+                            choices=lora_choices3,
+                            value=lora3_val,
                             allow_custom_value=False
                         )
                         
