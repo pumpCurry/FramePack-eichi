@@ -1546,6 +1546,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     clean_latent_4x_indices=clean_latent_4x_indices,
                     callback=callback,
                 )
+            # ユーザー中断検出時のメッセージ表示
+            if isinstance(generated_latents, dict) and generated_latents.get('user_interrupt'):
+                print(translate("バッチ内処理を完了します"))
+            else:
+                print(translate("生成は正常に完了しました"))
             except KeyboardInterrupt as e:
                 print(translate("生成中断を検知: {0}").format(e))
                 # 確実なリソース解放とCUDA状態クリア
@@ -2002,6 +2007,10 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                         clean_latent_4x_indices=clean_latent_4x_indices_2,
                                         callback=callback_interpolation,
                                     )
+                                    if isinstance(generated_interpolation_latents, dict) and generated_interpolation_latents.get('user_interrupt'):
+                                        print(translate("バッチ内処理を完了します"))
+                                    else:
+                                        print(translate("生成は正常に完了しました"))
 
                                     # 補間された潜在変数を結合
                                     device = real_history_latents.device
@@ -6197,6 +6206,13 @@ with block:
     # 実行前のバリデーション関数
     def validate_and_process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, save_settings_on_start=False, alarm_on_completion=False):
         """入力画像または最後のキーフレーム画像のいずれかが有効かどうかを確認し、問題がなければ処理を実行する"""
+
+        # 前回の進捗情報をリセットし、常に最初から開始されるようにする
+        global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
+        last_progress_desc = ""
+        last_progress_bar = ""
+        last_preview_image = None
+        last_output_filename = None
         # Gradioオブジェクトの場合は値を取得（save_settings_on_start）
         actual_save_settings_value = save_settings_on_start
         
