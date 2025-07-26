@@ -2126,11 +2126,14 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # 新たな処理開始時にグローバルフラグをリセット
     user_abort = False
     user_abort_notified = False
-    
+
     # プロセス開始時にバッチ中断フラグをリセット
     batch_stopped = False
     stop_after_current = False
     stop_after_step = False
+
+    # ストリームを新規作成してキューをクリア
+    stream = AsyncStream()
 
     # bool値の正規化
     reference_long_edge = _to_bool(reference_long_edge)
@@ -2765,7 +2768,8 @@ def end_process():
         user_abort_notified = True  # 通知フラグを設定
         
         # 現在実行中のバッチを停止
-        stream.input_queue.push('end')
+        if stream is not None and stream.input_queue.top() != 'end':
+            stream.input_queue.push('end')
 
     # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
     return (
