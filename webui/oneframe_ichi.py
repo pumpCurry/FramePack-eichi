@@ -2,41 +2,55 @@
 
 from eichi_utils.spinner import spinner_while_running
 import importlib
+import os
+import sys
+import argparse
+
+sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
+print(f"{os.path.basename(__file__)} : 起動開始....")
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--share', action='store_true')
+parser.add_argument("--server", type=str, default='127.0.0.1')
+parser.add_argument("--port", type=int, default=8000)
+parser.add_argument("--inbrowser", action='store_true')
+parser.add_argument("--lang", type=str, default='ja', help="Language: ja, zh-tw, en, ru")
+args = parser.parse_args()
+
+set_lang, translate = spinner_while_running(
+    "Load: i18n",
+    lambda: (
+        importlib.import_module("locales.i18n_extended").set_lang,
+        importlib.import_module("locales.i18n_extended").translate,
+    ),
+)
+set_lang(args.lang)
 
 (
-    os,
-    sys,
     asyncio,
     login,
     random,
     time,
     traceback,
     yaml,
-    argparse,
     json,
     glob,
     subprocess,
 ) = spinner_while_running(
     "Load: System Libraries",
     lambda: (
-        importlib.import_module("os"),
-        importlib.import_module("sys"),
         importlib.import_module("asyncio"),
         importlib.import_module("diffusers_helper.hf_login").login,
         importlib.import_module("random"),
         importlib.import_module("time"),
         importlib.import_module("traceback"),
         importlib.import_module("yaml"),
-        importlib.import_module("argparse"),
         importlib.import_module("json"),
         importlib.import_module("glob"),
         importlib.import_module("subprocess"),
     ),
 )
 import shutil
-
-sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
-print(f"{os.path.basename(__file__)} : 起動開始....")
 
 # Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
 if sys.platform in ('win32', 'cygwin'):
@@ -90,17 +104,6 @@ from eichi_utils.png_metadata import (
     PROMPT_KEY, SEED_KEY, SECTION_PROMPT_KEY, SECTION_NUMBER_KEY
 )
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--share', action='store_true')
-parser.add_argument("--server", type=str, default='127.0.0.1')
-parser.add_argument("--port", type=int, default=8000)
-parser.add_argument("--inbrowser", action='store_true')
-parser.add_argument("--lang", type=str, default='ja', help="Language: ja, zh-tw, en, ru")
-args = parser.parse_args()
-
-# Load translations from JSON files
-from locales.i18n_extended import (set_lang, translate)
-set_lang(args.lang)
 
 # サーバーがすでに実行中かチェック
 import socket
