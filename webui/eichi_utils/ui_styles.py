@@ -207,4 +207,38 @@ def get_app_css():
     .group-border {
         border: solid 1px;
     }
+
+    /* ===== 原寸大表示モーダル ===== */
+    #orig_size_modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.8);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    #orig_size_modal.visible {
+        display: flex;
+    }
+
+    #orig_size_modal img {
+        max-width: 90%;
+        max-height: 90%;
+    }
+
+    #orig_size_close {
+        position: absolute;
+        top: 20px;
+        right: 30px;
+        background: none;
+        border: none;
+        color: white;
+        font-size: 2rem;
+        cursor: pointer;
+    }
     """
