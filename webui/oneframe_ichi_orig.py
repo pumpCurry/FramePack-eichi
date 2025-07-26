@@ -257,10 +257,12 @@ def open_folder(folder_path):
     except Exception as e:
         print(translate("フォルダを開く際にエラーが発生しました: {0}").format(e))
         return False
+
 sample_hunyuan = spinner_while_running(
     translate("Load_diffusers_helper.pipelines.k_diffusion_hunyuan"),
     lambda: importlib.import_module("diffusers_helper.pipelines.k_diffusion_hunyuan").sample_hunyuan,
 )
+
 (
     cpu,
     gpu,

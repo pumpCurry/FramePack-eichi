@@ -175,47 +175,47 @@ import gradio as gr
 from eichi_utils.ui_styles import get_app_css
 
 torch = spinner_while_running(
-    translate("PyTorchを読み込んでいます..."),
+    translate("Load_torch"),
     importlib.import_module,
     "torch",
 )
 
 einops = spinner_while_running(
-    translate("einopsを読み込んでいます..."),
+    translate("Load_einops"),
     importlib.import_module,
     "einops",
 )
 
 sf = spinner_while_running(
-    translate("safetensorsを読み込んでいます..."),
+    translate("Load_safetensors.torch"),
     importlib.import_module,
     "safetensors.torch",
 )
 
 np = spinner_while_running(
-    translate("NumPyを読み込んでいます..."),
+    translate("Load_numpy"),
     importlib.import_module,
     "numpy",
 )
 
 math = spinner_while_running(
-    translate("mathを読み込んでいます..."),
+    translate("Load_math"),
     importlib.import_module,
     "math",
 )
 
 Image = spinner_while_running(
-    translate("PILを読み込んでいます..."),
+    translate("Load_PIL"),
     lambda: importlib.import_module("PIL").Image,
 )
 
 AutoencoderKLHunyuanVideo = spinner_while_running(
-    translate("diffusersを読み込んでいます..."),
+    translate("Load_diffusers"),
     lambda: importlib.import_module("diffusers").AutoencoderKLHunyuanVideo,
 )
 
 LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer = spinner_while_running(
-    translate("transformersを読み込んでいます..."),
+    translate("Load_transformers"),
     lambda: (
         importlib.import_module("transformers").LlamaModel,
         importlib.import_module("transformers").CLIPTextModel,
@@ -225,7 +225,7 @@ LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer = spinner_while_run
 )
 
 encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake = spinner_while_running(
-    translate("diffusers_helper.hunyuanを読み込んでいます..."),
+    translate("Load_diffusers_helper.hunyuan"),
     lambda: (
         importlib.import_module("diffusers_helper.hunyuan").encode_prompt_conds,
         importlib.import_module("diffusers_helper.hunyuan").vae_decode,
@@ -243,7 +243,7 @@ encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake = spinner_while_run
     state_dict_offset_merge,
     generate_timestamp,
 ) = spinner_while_running(
-    translate("diffusers_helper.utilsを読み込んでいます..."),
+    translate("Load_diffusers_helper.utils"),
     lambda: (
         importlib.import_module("diffusers_helper.utils").save_bcthw_as_mp4,
         importlib.import_module("diffusers_helper.utils").crop_or_pad_yield_mask,
@@ -256,10 +256,9 @@ encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake = spinner_while_run
 )
 
 HunyuanVideoTransformer3DModelPacked = spinner_while_running(
-    translate("diffusers_helper.modelsを読み込んでいます..."),
+    translate("Load_diffusers_helper.models.hunyuan_video_packed"),
     lambda: importlib.import_module("diffusers_helper.models.hunyuan_video_packed").HunyuanVideoTransformer3DModelPacked,
 )
-
 
 # フォルダを開く関数
 def open_folder(folder_path):
@@ -291,7 +290,7 @@ def open_folder(folder_path):
         return False
 
 sample_hunyuan = spinner_while_running(
-    translate("diffusers_helper.pipelinesを読み込んでいます..."),
+    translate("Load_diffusers_helper.pipelines.k_diffusion_hunyuan"),
     lambda: importlib.import_module("diffusers_helper.pipelines.k_diffusion_hunyuan").sample_hunyuan,
 )
 
@@ -307,7 +306,7 @@ sample_hunyuan = spinner_while_running(
     unload_complete_models,
     load_model_as_complete,
 ) = spinner_while_running(
-    translate("diffusers_helper.memoryを読み込んでいます..."),
+    translate("Load_diffusers_helper.memory"),
     lambda: (
         importlib.import_module("diffusers_helper.memory").cpu,
         importlib.import_module("diffusers_helper.memory").gpu,
@@ -323,7 +322,7 @@ sample_hunyuan = spinner_while_running(
 )
 
 AsyncStream, async_run = spinner_while_running(
-    translate("diffusers_helper.thread_utilsを読み込んでいます..."),
+    translate("Load_diffusers_helper.thread_utils"),
     lambda: (
         importlib.import_module("diffusers_helper.thread_utils").AsyncStream,
         importlib.import_module("diffusers_helper.thread_utils").async_run,
@@ -331,7 +330,7 @@ AsyncStream, async_run = spinner_while_running(
 )
 
 make_progress_bar_css, make_progress_bar_html = spinner_while_running(
-    translate("diffusers_helper.gradioを読み込んでいます..."),
+    translate("Load_diffusers_helper.gradio.progress_bar"),
     lambda: (
         importlib.import_module("diffusers_helper.gradio.progress_bar").make_progress_bar_css,
         importlib.import_module("diffusers_helper.gradio.progress_bar").make_progress_bar_html,
@@ -342,7 +341,7 @@ make_progress_bar_css, make_progress_bar_html = spinner_while_running(
 
 
 SiglipImageProcessor, SiglipVisionModel = spinner_while_running(
-    translate("transformers(Siglip)を読み込んでいます..."),
+    translate("Load_transformers(Siglip)"),
     lambda: (
         importlib.import_module("transformers").SiglipImageProcessor,
         importlib.import_module("transformers").SiglipVisionModel,
@@ -350,12 +349,12 @@ SiglipImageProcessor, SiglipVisionModel = spinner_while_running(
 )
 
 hf_clip_vision_encode = spinner_while_running(
-    translate("diffusers_helper.clip_visionを読み込んでいます..."),
+    translate("Load_diffusers_helper.clip_vision"),
     lambda: importlib.import_module("diffusers_helper.clip_vision").hf_clip_vision_encode,
 )
 
 find_nearest_bucket, SAFE_RESOLUTIONS = spinner_while_running(
-    translate("diffusers_helper.bucket_toolsを読み込んでいます..."),
+    translate("Load_diffusers_helper.bucket_tools"),
     lambda: (
         importlib.import_module("diffusers_helper.bucket_tools").find_nearest_bucket,
         importlib.import_module("diffusers_helper.bucket_tools").SAFE_RESOLUTIONS,
@@ -363,15 +362,14 @@ find_nearest_bucket, SAFE_RESOLUTIONS = spinner_while_running(
 )
 
 TransformerManager = spinner_while_running(
-    translate("eichi_utils.transformer_managerを読み込んでいます..."),
+    translate("Load_eichi_utils.transformer_manager"),
     lambda: importlib.import_module("eichi_utils.transformer_manager").TransformerManager,
 )
 
 TextEncoderManager = spinner_while_running(
-    translate("eichi_utils.text_encoder_managerを読み込んでいます..."),
+    translate("Load_eichi_utils.text_encoder_manager"),
     lambda: importlib.import_module("eichi_utils.text_encoder_manager").TextEncoderManager,
 )
-
 
 free_mem_gb = get_cuda_free_memory_gb(gpu)
 high_vram = free_mem_gb > 100
@@ -381,7 +379,7 @@ print(translate('High-VRAM Mode: {0}').format(high_vram))
 
 # モデルを並列ダウンロードしておく
 ModelDownloader = spinner_while_running(
-    translate("eichi_utils.model_downloaderを読み込んでいます..."),
+    translate("Load_eichi_utils.model_downloader"),
     lambda: importlib.import_module("eichi_utils.model_downloader").ModelDownloader,
 )
 
