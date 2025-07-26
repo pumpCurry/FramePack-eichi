@@ -174,47 +174,58 @@ from eichi_utils.ui_styles import get_app_css
 
 print(translate("PyTorchを読み込んでいます..."), end="", flush=True)
 import torch
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("einopsを読み込んでいます..."), end="", flush=True)
 import einops
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("safetensorsを読み込んでいます..."), end="", flush=True)
 import safetensors.torch as sf
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("NumPyを読み込んでいます..."), end="", flush=True)
 import numpy as np
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("mathを読み込んでいます..."), end="", flush=True)
 import math
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("PILを読み込んでいます..."), end="", flush=True)
 from PIL import Image
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("diffusersを読み込んでいます..."), end="", flush=True)
 from diffusers import AutoencoderKLHunyuanVideo
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("transformersを読み込んでいます..."), end="", flush=True)
 from transformers import LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("diffusers_helper.hunyuanを読み込んでいます..."), end="", flush=True)
 from diffusers_helper.hunyuan import encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("diffusers_helper.utilsを読み込んでいます..."), end="", flush=True)
 from diffusers_helper.utils import save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw, resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge, generate_timestamp
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("diffusers_helper.modelsを読み込んでいます..."), end="", flush=True)
 from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 
 # フォルダを開く関数
@@ -248,43 +259,53 @@ def open_folder(folder_path):
 
 print(translate("diffusers_helper.pipelinesを読み込んでいます..."), end="", flush=True)
 from diffusers_helper.pipelines.k_diffusion_hunyuan import sample_hunyuan
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("diffusers_helper.memoryを読み込んでいます..."), end="", flush=True)
 from diffusers_helper.memory import cpu, gpu, gpu_complete_modules, get_cuda_free_memory_gb, move_model_to_device_with_memory_preservation, offload_model_from_device_for_memory_preservation, fake_diffusers_current_device, DynamicSwapInstaller, unload_complete_models, load_model_as_complete
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("diffusers_helper.thread_utilsを読み込んでいます..."), end="", flush=True)
 from diffusers_helper.thread_utils import AsyncStream, async_run
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("diffusers_helper.gradioを読み込んでいます..."), end="", flush=True)
 from diffusers_helper.gradio.progress_bar import make_progress_bar_css, make_progress_bar_html
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("eichi_utils.ui_stylesを読み込んでいます..."), end="", flush=True)
 from eichi_utils.ui_styles import get_app_css
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("transformers(Siglip)を読み込んでいます..."), end="", flush=True)
 from transformers import SiglipImageProcessor, SiglipVisionModel
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("diffusers_helper.clip_visionを読み込んでいます..."), end="", flush=True)
 from diffusers_helper.clip_vision import hf_clip_vision_encode
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("diffusers_helper.bucket_toolsを読み込んでいます..."), end="", flush=True)
 from diffusers_helper.bucket_tools import find_nearest_bucket, SAFE_RESOLUTIONS
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("eichi_utils.transformer_managerを読み込んでいます..."), end="", flush=True)
 from eichi_utils.transformer_manager import TransformerManager
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 print(translate("eichi_utils.text_encoder_managerを読み込んでいます..."), end="", flush=True)
 from eichi_utils.text_encoder_manager import TextEncoderManager
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 
 free_mem_gb = get_cuda_free_memory_gb(gpu)
@@ -296,7 +317,8 @@ print(translate('High-VRAM Mode: {0}').format(high_vram))
 # モデルを並列ダウンロードしておく
 print(translate("eichi_utils.model_downloaderを読み込んでいます..."), end="", flush=True)
 from eichi_utils.model_downloader import ModelDownloader
-print(translate("完了."))
+print(translate("完了."), end="", flush=True)
+print()
 
 ModelDownloader().download_original()
 
