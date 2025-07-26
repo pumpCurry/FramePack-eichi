@@ -12,7 +12,7 @@ def spinner_while_running(message, function, *args, **kwargs):
 
     def spinner():
         while not done.is_set():
-            sys.stdout.write(f"{{{next(spinner_cycle)}}} {message}")
+            sys.stdout.write(f"{next(spinner_cycle)} {message}")
             sys.stdout.flush()
             time.sleep(0.1)
             sys.stdout.write('\r')
@@ -24,6 +24,6 @@ def spinner_while_running(message, function, *args, **kwargs):
     finally:
         done.set()
         spinner_thread.join()
-        sys.stdout.write(translate("完了."))
+        sys.stdout.write("✅")
         sys.stdout.write('\n')
     return result
