@@ -2280,6 +2280,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
     global progress_ref_idx, progress_ref_total, progress_ref_name
     global progress_img_idx, progress_img_total, progress_img_name
+    global last_output_filename
+
 
     # 新たな処理開始時にグローバルフラグをリセット
     user_abort = False
@@ -2772,7 +2774,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                     
                     if flag == 'file':
                         output_filename = data
-                        global last_output_filename
                         last_output_filename = data
                         yield (
                             output_filename if output_filename is not None else gr.skip(),
