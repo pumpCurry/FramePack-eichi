@@ -2280,8 +2280,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
     global progress_ref_idx, progress_ref_total, progress_ref_name
     global progress_img_idx, progress_img_total, progress_img_name
-    global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
-    global current_seed
 
     # 新たな処理開始時にグローバルフラグをリセット
     user_abort = False
@@ -2705,8 +2703,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         print(translate("イメージキュー実行中: バッチ {0}/{1} は画像数を超えているため入力画像を使用").format(batch_index+1, batch_count))
 
         # 進捗用グローバル変数を更新
-        global progress_ref_idx, progress_ref_total, progress_ref_name
-        global progress_img_idx, progress_img_total, progress_img_name
         progress_ref_idx = reference_idx + 1
         progress_ref_total = ref_count
         progress_ref_name = os.path.basename(reference_image_current) if isinstance(reference_image_current, str) else translate("入力画像")
