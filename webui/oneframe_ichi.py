@@ -2270,6 +2270,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     global stream
     global batch_stopped, stop_after_current, stop_after_step, user_abort, user_abort_notified
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
+    global progress_ref_idx, progress_ref_total, progress_ref_name
+    global progress_img_idx, progress_img_total, progress_img_name
+    global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
+    global current_seed
 
     # 新たな処理開始時にグローバルフラグをリセット
     user_abort = False
@@ -2279,6 +2283,19 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     batch_stopped = False
     stop_after_current = False
     stop_after_step = False
+
+    # progress and preview states reset
+    progress_ref_idx = 0
+    progress_ref_total = 0
+    progress_ref_name = ""
+    progress_img_idx = 0
+    progress_img_total = 0
+    progress_img_name = ""
+    last_progress_desc = ""
+    last_progress_bar = ""
+    last_preview_image = None
+    last_output_filename = None
+    current_seed = None
 
     # ストリームを新規作成してキューをクリア
     stream = AsyncStream()
