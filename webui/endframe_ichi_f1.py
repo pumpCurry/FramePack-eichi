@@ -4528,7 +4528,11 @@ with block:
       const obs=new MutationObserver(addButtons);
       obs.observe(document.body,{childList:true,subtree:true});
     }
-    window.addEventListener('load', setupOrigSize);
+    if(document.readyState !== 'loading'){
+      setupOrigSize();
+    } else {
+      window.addEventListener('load', setupOrigSize);
+    }
     </script>
     """)
 
