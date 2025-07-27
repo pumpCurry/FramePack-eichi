@@ -8,7 +8,15 @@ import importlib
 import sys
 import argparse
 
-sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
+spinner_while_running(
+    "Path: FramePack",
+    sys.path.append,
+    os.path.abspath(
+        os.path.realpath(
+            os.path.join(os.path.dirname(__file__), "./submodules/FramePack")
+        )
+    ),
+)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--share', action='store_true')
