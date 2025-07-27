@@ -1,13 +1,14 @@
 
 
 from eichi_utils.spinner import spinner_while_running
-import importlib
 import os
+print(f"{os.path.basename(__file__)} : 起動開始....")
+
+import importlib
 import sys
 import argparse
 
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
-print(f"{os.path.basename(__file__)} : 起動開始....")
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--share', action='store_true')
