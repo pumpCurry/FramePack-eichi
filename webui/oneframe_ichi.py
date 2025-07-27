@@ -8,7 +8,15 @@ import importlib
 import sys
 import argparse
 
-sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
+spinner_while_running(
+    "Path: FramePack",
+    sys.path.append,
+    os.path.abspath(
+        os.path.realpath(
+            os.path.join(os.path.dirname(__file__), "./submodules/FramePack")
+        )
+    ),
+)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--share', action='store_true')
@@ -2270,6 +2278,9 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     global stream
     global batch_stopped, stop_after_current, stop_after_step, user_abort, user_abort_notified
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
+    global progress_ref_idx, progress_ref_total, progress_ref_name
+    global progress_img_idx, progress_img_total, progress_img_name
+    global last_output_filename
 
     # 新たな処理開始時にグローバルフラグをリセット
     user_abort = False
@@ -2680,8 +2691,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         print(translate("イメージキュー実行中: バッチ {0}/{1} は画像数を超えているため入力画像を使用").format(batch_index+1, batch_count))
 
         # 進捗用グローバル変数を更新
-        global progress_ref_idx, progress_ref_total, progress_ref_name
-        global progress_img_idx, progress_img_total, progress_img_name
         progress_ref_idx = reference_idx + 1
         progress_ref_total = ref_count
         progress_ref_name = os.path.basename(reference_image_current) if isinstance(reference_image_current, str) else translate("入力画像")
@@ -2751,7 +2760,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                     
                     if flag == 'file':
                         output_filename = data
-                        global last_output_filename
                         last_output_filename = data
                         yield (
                             output_filename if output_filename is not None else gr.skip(),
