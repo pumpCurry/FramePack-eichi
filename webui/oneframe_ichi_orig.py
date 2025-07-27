@@ -1,11 +1,20 @@
+from eichi_utils.spinner import spinner_while_running
 import os
-import sys
-sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
+print(f"{os.path.basename(__file__)} : 起動開始....")
 
-# Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
-import asyncio
-if sys.platform in ('win32', 'cygwin'):
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+import importlib
+import sys
+import argparse
+
+spinner_while_running(
+    "Path: FramePack",
+    sys.path.append,
+    os.path.abspath(
+        os.path.realpath(
+            os.path.join(os.path.dirname(__file__), "./submodules/FramePack")
+        )
+    ),
+)
 
 # グローバル変数 - 停止フラグと通知状態管理
 user_abort = False
@@ -28,21 +37,9 @@ queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
 image_queue_files = []  # イメージキューのファイルリスト
 
-from diffusers_helper.hf_login import login
 
-import os
-import random  # ランダムシード生成用
-import time
-import traceback  # ログ出力用
-import yaml
-import argparse
-import json
-import glob
-import subprocess  # フォルダを開くために必要
-from PIL import Image
 
 # PNGメタデータ処理モジュールのインポート
-import sys
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from eichi_utils.png_metadata import (
     embed_metadata_to_png, extract_metadata_from_png,
@@ -57,10 +54,44 @@ parser.add_argument("--inbrowser", action='store_true')
 parser.add_argument("--lang", type=str, default='ja', help="Language: ja, zh-tw, en, ru")
 args = parser.parse_args()
 
-# Load translations from JSON files
-from locales.i18n_extended import (set_lang, translate)
+set_lang, translate = spinner_while_running(
+    "Load: i18n",
+    lambda: (
+        importlib.import_module("locales.i18n_extended").set_lang,
+        importlib.import_module("locales.i18n_extended").translate,
+    ),
+)
 set_lang(args.lang)
-print(f"{os.path.basename(__file__)} : {translate('起動開始')}")
+
+(
+    asyncio,
+    login,
+    random,
+    time,
+    traceback,
+    yaml,
+    json,
+    glob,
+    subprocess,
+) = spinner_while_running(
+    "Load: System Libraries",
+    lambda: (
+        importlib.import_module("asyncio"),
+        importlib.import_module("diffusers_helper.hf_login").login,
+        importlib.import_module("random"),
+        importlib.import_module("time"),
+        importlib.import_module("traceback"),
+        importlib.import_module("yaml"),
+        importlib.import_module("json"),
+        importlib.import_module("glob"),
+        importlib.import_module("subprocess"),
+    ),
+)
+import shutil
+
+# Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
+if sys.platform in ('win32', 'cygwin'):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # サーバーがすでに実行中かチェック
 import socket
@@ -86,7 +117,11 @@ if is_port_in_use(args.port):
     time.sleep(10) # 10秒待機して続行
 
 try:
-    import winsound
+    winsound = spinner_while_running(
+        "Load: winsound",
+        importlib.import_module,
+        "winsound",
+    )
     HAS_WINSOUND = True
 except ImportError:
     HAS_WINSOUND = False
@@ -101,8 +136,18 @@ else:
 has_lora_support = False
 has_fp8_support = False
 try:
-    import lora_utils
-    from lora_utils.fp8_optimization_utils import check_fp8_support, apply_fp8_monkey_patch
+    lora_utils = spinner_while_running(
+        "Load: lora_utils",
+        importlib.import_module,
+        "lora_utils",
+    )
+    check_fp8_support, apply_fp8_monkey_patch = spinner_while_running(
+        "Load: lora_utils.fp8_optimization_utils",
+        lambda: (
+            importlib.import_module("lora_utils.fp8_optimization_utils").check_fp8_support,
+            importlib.import_module("lora_utils.fp8_optimization_utils").apply_fp8_monkey_patch,
+        ),
+    )
     
     has_lora_support = True
     # FP8サポート確認
@@ -119,7 +164,7 @@ except ImportError:
     print(translate("LoRAサポートが無効です（lora_utilsモジュールがインストールされていません）"))
 
 # 設定管理モジュールをインポート
-from eichi_utils.settings_manager import (
+(
     get_settings_file_path,
     get_output_folder_path,
     initialize_settings,
@@ -127,29 +172,74 @@ from eichi_utils.settings_manager import (
     save_settings,
     open_output_folder,
     load_app_settings_oichi,
-    save_app_settings_oichi
+    save_app_settings_oichi,
+) = spinner_while_running(
+    "Load: eichi_utils.settings_manager",
+    lambda: (
+        importlib.import_module("eichi_utils.settings_manager").get_settings_file_path,
+        importlib.import_module("eichi_utils.settings_manager").get_output_folder_path,
+        importlib.import_module("eichi_utils.settings_manager").initialize_settings,
+        importlib.import_module("eichi_utils.settings_manager").load_settings,
+        importlib.import_module("eichi_utils.settings_manager").save_settings,
+        importlib.import_module("eichi_utils.settings_manager").open_output_folder,
+        importlib.import_module("eichi_utils.settings_manager").load_app_settings_oichi,
+        importlib.import_module("eichi_utils.settings_manager").save_app_settings_oichi,
+    ),
 )
 
 # ログ管理モジュールをインポート
-from eichi_utils.log_manager import (
-    enable_logging, disable_logging, is_logging_enabled, 
-    get_log_folder, set_log_folder, open_log_folder,
-    get_default_log_settings, load_log_settings, apply_log_settings
+(
+    enable_logging,
+    disable_logging,
+    is_logging_enabled,
+    get_log_folder,
+    set_log_folder,
+    open_log_folder,
+    get_default_log_settings,
+    load_log_settings,
+    apply_log_settings,
+) = spinner_while_running(
+    "Load: eichi_utils.log_manager",
+    lambda: (
+        importlib.import_module("eichi_utils.log_manager").enable_logging,
+        importlib.import_module("eichi_utils.log_manager").disable_logging,
+        importlib.import_module("eichi_utils.log_manager").is_logging_enabled,
+        importlib.import_module("eichi_utils.log_manager").get_log_folder,
+        importlib.import_module("eichi_utils.log_manager").set_log_folder,
+        importlib.import_module("eichi_utils.log_manager").open_log_folder,
+        importlib.import_module("eichi_utils.log_manager").get_default_log_settings,
+        importlib.import_module("eichi_utils.log_manager").load_log_settings,
+        importlib.import_module("eichi_utils.log_manager").apply_log_settings,
+    ),
 )
 
 # LoRAプリセット管理モジュールをインポート
-from eichi_utils.lora_preset_manager import (
+(
     initialize_lora_presets,
     load_lora_presets,
     save_lora_preset,
     load_lora_preset,
-    get_preset_names
+    get_preset_names,
+) = spinner_while_running(
+    "Load: eichi_utils.lora_preset_manager",
+    lambda: (
+        importlib.import_module("eichi_utils.lora_preset_manager").initialize_lora_presets,
+        importlib.import_module("eichi_utils.lora_preset_manager").load_lora_presets,
+        importlib.import_module("eichi_utils.lora_preset_manager").save_lora_preset,
+        importlib.import_module("eichi_utils.lora_preset_manager").load_lora_preset,
+        importlib.import_module("eichi_utils.lora_preset_manager").get_preset_names,
+    ),
 )
 
-import gradio as gr
-from eichi_utils.ui_styles import get_app_css
-from eichi_utils.spinner import spinner_while_running
-import importlib
+gr = spinner_while_running(
+    "Load: gradio",
+    importlib.import_module,
+    "gradio",
+)
+get_app_css = spinner_while_running(
+    "Load: eichi_utils.ui_styles",
+    lambda: importlib.import_module("eichi_utils.ui_styles").get_app_css,
+)
 
 torch = spinner_while_running(
     translate("Load_torch"),
