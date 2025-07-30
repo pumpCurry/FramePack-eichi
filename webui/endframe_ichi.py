@@ -1546,11 +1546,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     clean_latent_4x_indices=clean_latent_4x_indices,
                     callback=callback,
                 )
-            # ユーザー中断検出時のメッセージ表示
-            if isinstance(generated_latents, dict) and generated_latents.get('user_interrupt'):
-                print(translate("バッチ内処理を完了します"))
-            else:
-                print(translate("生成は正常に完了しました"))
+                # ユーザー中断検出時のメッセージ表示
+                if isinstance(generated_latents, dict) and generated_latents.get('user_interrupt'):
+                    print(translate("バッチ内処理を完了します"))
+                else:
+                    print(translate("生成は正常に完了しました"))
             except KeyboardInterrupt as e:
                 print(translate("生成中断を検知: {0}").format(e))
                 # 確実なリソース解放とCUDA状態クリア
@@ -3154,7 +3154,6 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         completion_message = translate("バッチ処理が中止されました（{0}/{1}）").format(batch_index + 1, batch_count)
                     else:
                         completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(batch_count, batch_count)
-                    global last_output_filename
                     last_output_filename = batch_output_filename
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
