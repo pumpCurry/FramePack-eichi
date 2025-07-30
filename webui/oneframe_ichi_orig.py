@@ -74,7 +74,7 @@ set_lang(args.lang)
     glob,
     subprocess,
 ) = spinner_while_running(
-    "Load: System Libraries",
+    translate("Load_System Libraries"),
     lambda: (
         importlib.import_module("asyncio"),
         importlib.import_module("diffusers_helper.hf_login").login,
@@ -118,7 +118,7 @@ if is_port_in_use(args.port):
 
 try:
     winsound = spinner_while_running(
-        "Load: winsound",
+        translate("Load_winsound"),
         importlib.import_module,
         "winsound",
     )
@@ -137,12 +137,12 @@ has_lora_support = False
 has_fp8_support = False
 try:
     lora_utils = spinner_while_running(
-        "Load: lora_utils",
+        translate("Load_lora_utils"),
         importlib.import_module,
         "lora_utils",
     )
     check_fp8_support, apply_fp8_monkey_patch = spinner_while_running(
-        "Load: lora_utils.fp8_optimization_utils",
+        translate("Load_lora_utils.fp8_optimization_utils"),
         lambda: (
             importlib.import_module("lora_utils.fp8_optimization_utils").check_fp8_support,
             importlib.import_module("lora_utils.fp8_optimization_utils").apply_fp8_monkey_patch,
@@ -174,7 +174,7 @@ except ImportError:
     load_app_settings_oichi,
     save_app_settings_oichi,
 ) = spinner_while_running(
-    "Load: eichi_utils.settings_manager",
+    translate("Load_eichi_utils.settings_manager"),
     lambda: (
         importlib.import_module("eichi_utils.settings_manager").get_settings_file_path,
         importlib.import_module("eichi_utils.settings_manager").get_output_folder_path,
@@ -199,7 +199,7 @@ except ImportError:
     load_log_settings,
     apply_log_settings,
 ) = spinner_while_running(
-    "Load: eichi_utils.log_manager",
+    translate("Load_eichi_utils.log_manager"),
     lambda: (
         importlib.import_module("eichi_utils.log_manager").enable_logging,
         importlib.import_module("eichi_utils.log_manager").disable_logging,
@@ -221,7 +221,7 @@ except ImportError:
     load_lora_preset,
     get_preset_names,
 ) = spinner_while_running(
-    "Load: eichi_utils.lora_preset_manager",
+    translate("Load_eichi_utils.lora_preset_manager"),
     lambda: (
         importlib.import_module("eichi_utils.lora_preset_manager").initialize_lora_presets,
         importlib.import_module("eichi_utils.lora_preset_manager").load_lora_presets,
@@ -232,12 +232,12 @@ except ImportError:
 )
 
 gr = spinner_while_running(
-    "Load: gradio",
+    translate("Load_gradio"),
     importlib.import_module,
     "gradio",
 )
 get_app_css = spinner_while_running(
-    "Load: eichi_utils.ui_styles",
+    translate("Load_eichi_utils.ui_styles"),
     lambda: importlib.import_module("eichi_utils.ui_styles").get_app_css,
 )
 
