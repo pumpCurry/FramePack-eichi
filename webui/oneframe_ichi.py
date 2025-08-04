@@ -1380,8 +1380,9 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             latent_padding_size = latent_padding * latent_window_size  # 常に0
             
             if stream.input_queue.top() == 'end':
-                stream.output_queue.push(('end', None))
-                return
+                global batch_stopped
+                batch_stopped = True
+                return {'user_interrupt': True}
             
             # 1フレームモード用のindices設定
             # PR実装に合わせて、インデックスの範囲を明示的に設定
@@ -1604,7 +1605,6 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                         if not user_abort_notified:
                             print(translate("\n[INFO] 開始前または現在の処理完了後に停止します..."))
                             user_abort_notified = True
-                        stream.output_queue.push(('end', None))
                         return {'user_interrupt': True}
 
                     if stop_after_step and stream.input_queue.top() != 'end':
@@ -2990,8 +2990,6 @@ def end_after_step_process():
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
-        if stream is not None and stream.input_queue.top() != 'end':
-            stream.input_queue.push('end')
         print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
         return (
             gr.update(value=translate("停止処理中..."), interactive=True),
