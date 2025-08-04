@@ -1456,8 +1456,9 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                             raise
 
             if stream.input_queue.top() == 'end':
-                stream.output_queue.push(('end', None))
-                return
+                global batch_stopped
+                batch_stopped = True
+                return {'user_interrupt': True}
 
             # セクション固有のプロンプトがあれば使用する（事前にエンコードしたキャッシュを使用）
             current_llama_vec, current_clip_l_pooler, current_llama_attention_mask = process_section_prompt(i_section, section_map, llama_vec, clip_l_pooler, llama_attention_mask, section_prompt_embeddings)
@@ -1499,7 +1500,6 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 if stream.input_queue.top() == 'end':
                     global batch_stopped
                     batch_stopped = True
-                    stream.output_queue.push(('end', None))
                     return {'user_interrupt': True}
 
                 # 現在のステップで停止する指示がある場合は次のステップ開始前に終了
@@ -1947,8 +1947,9 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                         preview = einops.rearrange(preview, 'b c t h w -> (b h) (t w) c')
 
                                         if stream.input_queue.top() == 'end':
-                                            stream.output_queue.push(('end', None))
-                                            raise KeyboardInterrupt('User ends the task.')
+                                            global batch_stopped
+                                            batch_stopped = True
+                                            return {'user_interrupt': True}
 
                                         current_step = d['i'] + 1
                                         percentage = int(100.0 * current_step / steps)
@@ -3222,8 +3223,6 @@ def end_after_step_process():
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
-        if stream is not None and stream.input_queue.top() != 'end':
-            stream.input_queue.push('end')
         print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
@@ -3292,8 +3291,6 @@ def end_after_step_process():
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
-        if stream is not None and stream.input_queue.top() != 'end':
-            stream.input_queue.push('end')
         print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
