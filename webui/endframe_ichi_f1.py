@@ -1396,7 +1396,8 @@ def setup_enhanced_config_queue_events(components, ui_components):
             components['queue_status_display'],
             ui_components['progress_desc'],
             ui_components['progress_bar']
-        ]
+        ],
+        queue=False
     )
 
 def setup_periodic_queue_status_check():
