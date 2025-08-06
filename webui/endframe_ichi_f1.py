@@ -4515,11 +4515,12 @@ with block:
       const closeBtn=document.getElementById('orig_size_close');
       closeBtn.addEventListener('click',()=>{modal.classList.remove('visible');imgElem.src='';});
       function addButtons(){
-        document.querySelectorAll('[data-testid="image"]').forEach(div=>{
-          if(div.querySelector('.view-modal-screen-btn')) return;
-          const img=div.querySelector('img');
-          const toolbar=div.querySelector('div.flex');
-          if(!img||!toolbar) return;
+        document.querySelectorAll('button[aria-label="View in full screen"]').forEach(fullBtn=>{
+          const toolbar=fullBtn.parentElement;
+          if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
+          const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
+          const img=container.querySelector('img');
+          if(!img) return;
           const btn=document.createElement('button');
           btn.setAttribute('aria-label','View modal screen');
           btn.setAttribute('aria-haspopup','false');
@@ -4529,11 +4530,11 @@ with block:
           btn.style.setProperty('--bg-color','var(--block-background-fill)');
           btn.innerHTML=`<div class="svelte-vzs2gq small">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">
-      <path fill="#000" fill-rule="evenodd" d=" M0 0 H24 V24 H0 Z M4.32 4.32 H19.68 V19.68 H4.32 Z"/>
+      <path fill="currentColor" fill-rule="evenodd" d=" M0 0 H24 V24 H0 Z M4.32 4.32 H19.68 V19.68 H4.32 Z"/>
     </svg>
   </div>`;
           btn.addEventListener('click',()=>{imgElem.src=img.src;modal.classList.add('visible');});
-          toolbar.insertBefore(btn, toolbar.firstChild);
+          toolbar.insertBefore(btn, fullBtn);
         });
       }
       addButtons();
