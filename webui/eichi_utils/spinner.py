@@ -1,3 +1,4 @@
+import io
 import itertools
 import sys
 import threading
@@ -13,29 +14,26 @@ def spinner_while_running(message, function, *args, **kwargs):
     done = threading.Event()
     lock = threading.Lock()
     original_stdout = sys.stdout
+    buffer = io.StringIO()
 
     class LockedStdout:
-        def __init__(self, original):
-            self._original = original
-
         def write(self, s):
             with lock:
-                self._original.write(s)
-                self._original.flush()
+                buffer.write(s)
+            return len(s)
 
         def flush(self):
-            with lock:
-                self._original.flush()
+            pass
 
         def fileno(self):
-            return self._original.fileno()
+            return original_stdout.fileno()
 
         def isatty(self):
-            return self._original.isatty()
+            return original_stdout.isatty()
 
         @property
         def encoding(self):
-            return getattr(self._original, "encoding", "utf-8")
+            return getattr(original_stdout, "encoding", "utf-8")
 
     def spinner():
         with lock:
@@ -53,7 +51,7 @@ def spinner_while_running(message, function, *args, **kwargs):
             original_stdout.flush()
 
     spinner_thread = threading.Thread(target=spinner)
-    sys.stdout = LockedStdout(original_stdout)
+    sys.stdout = LockedStdout()
     spinner_thread.start()
     try:
         result = function(*args, **kwargs)
@@ -61,4 +59,10 @@ def spinner_while_running(message, function, *args, **kwargs):
         done.set()
         spinner_thread.join()
         sys.stdout = original_stdout
+        output = buffer.getvalue()
+        if output:
+            if not output.startswith("\n"):
+                original_stdout.write("\n")
+            original_stdout.write(output)
+            original_stdout.flush()
     return result
