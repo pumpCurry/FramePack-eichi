@@ -1,7 +1,10 @@
 
 import os
-# Show which script is launching for easier debugging
+
+# 即座に起動しているファイルをまずは表示
+print(f"\n------------------------------------------------------------")
 print(f"{os.path.basename(__file__)} : Starting....")
+print(f"------------------------------------------------------------\n")
 
 from eichi_utils.spinner import spinner_while_running
 
