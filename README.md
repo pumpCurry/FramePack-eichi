@@ -418,7 +418,7 @@ RTX 50シリーズ（RTX 5070Ti、RTX 5080、RTX 5090など）では特別なセ
    - `run_endframe_ichi_f1.bat` - F1版/日本語用 ※v1.9.1で追加
    - `run_endframe_ichi_en_f1.bat` - F1版/英語用 ※v1.9.1で追加
    - `run_endframe_ichi_zh-tw_f1.bat` - F1版/繁体字中国語用 ※v1.9.1で追加
-   - `run_endframe_ichi_f1_ru.bat` - F1版/ロシア語用 ※v1.9.3で追加
+   - `run_endframe_ichi_ru_f1.bat` - F1版/ロシア語用 ※v1.9.3で追加
    - `run_oneframe_ichi.bat` - 1フレーム推論/日本語用 ※v1.9.2で追加
    - `run_oneframe_ichi_en.bat` - 1フレーム推論/英語用 ※v1.9.2で追加
    - `run_oneframe_ichi_zh-tw.bat` - 1フレーム推論/繁体字中国語用 ※v1.9.2で追加
@@ -479,7 +479,7 @@ RTX 50シリーズ（RTX 5070Ti、RTX 5080、RTX 5090など）では特別なセ
    - F1版/日本語：`run_endframe_ichi_f1.bat` ※v1.9.1で追加
    - F1版/英語：`run_endframe_ichi_en_f1.bat` ※v1.9.1で追加
    - F1版/繁体字中国語：`run_endframe_ichi_zh-tw_f1.bat` ※v1.9.1で追加
-   - F1版/ロシア語：`run_endframe_ichi_f1_ru.bat` ※v1.9.3で追加
+   - F1版/ロシア語：`run_endframe_ichi_ru_f1.bat` ※v1.9.3で追加
    - 1フレーム推論版/日本語：`run_oneframe_ichi.bat` ※v1.9.2で追加
    - 1フレーム推論版/英語：`run_oneframe_ichi_en.bat` ※v1.9.2で追加
    - 1フレーム推論版/繁体字中国語：`run_oneframe_ichi_zh-tw.bat` ※v1.9.2で追加
