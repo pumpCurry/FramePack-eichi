@@ -4513,13 +4513,22 @@ with block:
       closeBtn.addEventListener('click',()=>{modal.classList.remove('visible');imgElem.src='';});
       function addButtons(){
         document.querySelectorAll('[data-testid="image"]').forEach(div=>{
-          if(div.querySelector('.orig-size-btn')) return;
+          if(div.querySelector('.view-modal-screen-btn')) return;
           const img=div.querySelector('img');
           const toolbar=div.querySelector('div.flex');
           if(!img||!toolbar) return;
           const btn=document.createElement('button');
-          btn.innerText='原寸';
-          btn.className='orig-size-btn';
+          btn.setAttribute('aria-label','View modal screen');
+          btn.setAttribute('aria-haspopup','false');
+          btn.title='View modal screen';
+          btn.className='view-modal-screen-btn svelte-vzs2gq padded';
+          btn.style.color='var(--block-label-text-color)';
+          btn.style.setProperty('--bg-color','var(--block-background-fill)');
+          btn.innerHTML=`<div class="svelte-vzs2gq small">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">
+      <path fill="#000" fill-rule="evenodd" d=" M0 0 H24 V24 H0 Z M4.32 4.32 H19.68 V19.68 H4.32 Z"/>
+    </svg>
+  </div>`;
           btn.addEventListener('click',()=>{imgElem.src=img.src;modal.classList.add('visible');});
           toolbar.insertBefore(btn, toolbar.firstChild);
         });
