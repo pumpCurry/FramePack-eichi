@@ -2,12 +2,14 @@
 
 from eichi_utils.spinner import spinner_while_running
 import os
+# Show which script is launching for easier debugging
 print(f"{os.path.basename(__file__)} : 起動開始....")
 
 import importlib
 import sys
 import argparse
 
+# Append FramePack submodule path while showing a spinner to indicate progress
 spinner_while_running(
     "Path: FramePack",
     sys.path.append,
@@ -18,6 +20,7 @@ spinner_while_running(
     ),
 )
 
+# Parse common CLI options such as server address and UI language
 parser = argparse.ArgumentParser()
 parser.add_argument('--share', action='store_true')
 parser.add_argument("--server", type=str, default='127.0.0.1')
@@ -46,6 +49,7 @@ set_lang(args.lang)
     glob,
     subprocess,
 ) = spinner_while_running(
+    # Import core Python and helper libraries while displaying progress
     translate("Load_System Libraries"),
     lambda: (
         importlib.import_module("asyncio"),
