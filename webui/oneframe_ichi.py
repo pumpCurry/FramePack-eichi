@@ -5032,7 +5032,8 @@ with block:
     resync_status_btn.click(
         fn=resync_status_handler,
         inputs=[],
-        outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, stop_step_button, seed]
+        outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, stop_step_button, seed],
+        queue=False
     )
     
     gr.HTML(f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")}</div>')

@@ -6652,7 +6652,8 @@ with block:
     resync_status_btn.click(
         fn=resync_status_handler,
         inputs=[],
-        outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed]
+        outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed],
+        queue=False
     )
 
     # キーフレーム画像変更時のイベント登録
