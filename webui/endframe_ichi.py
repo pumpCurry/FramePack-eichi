@@ -18,6 +18,13 @@ vae_cache_enabled = False  # VAEキャッシュのチェックボックス状態
 current_prompt = None      # キューから読み込まれた現在のプロンプト
 current_seed = None        # キューから読み込まれた現在のシード値
 
+# Generation state flag for resync handling
+generation_active = False
+
+def is_generation_running():
+    """Return True if a generation job is currently active."""
+    return generation_active
+
 # 生成状態管理用グローバル変数
 generation_stopped = False      # 生成中断フラグ
 current_batch_data = None      # 現在のバッチデータ
@@ -2543,11 +2550,13 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     global vae_cache_enabled
     global image_queue_files
     global stop_after_current, stop_after_step
+    global generation_active
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
     stop_after_current = False
     stop_after_step = False
+    generation_active = True
     # frame_save_modeから save_latent_frames と save_last_section_frames を算出
     save_latent_frames = False
     save_last_section_frames = False
@@ -2820,6 +2829,8 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             gr.update(interactive=False),
             gr.update()
         )
+        generation_active = False
+        stream = AsyncStream()
         return
 
     # バッチ処理ループの開始
@@ -3189,15 +3200,19 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             print(translate("バッチ処理ループを中断します"))
             break
 
+    generation_active = False
+    stream = AsyncStream()
+
 def end_process():
     global stream
-    global batch_stopped
+    global batch_stopped, generation_active
 
     # 現在のバッチと次のバッチ処理を全て停止するフラグを設定
     batch_stopped = True
     print(translate("停止ボタンが押されました。バッチ処理を停止します..."))
     # 現在実行中のバッチを停止
     stream.input_queue.push('end')
+    generation_active = False
 
     # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
     return gr.update(value=translate("停止処理中..."))
@@ -3230,18 +3245,22 @@ def end_after_step_process():
 def resync_status_handler():
     """Resume streaming progress after page reload."""
     global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
-    global current_seed
+    global current_seed, generation_active, stream
 
+    running = is_generation_running()
     yield (
         last_output_filename if last_output_filename is not None else gr.skip(),
         gr.update(visible=last_preview_image is not None, value=last_preview_image),
         last_progress_desc,
         last_progress_bar,
-        gr.update(interactive=False),
-        gr.update(interactive=True),
-        gr.update(interactive=True),
+        gr.update(interactive=not running, value=translate("Start Generation")),
+        gr.update(interactive=running, value=translate("End Generation")),
+        gr.update(interactive=running),
         gr.update(),
     )
+
+    if not running or stream is None or not hasattr(stream, "output_queue"):
+        return
 
     while True:
         try:
@@ -3270,17 +3289,22 @@ def resync_status_handler():
             yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
         if flag == 'end':
+            generation_active = False
             last_output_filename = last_output_filename or data
             yield (
                 last_output_filename if last_output_filename is not None else gr.skip(),
                 gr.update(value=None, visible=False),
                 last_progress_desc,
                 last_progress_bar,
-                gr.update(interactive=True),
-                gr.update(interactive=False),
+                gr.update(interactive=True, value=translate("Start Generation")),
+                gr.update(interactive=False, value=translate("End Generation")),
                 gr.update(interactive=False),
                 gr.update(),
             )
+            try:
+                stream.output_queue.clear()
+            except Exception:
+                stream = AsyncStream()
             break
 
 def end_after_step_process():
