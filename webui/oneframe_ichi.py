@@ -3204,12 +3204,22 @@ with block:
       const closeBtn=document.getElementById('orig_size_close');
       closeBtn.addEventListener('click',()=>{modal.classList.remove('visible');imgElem.src='';});
       function addButtons(){
+        // 既存ボタンのクリーンアップ
+        document.querySelectorAll('.view-modal-screen-btn').forEach(btn=>{
+          const toolbar=btn.parentElement;
+          const fullBtn=toolbar?toolbar.querySelector('button[aria-label="View in full screen"]'):null;
+          const container=toolbar?toolbar.closest('[data-testid="image"]')||toolbar.parentElement:null;
+          const img=container?container.querySelector('img'):null;
+          if(!toolbar||!fullBtn||!img) btn.remove();
+        });
+        // 新規ボタンの追加
         document.querySelectorAll('button[aria-label="View in full screen"]').forEach(fullBtn=>{
           const toolbar=fullBtn.parentElement;
           if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
           const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
           const img=container.querySelector('img');
-          if(!img) return;
+          if(!img||!img.src) return;
+
           const btn=document.createElement('button');
           btn.setAttribute('aria-label','View modal screen');
           btn.setAttribute('aria-haspopup','false');
@@ -3228,7 +3238,7 @@ with block:
       }
       addButtons();
       const obs=new MutationObserver(addButtons);
-      obs.observe(document.body,{childList:true,subtree:true});
+      obs.observe(document.body,{childList:true,subtree:true,attributes:true});
     }
     if(document.readyState !== 'loading'){
       setupOrigSize();
