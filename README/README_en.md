@@ -30,13 +30,14 @@ We're extremely grateful to [https://github.com/hinablue](https://github.com/hin
 - **Progress time display**: show elapsed time and estimated completion for ongoing generation
 - **Input image save option**: automatically store input images to a user-defined folder
   - Clipboard images no longer vanish after use
+- **Log output settings**: enable console log saving, specify the destination folder, and open it directly from the UI
 - **Favorite setting management**: save UI configurations as favorites for quick reuse
 - **Prompt cache with switchable LoRA state cache**: persist prompt analysis results to disk and toggle LoRA state caching
 - **High-resolution support**: generate up to 2K (2160) resolution
   - Added trimming mode that matches the longer edge with padding when comparing reference images
 - **“Stop After Current” button**: stop processing after the current image finishes (F1/UI integration)
 - **“Stop After Step” button**: stop after the current frame generation step completes (F1/UI integration)
-- **Image preview window**: preview generated images in a window without going full-screen
+- **Image preview & original-size modal**: preview generated images in a window and view them in their original resolution
 
 ## 🌟 Feature Expansion (v1.9.4) ※Official Release
 
