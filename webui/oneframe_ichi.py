@@ -1,15 +1,15 @@
 
 import os
-
-# 進捗バーやスピナーと協調するスレッドセーフな印刷を有効化
-from eichi_utils.tqdm_print import enable_tqdm_print
-enable_tqdm_print()
-
 # 即座に起動しているファイルをまずは表示
 print(f"\n------------------------------------------------------------")
 print(f"{os.path.basename(__file__)} : Starting....")
 print(f"------------------------------------------------------------\n")
 
+# 進捗バーやスピナーと協調するスレッドセーフなprint文を有効化
+from eichi_utils.tqdm_print import enable_tqdm_print
+enable_tqdm_print()
+
+# スピナー を読み込む
 from eichi_utils.spinner import spinner_while_running
 
 # スピナーで進捗を示しながら基本モジュールをインポート
