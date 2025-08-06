@@ -3267,6 +3267,7 @@ def resync_status_handler():
         try:
             flag, data = stream.output_queue.next()
         except Exception:
+            generation_active = False
             break
 
         if flag == 'file':
@@ -3306,7 +3307,23 @@ def resync_status_handler():
                 stream.output_queue.clear()
             except Exception:
                 stream = AsyncStream()
-            break
+            return
+
+    # If we exit the loop without receiving an 'end' flag, ensure the state is reset
+    yield (
+        last_output_filename if last_output_filename is not None else gr.skip(),
+        gr.update(value=None, visible=False),
+        last_progress_desc,
+        last_progress_bar,
+        gr.update(interactive=True, value=translate("Start Generation")),
+        gr.update(interactive=False, value=translate("End Generation")),
+        gr.update(interactive=False),
+        gr.update(),
+    )
+    try:
+        stream.output_queue.clear()
+    except Exception:
+        stream = AsyncStream()
 
 def end_after_step_process():
     """現在のステップ完了後に停止する処理"""
