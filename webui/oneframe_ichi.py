@@ -99,6 +99,13 @@ last_preview_image = None
 last_output_filename = None
 current_seed = None
 
+# Generation state flag used for resync logic
+generation_active = False
+
+def is_generation_running():
+    """Return True if a generation job is currently active."""
+    return generation_active
+
 # 進捗表示用グローバル変数
 progress_ref_idx = 0
 progress_ref_total = 0
@@ -2285,6 +2292,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     global progress_ref_idx, progress_ref_total, progress_ref_name
     global progress_img_idx, progress_img_total, progress_img_name
     global last_output_filename
+    global generation_active
 
 
     # 新たな処理開始時にグローバルフラグをリセット
@@ -2311,6 +2319,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
     # ストリームを新規作成してキューをクリア
     stream = AsyncStream()
+    generation_active = True
 
     # bool値の正規化
     reference_long_edge = _to_bool(reference_long_edge)
@@ -2840,6 +2849,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                             gr.update(interactive=False, value=translate("このステップで打ち切り")),
                             gr.update(value=original_seed),
                         )
+                        generation_active = False
+                        stream = AsyncStream()
                         return
                         
                 except Exception as e:
@@ -2882,11 +2893,15 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             
             # UIをリセット
             yield None, gr.update(visible=False), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            generation_active = False
+            stream = AsyncStream()
             return
         except Exception as e:
             import traceback
             # UIをリセット
             yield None, gr.update(visible=False), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            generation_active = False
+            stream = AsyncStream()
             return
     
     # すべてのバッチ処理が正常に完了した場合と中断された場合で表示メッセージを分ける
@@ -2923,7 +2938,9 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print("*" * 50)
         print(translate("【全バッチ処理完了】プロセスが完了しました - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
         print("*" * 50)
-            
+
+    generation_active = False
+    stream = AsyncStream()
     return
 
 def end_process():
@@ -2944,6 +2961,7 @@ def end_process():
         # 現在実行中のバッチを停止
         if stream is not None and stream.input_queue.top() != 'end':
             stream.input_queue.push('end')
+    generation_active = False
 
     # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
     return (
@@ -3003,19 +3021,23 @@ def end_after_step_process():
 def resync_status_handler():
     """Resume streaming progress after page reload."""
     global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
-    global current_seed
+    global current_seed, generation_active, stream
 
+    running = is_generation_running()
     yield (
         last_output_filename if last_output_filename is not None else gr.skip(),
         gr.update(visible=last_preview_image is not None, value=last_preview_image),
         last_progress_desc,
         last_progress_bar,
-        gr.update(interactive=False),
-        gr.update(interactive=True),
-        gr.update(interactive=True),
-        gr.update(interactive=True),
+        gr.update(interactive=not running, value=translate("Start Generation")),
+        gr.update(interactive=running, value=translate("End Generation")),
+        gr.update(interactive=running),
+        gr.update(interactive=running),
         gr.update(value=current_seed),
     )
+
+    if not running or stream is None or not hasattr(stream, "output_queue"):
+        return
 
     while True:
         try:
@@ -3045,6 +3067,7 @@ def resync_status_handler():
             yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
         if flag == 'end':
+            generation_active = False
             last_output_filename = last_output_filename or data
             yield (
                 last_output_filename if last_output_filename is not None else gr.skip(),
@@ -3057,6 +3080,10 @@ def resync_status_handler():
                 gr.update(interactive=False),
                 gr.update(value=current_seed),
             )
+            try:
+                stream.output_queue.clear()
+            except Exception:
+                stream = AsyncStream()
             break
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
