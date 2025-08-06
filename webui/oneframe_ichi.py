@@ -1,6 +1,10 @@
 
 import os
 
+# Enable thread-safe printing that cooperates with progress bars/spinners
+from eichi_utils.tqdm_print import enable_tqdm_print
+enable_tqdm_print()
+
 # 即座に起動しているファイルをまずは表示
 print(f"\n------------------------------------------------------------")
 print(f"{os.path.basename(__file__)} : Starting....")
