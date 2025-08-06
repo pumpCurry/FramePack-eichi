@@ -18,18 +18,25 @@ We're extremely grateful to [https://github.com/hinablue](https://github.com/hin
 
 ## 🌟 Feature Enhancements (v1.9.5)
 
-**FramePack-eichi v1.9.5** introduces multiple UI/UX refinements and clearer startup feedback.
+**FramePack-eichi v1.9.5** focuses on smoother startup feedback and richer queue management to improve overall usability.
 
 ### 🚀 Key New Features
 
-- Display file name and startup message with spinners during import
-- Localized spinner text and log output
-- "stop-after-current" button with F1 integration
-- Expanded reference image queue and batch count management
-- Added progress time display
-- Input image save option and favorite settings management
-- Persistent prompt cache with switchable LoRA state cache
-- Added high-resolution support
+- **Improved startup messages with spinner**: display a spinner and completion checkmark during module loading so the app never looks frozen
+- **Expanded image queue & batch management**: specify repeat counts per source image
+  - Generated frame count becomes `image count × batch size`, removing the previous limit of 100
+- **Reference image queue and batch control**: enqueue reference images and process them with their own batch count
+  - Each image queue entry can cycle through multiple reference images sequentially
+- **Progress time display**: show elapsed time and estimated completion for ongoing generation
+- **Input image save option**: automatically store input images to a user-defined folder
+  - Clipboard images no longer vanish after use
+- **Favorite setting management**: save UI configurations as favorites for quick reuse
+- **Prompt cache with switchable LoRA state cache**: persist prompt analysis results to disk and toggle LoRA state caching
+- **High-resolution support**: generate up to 2K (2160) resolution
+  - Added trimming mode that matches the longer edge with padding when comparing reference images
+- **“Stop After Current” button**: stop processing after the current image finishes (F1/UI integration)
+- **“Stop After Step” button**: stop after the current frame generation step completes (F1/UI integration)
+- **Image preview window**: preview generated images in a window without going full-screen
 
 ## 🌟 Feature Expansion (v1.9.4) ※Official Release
 
