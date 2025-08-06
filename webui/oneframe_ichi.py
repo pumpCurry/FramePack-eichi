@@ -1,9 +1,9 @@
 
-
-from eichi_utils.spinner import spinner_while_running
 import os
 # Show which script is launching for easier debugging
-print(f"{os.path.basename(__file__)} : 起動開始....")
+print(f"{os.path.basename(__file__)} : Starting....")
+
+from eichi_utils.spinner import spinner_while_running
 
 import importlib
 import sys
