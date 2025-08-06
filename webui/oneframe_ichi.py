@@ -3171,14 +3171,16 @@ print(
     )
 )
 
-# △ 起動シーケンスここまで △
-print("🆗 " + translate("Startup_sequence_complete"))
-
 # 読み込んだ設定をログに出力
 if saved_app_settings:
     pass
 else:
     print(translate("保存された設定が見つかりません。デフォルト値を使用します"))
+
+# 起動シーケンス完了
+print("🆗 " + translate("Startup_sequence_complete"))
+print(f"------------------------------------------------------------\n")
+# △ 起動シーケンスここまで △
 
 block = gr.Blocks(css=css).queue()
 with block:
