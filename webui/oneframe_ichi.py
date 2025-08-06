@@ -1,6 +1,10 @@
 
 import os
 
+# 進捗バーやスピナーと協調するスレッドセーフな印刷を有効化
+from eichi_utils.tqdm_print import enable_tqdm_print
+enable_tqdm_print()
+
 # 即座に起動しているファイルをまずは表示
 print(f"\n------------------------------------------------------------")
 print(f"{os.path.basename(__file__)} : Starting....")
@@ -8,7 +12,7 @@ print(f"------------------------------------------------------------\n")
 
 from eichi_utils.spinner import spinner_while_running
 
-# Core initialization imports are loaded with a spinner to indicate progress
+# スピナーで進捗を示しながら基本モジュールをインポート
 importlib, sys, argparse = spinner_while_running(
     "Load: Initalize",
     lambda: (
@@ -18,7 +22,7 @@ importlib, sys, argparse = spinner_while_running(
     ),
 )
 
-# Append FramePack submodule path while showing a spinner to indicate progress
+# スピナーで進捗を表示しつつ FramePack サブモジュールのパスを追加
 spinner_while_running(
     "Path: FramePack",
     sys.path.append,
@@ -29,7 +33,7 @@ spinner_while_running(
     ),
 )
 
-# Parse common CLI options such as server address and UI language
+# サーバーアドレスやUI言語などの共通CLIオプションを解析
 parser = argparse.ArgumentParser()
 parser.add_argument('--share', action='store_true')
 parser.add_argument("--server", type=str, default='127.0.0.1')
@@ -59,7 +63,7 @@ set_lang(args.lang)
     subprocess,
     snapshot_download,
 ) = spinner_while_running(
-    # Import core Python and helper libraries while displaying progress
+    # 進捗を表示しつつPython標準ライブラリと補助ライブラリをインポート
     translate("Load_System Libraries"),
     lambda: (
         importlib.import_module("asyncio"),
@@ -103,18 +107,18 @@ queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
 image_queue_files = []  # イメージキューのファイルリスト
 
-# Resync support - store last progress state
+# 再同期対応 - 最終進捗状態を保存
 last_progress_desc = ""
 last_progress_bar = ""
 last_preview_image = None
 last_output_filename = None
 current_seed = None
 
-# Generation state flag used for resync logic
+# 再同期処理に使用される生成状態フラグ
 generation_active = False
 
 def is_generation_running():
-    """Return True if a generation job is currently active."""
+    """生成ジョブが実行中なら True を返す。"""
     return generation_active
 
 # 進捗表示用グローバル変数
@@ -274,7 +278,7 @@ except ImportError:
     ),
 )
 
-# Preset manager for default prompts and preset operations
+# デフォルトプロンプトおよびプリセット操作の管理
 (
     get_default_startup_prompt,
     load_presets,
@@ -399,7 +403,7 @@ def open_folder(folder_path):
         print(translate("フォルダを作成しました: {0}").format(folder_path))
 
     try:
-        if os.name == 'nt':  # Windows
+        if os.name == 'nt':  # Windows環境
             subprocess.Popen(['explorer', folder_path])
             print(translate("フォルダを開きました: {0}").format(folder_path))
         elif os.name == 'posix':
@@ -468,7 +472,7 @@ make_progress_bar_css, make_progress_bar_html = spinner_while_running(
     ),
 )
 
-# get_app_css was imported earlier from eichi_utils.ui_styles
+# get_app_css は eichi_utils.ui_styles から先にインポート済み
 
 
 SiglipImageProcessor, SiglipVisionModel = spinner_while_running(
@@ -537,13 +541,13 @@ for idx, model in enumerate(model_downloads, 1):
     )
 
 def _norm_dropdown(val):
-    """Return a clean str or None from a Gr.Dropdown value."""
+    """Gr.Dropdownの値から適切な文字列またはNoneを返す。"""
     if val in (None, False, True, 0, "0", 0.0) or val == translate("なし"):
         return None
     return str(val)
 
 def _to_bool(val):
-    """Convert various truthy inputs to a strict boolean."""
+    """様々な真偽値表現を厳密なboolに変換する。"""
     if isinstance(val, bool):
         return val
     if isinstance(val, str):
@@ -555,7 +559,7 @@ def _to_bool(val):
     return bool(val)
 
 def resize_and_pad_with_edge_color(image_np, target_width, target_height):
-    """Resize image to fit within target size and pad using edge color."""
+    """画像を目標サイズに合わせてリサイズし、縁の色で余白を埋める。"""
     pil_image = Image.fromarray(image_np)
     ow, oh = pil_image.size
     scale = min(target_width / ow, target_height / oh)
@@ -989,7 +993,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
         
         # -------- LoRA 設定 START ---------
 
-        # sanitise raw UI values (can be bool when allow_custom_value=True)
+        # UIの生値を正規化（allow_custom_value=True の場合はboolの可能性あり）
         lora_dropdown1 = _norm_dropdown(lora_dropdown1)
         lora_dropdown2 = _norm_dropdown(lora_dropdown2)
         lora_dropdown3 = _norm_dropdown(lora_dropdown3)
@@ -1591,15 +1595,15 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     print(translate("clean_latentsの結合中にエラーが発生しました: {0}").format(e))
                     print(translate("前処理のみを使用します"))
                     clean_latents = clean_latents_pre
-                    if len(clean_latents.shape) == 4:  # [B, C, H, W]
-                        clean_latents = clean_latents.unsqueeze(2)  # [B, C, 1, H, W]
+                    if len(clean_latents.shape) == 4:  # 形状[B, C, H, W]
+                        clean_latents = clean_latents.unsqueeze(2)  # 形状[B, C, 1, H, W]
             else:
                 print(translate("clean_latents_postは無効化されています。生成が高速化されますが、ノイズが増える可能性があります"))
                 # clean_latents_postを使用しない場合、前処理+空白レイテント（ゼロテンソル）を結合
                 # これはオリジナルの実装をできるだけ維持しつつ、エラーを回避するためのアプローチ
                 clean_latents_pre_shaped = clean_latents_pre
-                if len(clean_latents_pre.shape) == 4:  # [B, C, H, W]
-                    clean_latents_pre_shaped = clean_latents_pre.unsqueeze(2)  # [B, C, 1, H, W]
+                if len(clean_latents_pre.shape) == 4:  # 形状[B, C, H, W]
+                    clean_latents_pre_shaped = clean_latents_pre.unsqueeze(2)  # 形状[B, C, 1, H, W]
                 
                 # 空のレイテントを作成（形状を合わせる）
                 shape = list(clean_latents_pre_shaped.shape)
@@ -1699,7 +1703,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     # 必要なのは5次元テンソル[B, C, T, H, W]です
                     if clean_latents_2x.shape[2] == 1 and clean_latents_2x.shape[3] == 1:
                         # 余分な次元を削除
-                        clean_latents_2x = clean_latents_2x.squeeze(2)  # [1, 16, 1, 96, 64]
+                        clean_latents_2x = clean_latents_2x.squeeze(2)  # 形状[1, 16, 1, 96, 64]
             except Exception as e:
                 print(translate("clean_latents_2xの形状調整中にエラー: {0}").format(e))
             
@@ -1707,7 +1711,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 if len(clean_latents_4x.shape) > 5:
                     if clean_latents_4x.shape[2] == 1 and clean_latents_4x.shape[3] == 1:
                         # 余分な次元を削除
-                        clean_latents_4x = clean_latents_4x.squeeze(2)  # [1, 16, 1, 96, 64]
+                        clean_latents_4x = clean_latents_4x.squeeze(2)  # 形状[1, 16, 1, 96, 64]
             except Exception as e:
                 print(translate("clean_latents_4xの形状調整中にエラー: {0}").format(e))
             
@@ -2365,7 +2369,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     stop_after_current = False
     stop_after_step = False
 
-    # progress and preview states reset
+    # 進捗とプレビューの状態をリセット
     progress_ref_idx = 0
     progress_ref_total = 0
     progress_ref_name = ""
@@ -3080,7 +3084,7 @@ def end_after_step_process():
         )
 
 def resync_status_handler():
-    """Resume streaming progress after page reload."""
+    """ページ再読み込み後に進捗のストリーミングを再開する。"""
     global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
     global current_seed, generation_active, stream
 
@@ -3152,7 +3156,7 @@ css = get_app_css()  # eichi_utilsのスタイルを使用
 # アプリケーション起動時に保存された設定を読み込む
 saved_app_settings = load_app_settings_oichi()
 
-# Apply LoRA cache setting at startup
+# 起動時にLoRAキャッシュ設定を適用
 if saved_app_settings:
     spinner_while_running(
         translate("Setting_lora_state_cache").format(saved_app_settings.get("lora_cache", False)),
@@ -3215,6 +3219,7 @@ with block:
           const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
           const img=container.querySelector('img');
           if(!img||!img.src) return;
+
           const btn=document.createElement('button');
           btn.setAttribute('aria-label','View modal screen');
           btn.setAttribute('aria-haspopup','false');

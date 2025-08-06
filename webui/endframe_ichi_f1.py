@@ -4524,12 +4524,14 @@ with block:
           if(!toolbar||!fullBtn||!img) btn.remove();
         });
         // 新規ボタンの追加
+
         document.querySelectorAll('button[aria-label="View in full screen"]').forEach(fullBtn=>{
           const toolbar=fullBtn.parentElement;
           if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
           const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
           const img=container.querySelector('img');
           if(!img||!img.src) return;
+
           const btn=document.createElement('button');
           btn.setAttribute('aria-label','View modal screen');
           btn.setAttribute('aria-haspopup','false');
