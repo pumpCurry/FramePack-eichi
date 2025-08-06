@@ -241,4 +241,9 @@ def get_app_css():
         font-size: 2rem;
         cursor: pointer;
     }
+    .view-modal-screen-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
     """
