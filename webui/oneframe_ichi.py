@@ -8,9 +8,15 @@ print(f"------------------------------------------------------------\n")
 
 from eichi_utils.spinner import spinner_while_running
 
-import importlib
-import sys
-import argparse
+# Core initialization imports are loaded with a spinner to indicate progress
+importlib, sys, argparse = spinner_while_running(
+    "Load: Initalize",
+    lambda: (
+        __import__("importlib"),
+        __import__("sys"),
+        __import__("argparse"),
+    ),
+)
 
 # Append FramePack submodule path while showing a spinner to indicate progress
 spinner_while_running(
@@ -51,6 +57,7 @@ set_lang(args.lang)
     json,
     glob,
     subprocess,
+    snapshot_download,
 ) = spinner_while_running(
     # Import core Python and helper libraries while displaying progress
     translate("Load_System Libraries"),
@@ -64,6 +71,7 @@ set_lang(args.lang)
         importlib.import_module("json"),
         importlib.import_module("glob"),
         importlib.import_module("subprocess"),
+        importlib.import_module("huggingface_hub").snapshot_download,
     ),
 )
 import shutil
@@ -263,6 +271,22 @@ except ImportError:
         importlib.import_module("eichi_utils.lora_preset_manager").save_lora_preset,
         importlib.import_module("eichi_utils.lora_preset_manager").load_lora_preset,
         importlib.import_module("eichi_utils.lora_preset_manager").get_preset_names,
+    ),
+)
+
+# Preset manager for default prompts and preset operations
+(
+    get_default_startup_prompt,
+    load_presets,
+    save_preset,
+    delete_preset,
+) = spinner_while_running(
+    translate("Load_eichi_utils.preset_manager"),
+    lambda: (
+        importlib.import_module("eichi_utils.preset_manager").get_default_startup_prompt,
+        importlib.import_module("eichi_utils.preset_manager").load_presets,
+        importlib.import_module("eichi_utils.preset_manager").save_preset,
+        importlib.import_module("eichi_utils.preset_manager").delete_preset,
     ),
 )
 from eichi_utils import prompt_cache, lora_state_cache
@@ -485,12 +509,32 @@ print(translate('Free VRAM {0} GB').format(free_mem_gb))
 print(translate('High-VRAM Mode: {0}').format(high_vram))
 
 # モデルを並列ダウンロードしておく
-ModelDownloader = spinner_while_running(
-    translate("Load_eichi_utils.model_downloader"),
-    lambda: importlib.import_module("eichi_utils.model_downloader").ModelDownloader,
-)
+model_downloads = [
+    {
+        "repo_id": "hunyuanvideo-community/HunyuanVideo",
+        "allow_patterns": [
+            "tokenizer/*",
+            "tokenizer_2/*",
+            "vae/*",
+            "text_encoder/*",
+            "text_encoder_2/*",
+        ],
+    },
+    {
+        "repo_id": "lllyasviel/flux_redux_bfl",
+        "allow_patterns": ["feature_extractor/*", "image_encoder/*"],
+    },
+    {"repo_id": "lllyasviel/FramePackI2V_HY"},
+]
 
-ModelDownloader().download_original()
+for idx, model in enumerate(model_downloads, 1):
+    spinner_while_running(
+        translate("Download_progress").format(idx, len(model_downloads), model["repo_id"]),
+        snapshot_download,
+        repo_id=model["repo_id"],
+        allow_patterns=model.get("allow_patterns", "*"),
+        max_workers=4,
+    )
 
 def _norm_dropdown(val):
     """Return a clean str or None from a Gr.Dropdown value."""
@@ -526,7 +570,13 @@ def resize_and_pad_with_edge_color(image_np, target_width, target_height):
     return np.array(padded)
 
 # グローバルなモデル状態管理インスタンスを作成（モデルは実際に使用するまでロードしない）
-transformer_manager = TransformerManager(device=gpu, high_vram_mode=high_vram, use_f1_model=False)
+transformer_manager = spinner_while_running(
+    translate("Load_transformer_virtual_device"),
+    TransformerManager,
+    gpu,
+    high_vram_mode=high_vram,
+    use_f1_model=False,
+)
 text_encoder_manager = TextEncoderManager(device=gpu, high_vram_mode=high_vram)
 
 # LoRAの状態を確認
@@ -550,30 +600,38 @@ def reload_transformer_if_needed():
 # 遅延ロード方式に変更 - 起動時にはtokenizerのみロードする
 try:
     # tokenizerのロードは起動時から行う
-    try:
-        print(translate("tokenizer, tokenizer_2のロードを開始します..."))
-        tokenizer = LlamaTokenizerFast.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer')
-        tokenizer_2 = CLIPTokenizer.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2')
-        print(translate("tokenizer, tokenizer_2のロードが完了しました"))
-    except Exception as e:
-        print(translate("tokenizer, tokenizer_2のロードに失敗しました: {0}").format(e))
-        traceback.print_exc()
-        print(translate("5秒間待機後に再試行します..."))
-        time.sleep(5)
-        tokenizer = LlamaTokenizerFast.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer')
-        tokenizer_2 = CLIPTokenizer.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2')
-    
+    def load_tokenizers():
+        try:
+            return (
+                LlamaTokenizerFast.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer'),
+                CLIPTokenizer.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2'),
+            )
+        except Exception:
+            traceback.print_exc()
+            time.sleep(5)
+            return (
+                LlamaTokenizerFast.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer'),
+                CLIPTokenizer.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2'),
+            )
+
+    tokenizer, tokenizer_2 = spinner_while_running(
+        translate("Load_tokenizer_tokenizer_2"),
+        load_tokenizers,
+    )
+
     # feature_extractorは軽量なのでここでロード
-    try:
-        print(translate("feature_extractorのロードを開始します..."))
-        feature_extractor = SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
-        print(translate("feature_extractorのロードが完了しました"))
-    except Exception as e:
-        print(translate("feature_extractorのロードに失敗しました: {0}").format(e))
-        print(translate("再試行します..."))
-        time.sleep(2)
-        feature_extractor = SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
-    
+    def load_feature_extractor():
+        try:
+            return SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
+        except Exception:
+            time.sleep(2)
+            return SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
+
+    feature_extractor = spinner_while_running(
+        translate("Load_feature_extractor"),
+        load_feature_extractor,
+    )
+
     # 他の重いモデルは遅延ロード方式に変更
     # 変数の初期化だけ行い、実際のロードはworker関数内で行う
     vae = None
@@ -581,21 +639,16 @@ try:
     text_encoder_2 = None
     transformer = None
     image_encoder = None
-    
+
     # transformerダウンロードの確保だけは起動時に
-    try:
-        # モデルのダウンロードを確保（実際のロードはまだ行わない）
-        print(translate("モデルのダウンロードを確保します..."))
-        transformer_manager.ensure_download_models()
-        print(translate("モデルのダウンロードを確保しました"))
-    except Exception as e:
-        print(translate("モデルダウンロード確保エラー: {0}").format(e))
-        traceback.print_exc()
-    
+    spinner_while_running(
+        translate("Download_ensure_models"),
+        transformer_manager.ensure_download_models,
+    )
+
 except Exception as e:
     print(translate("初期化エラー: {0}").format(e))
     print(translate("プログラムを終了します..."))
-    import sys
     sys.exit(1)
 
 # モデル設定のデフォルト値を定義（実際のモデルロードはworker関数内で行う）
@@ -631,23 +684,28 @@ settings_folder = os.path.join(webui_folder, 'settings')
 os.makedirs(settings_folder, exist_ok=True)
 
 # LoRAプリセットの初期化
-from eichi_utils.lora_preset_manager import initialize_lora_presets
 initialize_lora_presets()
 
 # 設定から出力フォルダを取得
 app_settings = load_settings()
 output_folder_name = app_settings.get('output_folder', 'outputs')
-print(translate("設定から出力フォルダを読み込み: {0}").format(output_folder_name))
+spinner_while_running(
+    translate("Setting_output_folder").format(output_folder_name),
+    lambda: None,
+)
 
 # ログ設定を読み込み適用
 log_settings = app_settings.get('log_settings', get_default_log_settings())
-print(translate("ログ設定を読み込み: 有効={0}, フォルダ={1}").format(
-    log_settings.get('log_enabled', False), 
-    log_settings.get('log_folder', 'logs')
-))
-if log_settings.get('log_enabled', False):
-    # 現在のファイル名を渡す
-    enable_logging(log_settings.get('log_folder', 'logs'), source_name="oneframe_ichi")
+def apply_logs():
+    if log_settings.get('log_enabled', False):
+        enable_logging(log_settings.get('log_folder', 'logs'), source_name="oneframe_ichi")
+spinner_while_running(
+    translate("Setting_log").format(
+        log_settings.get('log_enabled', False),
+        log_settings.get('log_folder', 'logs')
+    ),
+    apply_logs,
+)
 
 # 出力フォルダのフルパスを生成
 outputs_folder = get_output_folder_path(output_folder_name)
@@ -3096,7 +3154,25 @@ saved_app_settings = load_app_settings_oichi()
 
 # Apply LoRA cache setting at startup
 if saved_app_settings:
-    lora_state_cache.set_cache_enabled(saved_app_settings.get("lora_cache", False))
+    spinner_while_running(
+        translate("Setting_lora_state_cache").format(saved_app_settings.get("lora_cache", False)),
+        lora_state_cache.set_cache_enabled,
+        saved_app_settings.get("lora_cache", False),
+    )
+
+# 起動時デフォルトプロンプトをロード
+startup_prompt = spinner_while_running(
+    translate("Load_startup_default_prompt"),
+    get_default_startup_prompt,
+)
+print(
+    translate("起動時デフォルトプロンプトを読み込み: '{0}'... (長さ: {1}文字)").format(
+        startup_prompt[:30], len(startup_prompt)
+    )
+)
+
+# △ 起動シーケンスここまで △
+print("🆗 " + translate("Startup_sequence_complete"))
 
 # 読み込んだ設定をログに出力
 if saved_app_settings:
@@ -3163,7 +3239,6 @@ with block:
     seed_default = saved_app_settings.get("seed", random.randint(0, 2**32 - 1)) if saved_app_settings else random.randint(0, 2**32 - 1)
     
     # eichiのプリセット管理関連のインポート
-    from eichi_utils.preset_manager import get_default_startup_prompt, load_presets, save_preset, delete_preset
     
     with gr.Row():
         with gr.Column(scale=1):
@@ -4105,7 +4180,7 @@ with block:
             # プロンプト入力
             prompt = gr.Textbox(
                 label=translate("プロンプト"),
-                value=saved_app_settings.get("prompt", get_default_startup_prompt()) if saved_app_settings else get_default_startup_prompt(),
+                value=saved_app_settings.get("prompt", startup_prompt) if saved_app_settings else startup_prompt,
                 lines=6
             )
             n_prompt = gr.Textbox(label=translate("ネガティブプロンプト"), value='', visible=False)
