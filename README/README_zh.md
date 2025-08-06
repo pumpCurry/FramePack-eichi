@@ -16,6 +16,21 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
 
 感謝您 [https://github.com/hinablue](https://github.com/hinablue) **Hina Chen** 對多語言支援的協助。
 
+## 🌟 功能強化 (v1.9.5)
+
+**FramePack-eichi v1.9.5** 帶來多項 UI/UX 改進與啟動資訊強化。
+
+### 🚀 主要新功能
+
+- 啟動時顯示檔名與開始訊息，並於匯入過程插入轉輪提示
+- 支援轉輪與日誌輸出的在地化
+- 新增「stop-after-current」按鈕並與 F1 整合
+- 擴充參考圖片佇列與批次數管理
+- 新增進度時間顯示
+- 輸入圖片保存選項與最愛設定管理
+- 永續化的提示快取與可切換的 LoRA 狀態快取
+- 加入高解析度支援
+
 ## 🌟 功能擴展 (v1.9.4) ※正式發布版
 
 **FramePack-eichi v1.9.4** 專注於使用便利性提升和穩定性改善。
@@ -119,6 +134,8 @@ FramePack-eichi 是基於 lllyasviel 的 [lllyasviel/FramePack](https://github.c
 #### 啟動方法
 1. 在 FramePack 根目錄執行 `Language_FramePack-eichi.bat`
 2. 從菜單中選擇所需的編號並按 Enter 鍵
+
+**啟動時如出現問題，請參考[故障排除](#-故障排除)。**
 
 #### 可用選項
 | 編號 | 說明 |
@@ -635,6 +652,68 @@ FramePack-eichi 可以通過 Docker 輕鬆設置，在不同系統之間提供�
    ```
 
 ## 🔧 故障排除
+
+### 關於 localhost 無法存取錯誤
+
+在某些 Windows 環境中，啟動時可能會出現以下錯誤：
+
+```
+ValueError: When localhost is not accessible, a shareable link must be created
+```
+
+此錯誤是由於 FramePack-eichi 新增的 UI 元件導致 Gradio 啟動時的 localhost 可用性檢查（3 秒超時）無法及時響應。
+
+**解決方法：**
+
+**方法1: 超時時間延長（推薦）**
+延長 Gradio 3 秒超時時間的根本解決方法：
+
+編輯 `[FramePack資料夾]\system\python\Lib\site-packages\gradio\networking.py` 第 68 行：
+
+```python
+# 變更前
+r = httpx.head(url, timeout=3, verify=False)
+
+# 變更後
+r = httpx.head(url, timeout=10, verify=False)  # 3 → 10 秒變更
+```
+
+※此方法可根本解決問題，但需要直接編輯 Gradio 函式庫。
+
+**方法2: VSCode 終端機啟動**
+透過 VSCode 終端機以下命令啟動：
+
+```bash
+cd [FramePack路徑]
+[FramePack路徑]\run_endframe_ichi.bat
+```
+
+※動作較快，能滿足 3 秒規則而成功的情況。
+
+**方法3: 虛擬記憶體增加**
+透過增加虛擬記憶體，可能改善響應時間並滿足 3 秒規則。
+
+**方法4: 新增 --share 選項**
+編輯啟動檔案（例：`run_endframe_ichi.bat`），新增 `--share` 選項：
+（此選項將回避 localhost 可用性檢查，透過 gradio.live 伺服器進行隧道連接）
+
+```batch
+# 變更前
+"%DIR%\python\python.exe" endframe_ichi.py --server 127.0.0.1 --inbrowser
+
+# 變更後
+"%DIR%\python\python.exe" endframe_ichi.py --server 127.0.0.1 --share --inbrowser
+```
+
+※使用 --share 選項具有以下特性：
+- **優點**: 回避 localhost 連接問題，簡單共享
+- **缺點**: 
+  - 會產生可透過網際網路存取的 URL（僅知道 URL 的人可存取，不共享 URL 的話洩漏風險較低）
+  - 連結 72 小時後過期
+  - 依賴網際網路連接品質，效能可能變動
+- **機制**: 透過 gradio.live 伺服器的隧道連接（運算在本機執行）
+
+**注意：** 官方 FramePack 或 F1 版本能正常運作，此問題為 FramePack-eichi 特有現象。
 
 ### 關於 h11 錯誤
 
