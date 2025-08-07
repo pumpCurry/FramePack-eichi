@@ -5035,9 +5035,9 @@ with block:
     )
     
     start_button.click(fn=process, inputs=ips, outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, stop_step_button, seed])
-    end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button])
-    stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button, end_button])
-    stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button, end_button])
+    end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button], queue=False)
+    stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button, end_button], queue=False)
+    stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button, end_button], queue=False)
     resync_status_btn.click(
         fn=resync_status_handler,
         inputs=[],
