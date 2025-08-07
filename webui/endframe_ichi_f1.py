@@ -1063,7 +1063,11 @@ def validate_and_process_with_queue_check(*args):
         if len(result) >= 7:
             video, preview, desc, progress, start_btn, end_btn, stop_after_btn = result[:7]
             seed_update = result[7] if len(result) > 7 else gr.update()
-        
+        else:
+            # Fallback for unexpected result format
+            yield result + (gr.update(),) * (9 - len(result))
+            continue
+
         # During manual generation, manage queue start button state
         if isinstance(start_btn, dict) and not start_btn.get('interactive', True):
             # Manual generation is running, disable queue start
@@ -1074,9 +1078,6 @@ def validate_and_process_with_queue_check(*args):
 
         # Return 9 outputs to match the expected outputs
         yield (video, preview, desc, progress, start_btn, end_btn, stop_after_btn, queue_start_state, seed_update)
-        else:
-            # Fallback for unexpected result format
-            yield result + (gr.update(),) * (9 - len(result))
 
 def end_process_enhanced():
 
@@ -4505,7 +4506,6 @@ with block:
     gr.HTML('<h1>FramePack<span class="title-suffix">-<s>eichi</s> F1</span></h1>')
 
     # 原寸大表示用モーダルとボタン追加スクリプト
-    gr.HTML("""
     fullscreen_label = translate("View in full screen")
     orig_size_script = """
     <div id='orig_size_modal'>
@@ -4522,14 +4522,14 @@ with block:
         // 既存ボタンのクリーンアップ
         document.querySelectorAll('.view-modal-screen-btn').forEach(btn=>{
           const toolbar=btn.parentElement;
-          const fullBtn=toolbar?toolbar.querySelector('button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"]'):null;
+          const fullBtn=toolbar?toolbar.querySelector('button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"],button[aria-label="View in full screen"]'):null;
           const container=toolbar?toolbar.closest('[data-testid="image"]')||toolbar.parentElement:null;
           const img=container?container.querySelector('img'):null;
           if(!toolbar||!fullBtn||!img) btn.remove();
         });
         // 新規ボタンの追加
 
-        document.querySelectorAll('button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"]').forEach(fullBtn=>{
+        document.querySelectorAll('button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"],button[aria-label="View in full screen"]').forEach(fullBtn=>{
           const toolbar=fullBtn.parentElement;
           if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
           const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
