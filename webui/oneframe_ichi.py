@@ -678,6 +678,7 @@ def setup_image_encoder_if_loaded():
             image_encoder.to(gpu)
 
 stream = AsyncStream()
+stream_listener_active = False
 
 # フォルダ構造を先に定義
 webui_folder = os.path.dirname(os.path.abspath(__file__))
@@ -2359,6 +2360,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     global last_output_filename
     global generation_active
     global last_progress_desc, last_progress_bar, last_preview_image
+    global stream_listener_active
 
 
     # 新たな処理開始時にグローバルフラグをリセット
@@ -2385,6 +2387,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
     # ストリームを新規作成してキューをクリア
     stream = AsyncStream()
+    stream_listener_active = False
     generation_active = True
 
     # bool値の正規化
@@ -2821,6 +2824,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         try:
             # 新しいストリームを作成
             stream = AsyncStream()
+            stream_listener_active = False
             
             # バッチインデックスをジョブIDに含める
             batch_suffix = f"{batch_index_total}" if batch_index_total > 0 else ""
@@ -2848,6 +2852,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         try:
             # ストリーム待機開始
             listener_queue = stream.output_queue.subscribe()
+            stream_listener_active = True
             while True:
                 try:
                     flag, data = listener_queue.next()
@@ -2921,6 +2926,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         )
                         generation_active = False
                         stream = AsyncStream()
+                        stream_listener_active = False
                         return
                         
                 except Exception as e:
@@ -2973,6 +2979,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             generation_active = False
             stream = AsyncStream()
             return
+        finally:
+            stream_listener_active = False
     
     # すべてのバッチ処理が正常に完了した場合と中断された場合で表示メッセージを分ける
     if batch_stopped:
@@ -3011,6 +3019,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
     generation_active = False
     stream = AsyncStream()
+    stream_listener_active = False
     return
 
 def end_process():
@@ -3091,7 +3100,7 @@ def end_after_step_process():
 def resync_status_handler():
     """ページ再読み込み後に進捗のストリーミングを再開する。"""
     global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
-    global current_seed, generation_active, stream
+    global current_seed, generation_active, stream, stream_listener_active
 
     running = is_generation_running()
     yield (
@@ -3106,10 +3115,11 @@ def resync_status_handler():
         gr.update(value=current_seed),
     )
 
-    if not running or stream is None or not hasattr(stream, "output_queue"):
+    if not running or stream is None or not hasattr(stream, "output_queue") or stream_listener_active:
         return
 
     listener_queue = stream.output_queue.subscribe()
+    stream_listener_active = True
     while True:
         try:
             flag, data = listener_queue.next()
@@ -3156,6 +3166,7 @@ def resync_status_handler():
                 stream.output_queue.clear()
             except Exception:
                 stream = AsyncStream()
+            stream_listener_active = False
             return
 
     # Ensure state reset if loop exits without 'end'
@@ -3174,6 +3185,7 @@ def resync_status_handler():
         stream.output_queue.clear()
     except Exception:
         stream = AsyncStream()
+    stream_listener_active = False
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
 
