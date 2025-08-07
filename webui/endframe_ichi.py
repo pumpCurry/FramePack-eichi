@@ -2552,6 +2552,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     global image_queue_files
     global stop_after_current, stop_after_step
     global generation_active
+    global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
@@ -3168,6 +3169,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     else:
                         completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(batch_count, batch_count)
                     last_output_filename = batch_output_filename
+                    last_progress_desc = completion_message
+                    last_progress_bar = ''
+                    last_preview_image = None
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
                         gr.update(value=None, visible=False),
