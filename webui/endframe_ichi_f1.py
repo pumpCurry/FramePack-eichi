@@ -6359,8 +6359,8 @@ with block:
     ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, image_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, section_settings, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion]
 
     start_button.click(fn=validate_and_process_with_queue_check, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, queue_start_button, seed])
-    end_button.click(fn=end_process_enhanced, outputs=[end_button, stop_after_button, queue_start_button])
-    stop_after_button.click(fn=end_after_current_process_enhanced, outputs=[stop_after_button, queue_start_button])
+    end_button.click(fn=end_process_enhanced, outputs=[end_button, stop_after_button, queue_start_button], queue=False)
+    stop_after_button.click(fn=end_after_current_process_enhanced, outputs=[stop_after_button, queue_start_button], queue=False)
 
     # F1モードではセクション機能とキーフレームコピー機能を削除済み
 
