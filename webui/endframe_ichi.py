@@ -283,7 +283,6 @@ def get_image_queue_files():
     return image_files
 
 stream = AsyncStream()
-stream_listener_active = False
 
 # 設定管理モジュールをインポート
 from eichi_utils.settings_manager import (
@@ -2554,7 +2553,6 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     global stop_after_current, stop_after_step
     global generation_active
     global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
-    global stream_listener_active
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
@@ -2819,7 +2817,6 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
     stream = AsyncStream()
-    stream_listener_active = False
 
     # stream作成後、バッチ処理前もう一度フラグを確認
     if batch_stopped:
@@ -2836,7 +2833,6 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         )
         generation_active = False
         stream = AsyncStream()
-        stream_listener_active = False
         return
 
     # バッチ処理ループの開始
@@ -3108,10 +3104,8 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
         # 現在のバッチの処理結果を取得
         listener_queue = stream.output_queue.subscribe()
-        stream_listener_active = True
-        try:
-            while True:
-                flag, data = listener_queue.next()
+        while True:
+            flag, data = listener_queue.next()
 
             if flag == 'file':
                 batch_output_filename = data
@@ -3203,8 +3197,6 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         gr.update()
                     )
                 break
-        finally:
-            stream_listener_active = False
 
         # 最終的な出力ファイル名を更新
         output_filename = batch_output_filename
@@ -3216,7 +3208,6 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
     generation_active = False
     stream = AsyncStream()
-    stream_listener_active = False
 
 def end_process():
     global stream
@@ -3260,7 +3251,7 @@ def end_after_step_process():
 def resync_status_handler():
     """Resume streaming progress after page reload."""
     global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
-    global current_seed, generation_active, stream, stream_listener_active
+    global current_seed, generation_active, stream
 
     running = is_generation_running()
     yield (
@@ -3274,11 +3265,10 @@ def resync_status_handler():
         gr.update(value=current_seed),
     )
 
-    if not running or stream is None or not hasattr(stream, "output_queue") or stream_listener_active:
+    if not running or stream is None or not hasattr(stream, "output_queue"):
         return
 
     listener_queue = stream.output_queue.subscribe()
-    stream_listener_active = True
     while True:
         try:
             flag, data = listener_queue.next()
@@ -3322,8 +3312,7 @@ def resync_status_handler():
             try:
                 stream.output_queue.clear()
             except Exception:
-                stream = AsyncStream()
-            stream_listener_active = False
+                pass
             return
 
     # If we exit the loop without receiving an 'end' flag, ensure the state is reset
@@ -3340,8 +3329,7 @@ def resync_status_handler():
     try:
         stream.output_queue.clear()
     except Exception:
-        stream = AsyncStream()
-    stream_listener_active = False
+        pass
 
 def end_after_step_process():
     """現在のステップ完了後に停止する処理"""
