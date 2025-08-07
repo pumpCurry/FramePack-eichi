@@ -3367,6 +3367,8 @@ with block:
 
     # 原寸大表示用モーダルとボタン追加スクリプト
     gr.HTML("""
+    fullscreen_label = translate("View in full screen")
+    orig_size_script = """
     <div id='orig_size_modal'>
       <button id='orig_size_close'>×</button>
       <img id='orig_size_img'>
@@ -3382,14 +3384,14 @@ with block:
         // 既存ボタンのクリーンアップ
         document.querySelectorAll('.view-modal-screen-btn').forEach(btn=>{
           const toolbar=btn.parentElement;
-          const fullBtn=toolbar?toolbar.querySelector('button[aria-label="View in full screen"]'):null;
+          const fullBtn=toolbar?toolbar.querySelector('button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"]'):null;
           const container=toolbar?toolbar.closest('[data-testid="image"]')||toolbar.parentElement:null;
           const img=container?container.querySelector('img'):null;
           if(!toolbar||!fullBtn||!img) btn.remove();
         });
         // 新規ボタンの追加
 
-        document.querySelectorAll('button[aria-label="View in full screen"]').forEach(fullBtn=>{
+        document.querySelectorAll('button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"]').forEach(fullBtn=>{
           const toolbar=fullBtn.parentElement;
           if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
           const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
@@ -3403,9 +3405,9 @@ with block:
           btn.className='view-modal-screen-btn svelte-vzs2gq padded';
           btn.style.color='var(--block-label-text-color)';
           btn.style.setProperty('--bg-color','var(--block-background-fill)');
-          btn.innerHTML=`<div class="svelte-vzs2gq small">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">
-      <path fill="currentColor" fill-rule="evenodd" d=" M0 0 H24 V24 H0 Z M4.32 4.32 H19.68 V19.68 H4.32 Z"/>
+          btn.innerHTML=`<div class=\"svelte-vzs2gq small\">
+    <svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"100%\" height=\"100%\">
+      <path fill=\"currentColor\" fill-rule=\"evenodd\" d=\" M0 0 H24 V24 H0 Z M4.32 4.32 H19.68 V19.68 H4.32 Z\"/>
     </svg>
   </div>`;
           btn.addEventListener('click',()=>{imgElem.src=img.src;modal.classList.add('visible');});
@@ -3422,7 +3424,8 @@ with block:
       window.addEventListener('load', setupOrigSize);
     }
     </script>
-    """)
+    """
+    gr.HTML(orig_size_script.replace("VIEW_IN_FULL_SCREEN_LABEL", fullscreen_label))
 
     # 一番上の行に「生成モード、セクションフレームサイズ、オールパディング、動画長」を配置
     with gr.Row():

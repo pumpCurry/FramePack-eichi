@@ -1392,5 +1392,6 @@
   "🗑️ Clear Queue": "🗑️ 清空佇列",
   "🗑️ Delete": "🗑️ 刪除",
   "🗑️ Removed file: {0}": "🗑️ 已移除檔案：{0}",
-  "🛑 Stopping queue processing...": "🛑 停止佇列處理中..."
+  "🛑 Stopping queue processing...": "🛑 停止佇列處理中...",
+  "View in full screen": "全螢幕檢視"
 }
