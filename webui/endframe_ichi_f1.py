@@ -4519,17 +4519,18 @@ with block:
       const closeBtn=document.getElementById('orig_size_close');
       closeBtn.addEventListener('click',()=>{modal.classList.remove('visible');imgElem.src='';});
       function addButtons(){
+        const selector='button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"],button[title="VIEW_IN_FULL_SCREEN_LABEL"],button[aria-label="View in full screen"],button[title="View in full screen"],button[aria-label="View fullscreen"],button[title="View fullscreen"],button[aria-label="View full screen"],button[title="View full screen"]';
         // 既存ボタンのクリーンアップ
         document.querySelectorAll('.view-modal-screen-btn').forEach(btn=>{
           const toolbar=btn.parentElement;
-          const fullBtn=toolbar?toolbar.querySelector('button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"],button[aria-label="View in full screen"]'):null;
+          const fullBtn=toolbar?toolbar.querySelector(selector):null;
           const container=toolbar?toolbar.closest('[data-testid="image"]')||toolbar.parentElement:null;
           const img=container?container.querySelector('img'):null;
           if(!toolbar||!fullBtn||!img) btn.remove();
         });
         // 新規ボタンの追加
 
-        document.querySelectorAll('button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"],button[aria-label="View in full screen"]').forEach(fullBtn=>{
+        document.querySelectorAll(selector).forEach(fullBtn=>{
           const toolbar=fullBtn.parentElement;
           if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
           const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
