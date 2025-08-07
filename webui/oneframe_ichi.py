@@ -2847,9 +2847,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # ジョブ完了まで監視
         try:
             # ストリーム待機開始
+            listener_queue = stream.output_queue.subscribe()
             while True:
                 try:
-                    flag, data = stream.output_queue.next()
+                    flag, data = listener_queue.next()
                     
                     if flag == 'file':
                         output_filename = data
@@ -3108,9 +3109,10 @@ def resync_status_handler():
     if not running or stream is None or not hasattr(stream, "output_queue"):
         return
 
+    listener_queue = stream.output_queue.subscribe()
     while True:
         try:
-            flag, data = stream.output_queue.next()
+            flag, data = listener_queue.next()
         except Exception:
             generation_active = False
             break
