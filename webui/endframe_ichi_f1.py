@@ -4514,14 +4514,16 @@ with block:
     </div>
     <script>
     function setupOrigSize(){
-      const modal=document.getElementById('orig_size_modal');
-      const imgElem=document.getElementById('orig_size_img');
-      const closeBtn=document.getElementById('orig_size_close');
+      const app=document.querySelector('gradio-app');
+      const root=app&&app.shadowRoot?app.shadowRoot:document;
+      const modal=root.getElementById('orig_size_modal');
+      const imgElem=root.getElementById('orig_size_img');
+      const closeBtn=root.getElementById('orig_size_close');
       closeBtn.addEventListener('click',()=>{modal.classList.remove('visible');imgElem.src='';});
       function addButtons(){
         const selector='button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"],button[title="VIEW_IN_FULL_SCREEN_LABEL"],button[aria-label="View in full screen"],button[title="View in full screen"],button[aria-label="View fullscreen"],button[title="View fullscreen"],button[aria-label="View full screen"],button[title="View full screen"]';
         // 既存ボタンのクリーンアップ
-        document.querySelectorAll('.view-modal-screen-btn').forEach(btn=>{
+        root.querySelectorAll('.view-modal-screen-btn').forEach(btn=>{
           const toolbar=btn.parentElement;
           const fullBtn=toolbar?toolbar.querySelector(selector):null;
           const container=toolbar?toolbar.closest('[data-testid="image"]')||toolbar.parentElement:null;
@@ -4530,7 +4532,7 @@ with block:
         });
         // 新規ボタンの追加
 
-        document.querySelectorAll(selector).forEach(fullBtn=>{
+        root.querySelectorAll(selector).forEach(fullBtn=>{
           const toolbar=fullBtn.parentElement;
           if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
           const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
@@ -4555,7 +4557,7 @@ with block:
       }
       addButtons();
       const obs=new MutationObserver(addButtons);
-      obs.observe(document.body,{childList:true,subtree:true,attributes:true});
+      obs.observe(root,{childList:true,subtree:true,attributes:true});
     }
     if(document.readyState !== 'loading'){
       setupOrigSize();
