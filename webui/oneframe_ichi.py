@@ -2358,6 +2358,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     global progress_img_idx, progress_img_total, progress_img_name
     global last_output_filename
     global generation_active
+    global last_progress_desc, last_progress_bar, last_preview_image
 
 
     # 新たな処理開始時にグローバルフラグをリセット
@@ -2881,8 +2882,11 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                                 completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(total_batches, total_batches)
                             completion_message = f"{completion_message} - {progress_summary}"
 
-                            # 完了メッセージでUIを更新
+                            # 完了メッセージでUIを更新し、再同期用に保存
                             last_output_filename = output_filename
+                            last_progress_desc = completion_message
+                            last_progress_bar = ''
+                            last_preview_image = None
                             yield (
                                 output_filename if output_filename is not None else gr.skip(),
                                 gr.update(visible=False),
