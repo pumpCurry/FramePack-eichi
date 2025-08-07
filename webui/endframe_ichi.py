@@ -3103,8 +3103,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         batch_output_filename = None
 
         # 現在のバッチの処理結果を取得
+        listener_queue = stream.output_queue.subscribe()
         while True:
-            flag, data = stream.output_queue.next()
+            flag, data = listener_queue.next()
 
             if flag == 'file':
                 batch_output_filename = data
@@ -3267,9 +3268,10 @@ def resync_status_handler():
     if not running or stream is None or not hasattr(stream, "output_queue"):
         return
 
+    listener_queue = stream.output_queue.subscribe()
     while True:
         try:
-            flag, data = stream.output_queue.next()
+            flag, data = listener_queue.next()
         except Exception:
             generation_active = False
             break
