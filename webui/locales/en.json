@@ -1392,5 +1392,6 @@
   "🗑️ Clear Queue": "🗑️ Clear Queue",
   "🗑️ Delete": "🗑️ Delete",
   "🗑️ Removed file: {0}": "🗑️ Removed file: {0}",
-  "🛑 Stopping queue processing...": "🛑 Stopping queue processing..."
+  "🛑 Stopping queue processing...": "🛑 Stopping queue processing...",
+  "View in full screen": "View in full screen"
 }

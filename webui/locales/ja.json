@@ -1398,5 +1398,6 @@
   "🗑️ Clear Queue": "🗑️ キューをクリア",
   "🗑️ Delete": "🗑️ 削除",
   "🗑️ Removed file: {0}": "🗑️ ファイル削除: {0}",
-  "🛑 Stopping queue processing...": "🛑 キュー処理停止中..."
+  "🛑 Stopping queue processing...": "🛑 キュー処理停止中...",
+  "View in full screen": "全画面表示"
 }
