@@ -3267,7 +3267,12 @@ with block:
       }
       addButtons();
       const obs=new MutationObserver(addButtons);
-      obs.observe(root,{childList:true,subtree:true,attributes:true});
+      // Observing attribute mutations triggered excessive "upload" events in
+      // Gradio's image components which caused console errors like
+      // "Too many arguments provided for the endpoint" when an image was
+      // added.  We only need to track structural changes to insert the modal
+      // preview buttons, so limit observation to childList/subtree updates.
+      obs.observe(root,{childList:true,subtree:true});
     }
     if(document.readyState !== 'loading'){
       setupOrigSize();
