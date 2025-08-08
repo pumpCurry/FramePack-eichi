@@ -130,7 +130,16 @@ def open_output_folder(folder_path):
             print(translate("フォルダを開きました: {0}").format(folder_path))
         elif os.name == 'posix':
             if _is_wsl() and shutil.which('explorer.exe'):
-                subprocess.Popen(['explorer.exe', folder_path])
+                win_path = folder_path
+                try:
+                    win_path = (
+                        subprocess.check_output(['wslpath', '-w', folder_path])
+                        .decode()
+                        .strip()
+                    )
+                except Exception:
+                    pass
+                subprocess.Popen(['explorer.exe', win_path])
                 print(translate("フォルダを開きました: {0}").format(folder_path))
             else:
                 opener = None
@@ -142,7 +151,11 @@ def open_output_folder(folder_path):
                     subprocess.Popen([opener, folder_path])
                     print(translate("フォルダを開きました: {0}").format(folder_path))
                 else:
-                    print(translate("xdg-open/open が見つからないため自動でフォルダを開けません: {0}").format(folder_path))
+                    print(
+                        translate(
+                            "xdg-open/open が見つからないため自動でフォルダを開けません: {0}"
+                        ).format(folder_path)
+                    )
         else:
             print(translate("このOSではフォルダを自動で開く機能はサポートされていません: {0}").format(folder_path))
     except Exception as e:
