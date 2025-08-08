@@ -82,6 +82,54 @@ import shutil
 
 from eichi_utils.notification_utils import play_completion_sound
 
+import queue
+import threading
+from collections import deque
+
+
+class FanoutQueue:
+    """Thread-safe fan-out queue with replayable history."""
+
+    def __init__(self, maxlen: int = 30, maxsize: int = 5):
+        self._history = deque(maxlen=maxlen)
+        self._subscribers: list[queue.Queue] = []
+        self._lock = threading.Lock()
+        self._maxsize = maxsize
+
+    def publish(self, item) -> None:
+        """Publish an item to all subscribers and store in history."""
+        with self._lock:
+            self._history.append(item)
+            for q in list(self._subscribers):
+                try:
+                    q.put_nowait(item)
+                except queue.Full:
+                    # Skip if subscriber queue is full to avoid blocking
+                    pass
+
+    def subscribe(self) -> queue.Queue:
+        """Subscribe to the queue and receive the backlog immediately."""
+        q: queue.Queue = queue.Queue(maxsize=self._maxsize)
+        with self._lock:
+            for item in list(self._history):
+                try:
+                    q.put_nowait(item)
+                except queue.Full:
+                    break
+            self._subscribers.append(q)
+        return q
+
+    def clear(self) -> None:
+        """Clear history and all subscriber queues."""
+        with self._lock:
+            self._history.clear()
+            for q in self._subscribers:
+                while not q.empty():
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        break
+
 # Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
 if sys.platform in ('win32', 'cygwin'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -108,6 +156,9 @@ queue_enabled = False  # キュー機能の有効/無効フラグ
 queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
 image_queue_files = []  # イメージキューのファイルリスト
+
+# 進捗を複数クライアントへ配信するためのキュー
+progress_bus = FanoutQueue()
 
 # 再同期対応 - 最終進捗状態を保存
 last_progress_desc = ""
@@ -811,6 +862,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     # テキストエンコード結果をキャッシュするグローバル変数
     global cached_prompt, cached_n_prompt, cached_llama_vec, cached_llama_vec_n, cached_clip_l_pooler, cached_clip_l_pooler_n
     global cached_llama_attention_mask, cached_llama_attention_mask_n
+    global progress_bus
 
     # フラグ類は確実にbool化しておく
     reference_long_edge = _to_bool(reference_long_edge)
@@ -877,12 +929,11 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             desc = f"{progress_html}{time_info}"
 
         bar_html = make_progress_bar_html(percent, hint)
-        global last_progress_desc, last_progress_bar, last_preview_image
+        global last_progress_desc, last_progress_bar, last_preview_image, progress_bus
         last_progress_desc = desc
         last_progress_bar = bar_html
         last_preview_image = preview
-
-        stream.output_queue.push(('progress', (preview, desc, bar_html)))
+        progress_bus.publish(('progress', (preview, desc, bar_html)))
 
     if save_before_input_images:
         for p, suffix in [
@@ -2153,7 +2204,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 print(translate("1フレーム画像を保存しました: {0}").format(output_filename))
                 
                 # MP4保存はスキップして、画像ファイルパスを返す
-                stream.output_queue.push(('file', output_filename))
+                progress_bus.publish(('file', output_filename))
                 
             except Exception as e:
                 print(translate("1フレームの画像保存中にエラーが発生しました: {0}").format(e))
@@ -2256,7 +2307,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     
     # worker関数内では効果音を鳴らさない（バッチ処理全体の完了時のみ鳴らす）
     
-    stream.output_queue.push(('end', None))
+    progress_bus.publish(('end', None))
     return
 
 def handle_open_folder_btn(folder_name):
@@ -2378,6 +2429,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     last_preview_image = None
     last_output_filename = None
     current_seed = None
+
+    # 進捗配信用のキューをリセット
+    global progress_bus
+    progress_bus = FanoutQueue()
 
     # ストリームを新規作成してキューをクリア
     stream = AsyncStream()
@@ -2843,10 +2898,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # ジョブ完了まで監視
         try:
             # ストリーム待機開始
-            listener_queue = stream.output_queue.subscribe()
+            listener_queue = progress_bus.subscribe()
             while True:
                 try:
-                    flag, data = listener_queue.next()
+                    flag, data = listener_queue.get()
                     
                     if flag == 'file':
                         output_filename = data
@@ -3099,13 +3154,14 @@ def resync_status_handler():
         gr.update(value=current_seed) if current_seed is not None else gr.skip(),
     )
 
-    if not running or stream is None or not hasattr(stream, "output_queue"):
+    global progress_bus
+    if not running or progress_bus is None:
         return
 
-    listener_queue = stream.output_queue.subscribe()
+    listener_queue = progress_bus.subscribe()
     while True:
         try:
-            flag, data = listener_queue.next()
+            flag, data = listener_queue.get()
         except Exception:
             generation_active = False
             break
@@ -3146,7 +3202,7 @@ def resync_status_handler():
                 gr.update(value=current_seed) if current_seed is not None else gr.skip(),
             )
             try:
-                stream.output_queue.clear()
+                progress_bus.clear()
             except Exception:
                 pass
             return
@@ -3164,7 +3220,7 @@ def resync_status_handler():
         gr.update(value=current_seed) if current_seed is not None else gr.skip(),
     )
     try:
-        stream.output_queue.clear()
+        progress_bus.clear()
     except Exception:
         pass
 
@@ -4989,7 +5045,7 @@ with block:
         ]
     )
     
-    start_button.click(fn=process, inputs=ips, outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, stop_step_button, seed])
+    start_button.click(fn=process, inputs=ips, outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, stop_step_button, seed], stream=True)
     end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button], queue=False)
     stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button, end_button], queue=False)
     stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button, end_button], queue=False)
@@ -4997,7 +5053,8 @@ with block:
         fn=resync_status_handler,
         inputs=[],
         outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, stop_step_button, seed],
-        queue=False
+        queue=False,
+        stream=True
     )
     
     gr.HTML(f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")}</div>')
