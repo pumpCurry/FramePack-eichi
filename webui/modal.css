@@ -1,0 +1,18 @@
+#modal_dlg {
+  border: none;
+  padding: 0;
+  background: none;
+}
+#modal_dlg::backdrop {
+  background: rgba(0,0,0,0.8);
+}
+#modal_dlg img {
+  max-width: 90vw;
+  max-height: 90vh;
+}
+.icon-button-wrapper .view-modal-btn,
+.gr-image__tool .view-modal-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}

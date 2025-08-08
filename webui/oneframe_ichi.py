@@ -3169,6 +3169,8 @@ def resync_status_handler():
         pass
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
+with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
+    css += f.read()
 
 # アプリケーション起動時に保存された設定を読み込む
 saved_app_settings = load_app_settings_oichi()
@@ -3198,89 +3200,11 @@ print("\n------------------------------------------------------------")
 print(f"🆗 {translate('Startup_sequence_complete')}\n")
 # △ 起動シーケンスここまで △
 
-block = gr.Blocks(css=css).queue()
+block = gr.Blocks(css=css, js=os.path.join(os.path.dirname(__file__), "modal.js")).queue()
 with block:
     # eichiと同じ半透明度スタイルを使用
     gr.HTML('<h1>FramePack<span class="title-suffix">-oichi</span></h1>')
-
-    # 原寸大表示用モーダルとボタン追加スクリプト
-    fullscreen_label = translate("View in full screen")
-    orig_size_script = """
-    <div id='orig_size_modal'>
-      <button id='orig_size_close'>×</button>
-      <img id='orig_size_img'>
-    </div>
-    <script>
-    const scriptRoot=document.currentScript?.getRootNode?.()||document;
-    function setupOrigSize(){
-      const root=scriptRoot;
-      const modal=root.getElementById('orig_size_modal');
-      const imgElem=root.getElementById('orig_size_img');
-      const closeBtn=root.getElementById('orig_size_close');
-      if(!modal||!imgElem||!closeBtn) return;
-      closeBtn.addEventListener('click',()=>{modal.classList.remove('visible');imgElem.src='';});
-      function addButtons(){
-        const selector='button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"],button[title="VIEW_IN_FULL_SCREEN_LABEL"],button[aria-label="View in full screen"],button[title="View in full screen"],button[aria-label="View fullscreen"],button[title="View fullscreen"],button[aria-label="View full screen"],button[title="View full screen"]';
-        // 既存ボタンのクリーンアップ
-        root.querySelectorAll('.view-modal-screen-btn').forEach(btn=>{
-          const toolbar=btn.parentElement;
-          const fullBtn=toolbar?toolbar.querySelector(selector):null;
-          const container=toolbar?toolbar.closest('[data-testid="image"]')||toolbar.parentElement:null;
-          const img=container?container.querySelector('img'):null;
-          const fileInput=container?container.querySelector('input[type="file"]'):null;
-          // Remove buttons that have lost their associated image or belong to
-          // upload components (which contain a file input element)
-          if(!toolbar||!fullBtn||!img||fileInput) btn.remove();
-        });
-        // 新規ボタンの追加
-        root.querySelectorAll(selector).forEach(fullBtn=>{
-          const toolbar=fullBtn.parentElement;
-          if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
-          const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
-          const img=container.querySelector('img');
-          const fileInput=container.querySelector('input[type="file"]');
-          // Skip input image components to avoid interfering with Gradio's
-          // upload widgets, which caused console errors when mutated.
-          if(!img||!img.src||fileInput) return;
-
-          const btn=document.createElement('button');
-          btn.className=fullBtn.className;
-          btn.classList.add('view-modal-screen-btn');
-          btn.setAttribute('aria-label','View modal screen');
-          btn.setAttribute('aria-haspopup','false');
-          btn.title='View modal screen';
-          btn.style.color='var(--block-label-text-color)';
-          btn.style.setProperty('--bg-color','var(--block-background-fill)');
-          const inner=fullBtn.querySelector('div');
-          const innerClass=inner?inner.className:'';
-          btn.innerHTML=`<div class="${innerClass}">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">
-      <path fill="currentColor" fill-rule="evenodd" d="M0 0H24V24H0Z M4.32 4.32H19.68V19.68H4.32Z"/>
-    </svg>
-  </div>`;
-          btn.addEventListener('click',()=>{imgElem.src=img.src;modal.classList.add('visible');});
-          toolbar.insertBefore(btn, fullBtn);
-        });
-      }
-      addButtons();
-      const obs=new MutationObserver(addButtons);
-      // Observing attribute mutations triggered excessive upload requests in
-      // Gradio's image components which surfaced console errors such as
-      // "Too many arguments provided for the endpoint" and "Method not
-      // implemented" when images were added or replaced. Track only
-      // structural changes so the modal buttons can be injected without
-      // disturbing the upload widget.
-      const mutationOptions={childList:true,subtree:true};
-      obs.observe(root, mutationOptions);
-    }
-    if(document.readyState !== 'loading'){
-      setupOrigSize();
-    } else {
-      window.addEventListener('load', setupOrigSize);
-    }
-    </script>
-    """
-    gr.HTML(orig_size_script.replace("VIEW_IN_FULL_SCREEN_LABEL", fullscreen_label))
+    gr.HTML('<dialog id="modal_dlg"><img /></dialog>')
     
     # 初期化時にtransformerの状態確認は行わない（必要時に遅延ロード）
     # ここではロードをスキップして、ワーカー関数内で必要になったときにだけロードする
@@ -3297,7 +3221,14 @@ with block:
             # モードについての説明を画像枠の上に表示
             gr.Markdown(translate("**「1フレーム推論」モードでは、1枚の新しい未来の画像を生成します。**"))
             
-            input_image = gr.Image(sources=['upload', 'clipboard'], type="filepath", label=translate("Image"), height=320)
+            input_image = gr.Image(
+                sources=['upload', 'clipboard'],
+                type="filepath",
+                label=translate("Image"),
+                height=320,
+                elem_id="input_image",
+                elem_classes="modal-image",
+            )
             
             # 解像度設定（画像の直下に）
             resolution = gr.Dropdown(
@@ -3566,7 +3497,9 @@ with block:
                 type="filepath",
                 interactive=True,
                 visible=use_reference_image_default,  # 保存設定に基づき初期表示
-                height=320
+                height=320,
+                elem_id="reference_image",
+                elem_classes="modal-image",
             )
 
             # 参照画像キュー設定
@@ -4279,8 +4212,19 @@ with block:
                 
         with gr.Column(scale=1):
             # 右カラム - 生成結果と設定
-            result_image = gr.Image(label=translate("生成結果"), height=512)
-            preview_image = gr.Image(label=translate("処理中のプレビュー"), height=200, visible=False)
+            result_image = gr.Image(
+                label=translate("生成結果"),
+                height=512,
+                elem_id="result_image",
+                elem_classes="modal-image",
+            )
+            preview_image = gr.Image(
+                label=translate("処理中のプレビュー"),
+                height=200,
+                visible=False,
+                elem_id="preview_image",
+                elem_classes="modal-image",
+            )
             progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
             progress_bar = gr.HTML('', elem_classes='no-generating-animation')
             
