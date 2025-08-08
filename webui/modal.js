@@ -23,7 +23,11 @@
         btn.className = fullBtn.className + " view-modal-btn";
         btn.setAttribute("aria-label", "View modal screen");
         btn.title = "View modal screen";
-        btn.innerHTML = `<div class="${innerClass}">\n  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">\n    <path fill="currentColor" d="M4 4h16v16H4z"/>\n  </svg>\n</div>`;
+        btn.innerHTML =
+          '<div class="' +
+          innerClass +
+          '"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M4 4h16v16H4z"/></svg></div>';
+
         btn.onclick = () => {
           dialogImg.src = img.src;
           dialog.showModal();
