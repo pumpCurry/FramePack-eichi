@@ -130,6 +130,29 @@ class FanoutQueue:
                     except queue.Empty:
                         break
 
+    def close(self) -> None:
+        """Close all subscriber queues and remove them."""
+        with self._lock:
+            for q in list(self._subscribers):
+                try:
+                    q.put_nowait((None, None))
+                except queue.Full:
+                    pass
+            self._subscribers.clear()
+
+
+class JobContext:
+    """Holds job-specific state such as the fan-out queue."""
+
+    def __init__(self):
+        self.bus = FanoutQueue()
+        self.done = threading.Event()
+
+
+# ----------------- globals -----------------
+ctx_lock = threading.Lock()
+cur_job = None  # type: JobContext | None
+
 # Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
 if sys.platform in ('win32', 'cygwin'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -158,7 +181,7 @@ prompt_queue_file_path = None  # プロンプトキューファイルのパス
 image_queue_files = []  # イメージキューのファイルリスト
 
 # 進捗を複数クライアントへ配信するためのキュー
-progress_bus = FanoutQueue()
+progress_bus = None  # type: FanoutQueue | None
 
 # 再同期対応 - 最終進捗状態を保存
 last_progress_desc = ""
@@ -2308,6 +2331,13 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     # worker関数内では効果音を鳴らさない（バッチ処理全体の完了時のみ鳴らす）
     
     progress_bus.publish(('end', None))
+    global cur_job
+    if cur_job is not None:
+        cur_job.done.set()
+        try:
+            cur_job.bus.close()
+        except Exception:
+            pass
     return
 
 def handle_open_folder_btn(folder_name):
@@ -2406,6 +2436,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     global last_output_filename
     global generation_active
     global last_progress_desc, last_progress_bar, last_preview_image
+    global progress_bus, cur_job
 
 
     # 新たな処理開始時にグローバルフラグをリセット
@@ -2431,8 +2462,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     current_seed = None
 
     # 進捗配信用のキューをリセット
-    global progress_bus
-    progress_bus = FanoutQueue()
+    global progress_bus, cur_job
+    with ctx_lock:
+        cur_job = JobContext()
+        progress_bus = cur_job.bus
 
     # ストリームを新規作成してキューをクリア
     stream = AsyncStream()
@@ -2898,7 +2931,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # ジョブ完了まで監視
         try:
             # ストリーム待機開始
-            listener_queue = progress_bus.subscribe()
+            listener_queue = cur_job.bus.subscribe()
             while True:
                 try:
                     flag, data = listener_queue.get()
@@ -3140,6 +3173,7 @@ def resync_status_handler():
     """ページ再読み込み後に進捗のストリーミングを再開する。"""
     global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
     global current_seed, generation_active, stream
+    global cur_job
 
     running = is_generation_running()
     yield (
@@ -3154,11 +3188,10 @@ def resync_status_handler():
         gr.update(value=current_seed) if current_seed is not None else gr.skip(),
     )
 
-    global progress_bus
-    if not running or progress_bus is None:
+    if not running or cur_job is None:
         return
 
-    listener_queue = progress_bus.subscribe()
+    listener_queue = cur_job.bus.subscribe()
     while True:
         try:
             flag, data = listener_queue.get()
@@ -3202,7 +3235,8 @@ def resync_status_handler():
                 gr.update(value=current_seed) if current_seed is not None else gr.skip(),
             )
             try:
-                progress_bus.clear()
+                if cur_job is not None:
+                    cur_job.bus.clear()
             except Exception:
                 pass
             return
@@ -3220,7 +3254,8 @@ def resync_status_handler():
         gr.update(value=current_seed) if current_seed is not None else gr.skip(),
     )
     try:
-        progress_bus.clear()
+        if cur_job is not None:
+            cur_job.bus.clear()
     except Exception:
         pass
 
