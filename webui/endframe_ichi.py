@@ -3402,15 +3402,18 @@ with block:
           if(!img||!img.src) return;
 
           const btn=document.createElement('button');
+          btn.className=fullBtn.className;
+          btn.classList.add('view-modal-screen-btn');
           btn.setAttribute('aria-label','View modal screen');
           btn.setAttribute('aria-haspopup','false');
           btn.title='View modal screen';
-          btn.className='view-modal-screen-btn svelte-vzs2gq padded';
           btn.style.color='var(--block-label-text-color)';
           btn.style.setProperty('--bg-color','var(--block-background-fill)');
-          btn.innerHTML=`<div class=\"svelte-vzs2gq small\">
-    <svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"100%\" height=\"100%\">
-      <path fill=\"currentColor\" fill-rule=\"evenodd\" d=\" M0 0 H24 V24 H0 Z M4.32 4.32 H19.68 V19.68 H4.32 Z\"/>
+          const inner=fullBtn.querySelector('div');
+          const innerClass=inner?inner.className:'';
+          btn.innerHTML=`<div class="${innerClass}">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">
+      <path fill="currentColor" fill-rule="evenodd" d="M0 0H24V24H0Z M4.32 4.32H19.68V19.68H4.32Z"/>
     </svg>
   </div>`;
           btn.addEventListener('click',()=>{imgElem.src=img.src;modal.classList.add('visible');});
