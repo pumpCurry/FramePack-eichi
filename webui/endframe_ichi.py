@@ -3391,7 +3391,10 @@ with block:
           const fullBtn=toolbar?toolbar.querySelector(selector):null;
           const container=toolbar?toolbar.closest('[data-testid="image"]')||toolbar.parentElement:null;
           const img=container?container.querySelector('img'):null;
-          if(!toolbar||!fullBtn||!img) btn.remove();
+          const fileInput=container?container.querySelector('input[type="file"]'):null;
+          // Drop buttons if their image is missing or if they belong to an
+          // upload widget (identified by the presence of a file input)
+          if(!toolbar||!fullBtn||!img||fileInput) btn.remove();
         });
         // 新規ボタンの追加
 
@@ -3400,7 +3403,10 @@ with block:
           if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
           const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
           const img=container.querySelector('img');
-          if(!img||!img.src) return;
+          const fileInput=container.querySelector('input[type="file"]');
+          // Skip adding modal buttons to input images to avoid triggering
+          // errors in Gradio's upload handling when the DOM is mutated.
+          if(!img||!img.src||fileInput) return;
 
           const btn=document.createElement('button');
           btn.className=fullBtn.className;
