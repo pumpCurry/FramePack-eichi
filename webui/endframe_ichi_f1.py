@@ -4529,7 +4529,9 @@ with block:
           const fullBtn=toolbar?toolbar.querySelector(selector):null;
           const container=toolbar?toolbar.closest('[data-testid="image"]')||toolbar.parentElement:null;
           const img=container?container.querySelector('img'):null;
-          if(!toolbar||!fullBtn||!img) btn.remove();
+          const fileInput=container?container.querySelector('input[type="file"]'):null;
+          // Remove orphaned buttons or those inside upload components
+          if(!toolbar||!fullBtn||!img||fileInput) btn.remove();
         });
         // 新規ボタンの追加
 
@@ -4538,7 +4540,10 @@ with block:
           if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
           const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
           const img=container.querySelector('img');
-          if(!img||!img.src) return;
+          const fileInput=container.querySelector('input[type="file"]');
+          // Input image widgets include a file input element; skip them to
+          // avoid interfering with Gradio's upload mechanism.
+          if(!img||!img.src||fileInput) return;
 
           const btn=document.createElement('button');
           btn.className=fullBtn.className;
