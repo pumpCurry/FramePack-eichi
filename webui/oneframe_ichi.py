@@ -2990,6 +2990,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         batch_stopped = True
                         # 処理ループ内での中断検出
                         print(translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches))
+                        # 直前に保存した画像を結果に反映
+                        if output_filename is not None:
+                            global last_output_filename
+                            last_output_filename = output_filename
                         # endframe_ichiと同様のシンプルな実装に戻す
                         progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                         yield (
@@ -3096,7 +3100,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
 def end_process():
     """生成終了ボタンが押された時の処理"""
-    global stream
+    global stream, cur_job
     global batch_stopped, user_abort, user_abort_notified
 
     # 重複停止通知を防止するためのチェック
@@ -3112,6 +3116,9 @@ def end_process():
         # 現在実行中のバッチを停止
         if stream is not None and stream.input_queue.top() != 'end':
             stream.input_queue.push('end')
+        # バックグラウンドジョブに停止を通知
+        if cur_job is not None:
+            cur_job.done.set()
     generation_active = False
 
     # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
@@ -3123,7 +3130,7 @@ def end_process():
 
 def end_after_current_process():
     """現在の生成完了後に停止する処理"""
-    global batch_stopped, stop_after_current, stream
+    global batch_stopped, stop_after_current, stream, cur_job
 
     if stop_after_current:
         # キャンセル処理
@@ -3137,8 +3144,11 @@ def end_after_current_process():
     else:
         batch_stopped = True
         stop_after_current = True
+        # ストリームとジョブに停止指示を送る
         if stream is not None and stream.input_queue.top() != 'end':
             stream.input_queue.push('end')
+        if cur_job is not None:
+            cur_job.done.set()
         print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
         return (
             gr.update(value=translate("打ち切り処理中..."), interactive=True),
@@ -3147,7 +3157,7 @@ def end_after_current_process():
 
 def end_after_step_process():
     """現在のステップ完了後に停止する処理"""
-    global batch_stopped, stop_after_current, stop_after_step, stream
+    global batch_stopped, stop_after_current, stop_after_step, stream, cur_job
 
     if stop_after_step:
         # キャンセル処理
@@ -3163,6 +3173,11 @@ def end_after_step_process():
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
+        # ストリームとジョブに停止指示を送る
+        if stream is not None and stream.input_queue.top() != 'end':
+            stream.input_queue.push('end')
+        if cur_job is not None:
+            cur_job.done.set()
         print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
         return (
             gr.update(value=translate("停止処理中..."), interactive=True),
