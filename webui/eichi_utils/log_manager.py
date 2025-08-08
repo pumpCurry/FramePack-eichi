@@ -270,7 +270,10 @@ def open_log_folder():
     
     try:
         if os.name == 'nt':  # Windows
-            subprocess.Popen(['explorer', folder_path])
+            try:
+                os.startfile(folder_path)
+            except Exception:
+                subprocess.Popen(['explorer', folder_path])
             print(translate("ログフォルダを開きました: {0}").format(folder_path))
         elif os.name == 'posix':
             opener = None
