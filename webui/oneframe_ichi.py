@@ -2992,7 +2992,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         print(translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches))
                         # 直前に保存した画像を結果に反映
                         if output_filename is not None:
-                            global last_output_filename
                             last_output_filename = output_filename
                         # endframe_ichiと同様のシンプルな実装に戻す
                         progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
