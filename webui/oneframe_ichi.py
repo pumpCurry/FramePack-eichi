@@ -3695,7 +3695,8 @@ with block:
                             label=translate("入力画像マスク（オプション）"),
                             type="filepath",
                             interactive=True,
-                            height=320
+                            height=320,
+                            elem_classes="modal-image",
                         )
                         input_mask_info = gr.Markdown(
                             translate("白い部分を保持、黒い部分を変更（グレースケール画像）")
@@ -3708,7 +3709,8 @@ with block:
                             label=translate("参照画像マスク（オプション）"),
                             type="filepath",
                             interactive=True,
-                            height=320
+                            height=320,
+                            elem_classes="modal-image",
                         )
                         reference_mask_info = gr.Markdown(
                             translate("白い部分を適用、黒い部分を無視（グレースケール画像）")
