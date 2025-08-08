@@ -3373,12 +3373,13 @@ with block:
       <img id='orig_size_img'>
     </div>
     <script>
+    const scriptRoot=document.currentScript?.getRootNode?.()||document;
     function setupOrigSize(){
-      const app=document.querySelector('gradio-app');
-      const root=app&&app.shadowRoot?app.shadowRoot:document;
+      const root=scriptRoot;
       const modal=root.getElementById('orig_size_modal');
       const imgElem=root.getElementById('orig_size_img');
       const closeBtn=root.getElementById('orig_size_close');
+      if(!modal||!imgElem||!closeBtn) return;
       closeBtn.addEventListener('click',()=>{modal.classList.remove('visible');imgElem.src='';});
       function addButtons(){
 
