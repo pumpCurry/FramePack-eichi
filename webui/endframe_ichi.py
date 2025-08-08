@@ -3359,7 +3359,6 @@ if saved_app_settings:
 modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
 with open(modal_js_path, encoding="utf8") as f:
     modal_js = f.read()
-
 block = gr.Blocks(css=css, js=modal_js).queue()
 
 with block:

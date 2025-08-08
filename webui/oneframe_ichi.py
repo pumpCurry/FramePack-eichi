@@ -3228,10 +3228,9 @@ css = get_app_css()  # eichi_utilsのスタイルを使用
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
     css += f.read()
 modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
+# JSを直接読み込み、グラディオにコードとして渡す
 with open(modal_js_path, encoding="utf8") as f:
     modal_js = f.read()
-
-
 # アプリケーション起動時に保存された設定を読み込む
 saved_app_settings = load_app_settings_oichi()
 
