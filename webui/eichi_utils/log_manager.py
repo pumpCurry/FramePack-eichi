@@ -8,6 +8,7 @@ import sys
 import datetime
 import subprocess
 import shutil
+import platform
 from locales.i18n_extended import translate
 
 # グローバル変数
@@ -256,18 +257,23 @@ def set_log_folder(folder_path):
     print(f"[DEBUG] ログフォルダを設定: {os.path.abspath(_log_folder)}")
     return True
 
+def _is_wsl() -> bool:
+    """WSL 環境で実行されているかを判定"""
+    return "microsoft" in platform.release().lower() or "WSL_DISTRO_NAME" in os.environ
+
+
 def open_log_folder():
     """ログフォルダをOSに依存せず開く"""
     # ブール値が入り込むと os.path.exists で例外となるため正規化
     folder_path = get_absolute_path(_log_folder)
-    
+
     if not os.path.exists(folder_path):
         try:
             os.makedirs(folder_path, exist_ok=True)
         except Exception as e:
             print(translate("ログフォルダの作成に失敗しました: {0} - {1}").format(folder_path, str(e)))
-            return False
-    
+            return
+
     try:
         if os.name == 'nt':  # Windows
             try:
@@ -276,22 +282,24 @@ def open_log_folder():
                 subprocess.Popen(['explorer', folder_path])
             print(translate("ログフォルダを開きました: {0}").format(folder_path))
         elif os.name == 'posix':
-            opener = None
-            if sys.platform == 'darwin' and shutil.which('open'):
-                opener = 'open'
-            else:
-                opener = shutil.which('xdg-open') or shutil.which('open')
-            if opener:
-                subprocess.Popen([opener, folder_path])
+            if _is_wsl() and shutil.which('explorer.exe'):
+                subprocess.Popen(['explorer.exe', folder_path])
                 print(translate("ログフォルダを開きました: {0}").format(folder_path))
             else:
-                print(translate("xdg-open/open が見つからないため自動でフォルダを開けません: {0}").format(folder_path))
+                opener = None
+                if sys.platform == 'darwin' and shutil.which('open'):
+                    opener = 'open'
+                else:
+                    opener = shutil.which('xdg-open') or shutil.which('open')
+                if opener:
+                    subprocess.Popen([opener, folder_path])
+                    print(translate("ログフォルダを開きました: {0}").format(folder_path))
+                else:
+                    print(translate("xdg-open/open が見つからないため自動でフォルダを開けません: {0}").format(folder_path))
         else:
             print(translate("このOSではフォルダを自動で開く機能はサポートされていません: {0}").format(folder_path))
-        return True
     except Exception as e:
         print(translate("ログフォルダを開く際にエラーが発生しました: {0}").format(e))
-        return False
 
 def get_default_log_settings():
     """

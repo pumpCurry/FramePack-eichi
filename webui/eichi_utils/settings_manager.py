@@ -8,6 +8,7 @@ import json
 import subprocess
 import sys
 import shutil
+import platform
 from locales.i18n_extended import translate
 
 def get_settings_file_path():
@@ -105,6 +106,11 @@ def save_settings(settings):
         print(translate("設定保存エラー: {0}").format(e))
         return False
 
+def _is_wsl() -> bool:
+    """WSL 環境で実行されているかを判定"""
+    return "microsoft" in platform.release().lower() or "WSL_DISTRO_NAME" in os.environ
+
+
 def open_output_folder(folder_path):
     """指定されたフォルダをOSに依存せず開く"""
     # ブール値やNoneが渡されてもエラーにならないよう文字列に変換
@@ -123,22 +129,24 @@ def open_output_folder(folder_path):
                 subprocess.Popen(['explorer', folder_path])
             print(translate("フォルダを開きました: {0}").format(folder_path))
         elif os.name == 'posix':
-            opener = None
-            if sys.platform == 'darwin' and shutil.which('open'):
-                opener = 'open'
-            else:
-                opener = shutil.which('xdg-open') or shutil.which('open')
-            if opener:
-                subprocess.Popen([opener, folder_path])
+            if _is_wsl() and shutil.which('explorer.exe'):
+                subprocess.Popen(['explorer.exe', folder_path])
                 print(translate("フォルダを開きました: {0}").format(folder_path))
             else:
-                print(translate("xdg-open/open が見つからないため自動でフォルダを開けません: {0}").format(folder_path))
+                opener = None
+                if sys.platform == 'darwin' and shutil.which('open'):
+                    opener = 'open'
+                else:
+                    opener = shutil.which('xdg-open') or shutil.which('open')
+                if opener:
+                    subprocess.Popen([opener, folder_path])
+                    print(translate("フォルダを開きました: {0}").format(folder_path))
+                else:
+                    print(translate("xdg-open/open が見つからないため自動でフォルダを開けません: {0}").format(folder_path))
         else:
             print(translate("このOSではフォルダを自動で開く機能はサポートされていません: {0}").format(folder_path))
-        return True
     except Exception as e:
         print(translate("フォルダを開く際にエラーが発生しました: {0}").format(e))
-        return False
 
 def get_localized_default_value(key, current_lang="ja"):
     """言語に応じたデフォルト値を返す
