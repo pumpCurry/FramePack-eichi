@@ -4498,7 +4498,9 @@ css = get_app_css()
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
     css += f.read()
 modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
-block = gr.Blocks(css=css, js=modal_js_path).queue()
+with open(modal_js_path, encoding="utf8") as f:
+    modal_js = f.read()
+block = gr.Blocks(css=css, js=modal_js).queue()
 
 with block:
     gr.HTML('<h1>FramePack<span class="title-suffix">-<s>eichi</s> F1</span></h1>')
