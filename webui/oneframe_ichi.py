@@ -3195,11 +3195,6 @@ startup_prompt = spinner_while_running(
     translate("Load_startup_default_prompt"),
     get_default_startup_prompt,
 )
-print(
-    translate("起動時デフォルトプロンプトを読み込み: '{0}'... (長さ: {1}文字)").format(
-        startup_prompt[:30], len(startup_prompt)
-    )
-)
 
 # 読み込んだ設定をログに出力
 if saved_app_settings:

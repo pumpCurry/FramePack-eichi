@@ -37,16 +37,16 @@ def spinner_while_running(message, function, *args, **kwargs):
 
     def spinner():
         with lock:
-            original_stdout.write(f"{next(spinner_cycle)}  {message}\n")
+            original_stdout.write(f"{next(spinner_cycle)}  {message}")
             original_stdout.flush()
         while not done.is_set():
             time.sleep(0.1)
             with lock:
-                original_stdout.write("\x1b[1A\r\x1b[2K")
-                original_stdout.write(f"{next(spinner_cycle)}  {message}\n")
+                original_stdout.write("\r\x1b[K")
+                original_stdout.write(f"{next(spinner_cycle)}  {message}")
                 original_stdout.flush()
         with lock:
-            original_stdout.write("\x1b[1A\r\x1b[2K")
+            original_stdout.write("\r\x1b[K")
             original_stdout.write(f"✅ {message}\n")
             original_stdout.flush()
 
