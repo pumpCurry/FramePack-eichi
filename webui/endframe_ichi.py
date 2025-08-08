@@ -3347,6 +3347,8 @@ quick_prompts = [
 quick_prompts = [[x] for x in quick_prompts]
 
 css = get_app_css()
+with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
+    css += f.read()
 
 # アプリケーション起動時に保存された設定を読み込む
 from eichi_utils.settings_manager import load_app_settings
@@ -3354,90 +3356,12 @@ saved_app_settings = load_app_settings()
 if saved_app_settings:
     lora_state_cache.set_cache_enabled(saved_app_settings.get("lora_cache", False))
 
-block = gr.Blocks(css=css).queue()
+modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
+
+block = gr.Blocks(css=css, js=modal_js_path).queue()
 with block:
     gr.HTML('<h1>FramePack<span class="title-suffix">-eichi</span></h1>')
-
-    # 原寸大表示用モーダルとボタン追加スクリプト
-    fullscreen_label = translate("View in full screen")
-    orig_size_script = """
-    <div id='orig_size_modal'>
-      <button id='orig_size_close'>×</button>
-      <img id='orig_size_img'>
-    </div>
-    <script>
-    const scriptRoot=document.currentScript?.getRootNode?.()||document;
-    function setupOrigSize(){
-      const root=scriptRoot;
-      const modal=root.getElementById('orig_size_modal');
-      const imgElem=root.getElementById('orig_size_img');
-      const closeBtn=root.getElementById('orig_size_close');
-      if(!modal||!imgElem||!closeBtn) return;
-      closeBtn.addEventListener('click',()=>{modal.classList.remove('visible');imgElem.src='';});
-      function addButtons(){
-
-        const selector='button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"],button[title="VIEW_IN_FULL_SCREEN_LABEL"],button[aria-label="View in full screen"],button[title="View in full screen"],button[aria-label="View fullscreen"],button[title="View fullscreen"],button[aria-label="View full screen"],button[title="View full screen"]';
-
-        // 既存ボタンのクリーンアップ
-        root.querySelectorAll('.view-modal-screen-btn').forEach(btn=>{
-          const toolbar=btn.parentElement;
-          const fullBtn=toolbar?toolbar.querySelector(selector):null;
-          const container=toolbar?toolbar.closest('[data-testid="image"]')||toolbar.parentElement:null;
-          const img=container?container.querySelector('img'):null;
-          const fileInput=container?container.querySelector('input[type="file"]'):null;
-          // Drop buttons if their image is missing or if they belong to an
-          // upload widget (identified by the presence of a file input)
-          if(!toolbar||!fullBtn||!img||fileInput) btn.remove();
-        });
-        // 新規ボタンの追加
-
-        root.querySelectorAll(selector).forEach(fullBtn=>{
-          const toolbar=fullBtn.parentElement;
-          if(!toolbar||toolbar.querySelector('.view-modal-screen-btn')) return;
-          const container=toolbar.closest('[data-testid="image"]')||toolbar.parentElement;
-          const img=container.querySelector('img');
-          const fileInput=container.querySelector('input[type="file"]');
-          // Skip adding modal buttons to input images to avoid triggering
-          // errors in Gradio's upload handling when the DOM is mutated.
-          if(!img||!img.src||fileInput) return;
-
-          const btn=document.createElement('button');
-          btn.className=fullBtn.className;
-          btn.classList.add('view-modal-screen-btn');
-          btn.setAttribute('aria-label','View modal screen');
-          btn.setAttribute('aria-haspopup','false');
-          btn.title='View modal screen';
-          btn.style.color='var(--block-label-text-color)';
-          btn.style.setProperty('--bg-color','var(--block-background-fill)');
-          const inner=fullBtn.querySelector('div');
-          const innerClass=inner?inner.className:'';
-          btn.innerHTML=`<div class="${innerClass}">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">
-      <path fill="currentColor" fill-rule="evenodd" d="M0 0H24V24H0Z M4.32 4.32H19.68V19.68H4.32Z"/>
-    </svg>
-  </div>`;
-          btn.addEventListener('click',()=>{imgElem.src=img.src;modal.classList.add('visible');});
-          toolbar.insertBefore(btn, fullBtn);
-        });
-      }
-      addButtons();
-      const obs=new MutationObserver(addButtons);
-      // Watching attribute changes on Gradio's image upload components
-      // causes extra network traffic which surfaces "Method not
-      // implemented" and "Too many arguments" errors in the console. We
-      // only need to react to structural updates, so observe child list
-      // mutations and ignore attributes.
-      const mutationOptions={childList:true,subtree:true};
-      obs.observe(root, mutationOptions);
-    }
-    if(document.readyState !== 'loading'){
-      setupOrigSize();
-    } else {
-      window.addEventListener('load', setupOrigSize);
-    }
-    </script>
-    """
-    gr.HTML(orig_size_script.replace("VIEW_IN_FULL_SCREEN_LABEL", fullscreen_label))
+    gr.HTML('<dialog id="modal_dlg"><img /></dialog>')
 
     # 一番上の行に「生成モード、セクションフレームサイズ、オールパディング、動画長」を配置
     with gr.Row():
@@ -3496,7 +3420,14 @@ with block:
         with gr.Column():
             # Final Frameの上に説明を追加
             gr.Markdown(translate("**Finalは最後の画像、Imageは最初の画像(最終キーフレーム画像といずれか必須)となります。**"))
-            end_frame = gr.Image(sources=['upload', 'clipboard'], type="filepath", label=translate("Final Frame (Optional)"), height=320)
+            end_frame = gr.Image(
+                sources=['upload', 'clipboard'],
+                type="filepath",
+                label=translate("Final Frame (Optional)"),
+                height=320,
+                elem_id="end_frame_image",
+                elem_classes="modal-image",
+            )
 
             # テンソルデータ設定をグループ化して灰色のタイトルバーに変更
             with gr.Group():
@@ -3986,7 +3917,13 @@ with block:
 
                             # 右側にキーフレーム画像のみ配置
                             with gr.Column(scale=2):
-                                section_image = gr.Image(label=translate("キーフレーム画像 {0}").format(i), sources="upload", type="filepath", height=200)
+                                section_image = gr.Image(
+                                    label=translate("キーフレーム画像 {0}").format(i),
+                                    sources="upload",
+                                    type="filepath",
+                                    height=200,
+                                    elem_classes="modal-image",
+                                )
 
                                 # プロンプト変更時にStateを更新するハンドラー
                                 def update_prompt_state(prompt_value, section_idx=i):
@@ -4201,7 +4138,14 @@ with block:
                         outputs=[section_image_inputs[0], section_image_inputs[1]]
                     )
 
-            input_image = gr.Image(sources=['upload', 'clipboard'], type="filepath", label="Image", height=320)
+            input_image = gr.Image(
+                sources=['upload', 'clipboard'],
+                type="filepath",
+                label="Image",
+                height=320,
+                elem_id="input_image",
+                elem_classes="modal-image",
+            )
 
             # メタデータ抽出関数を定義（後で登録する）
             def update_from_image_metadata(image_path, copy_enabled=False):
@@ -5556,7 +5500,13 @@ with block:
             )
             progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
             progress_bar = gr.HTML('', elem_classes='no-generating-animation')
-            preview_image = gr.Image(label=translate("Next Latents"), height=200, visible=False)
+            preview_image = gr.Image(
+                label=translate("Next Latents"),
+                height=200,
+                visible=False,
+                elem_id="preview_image",
+                elem_classes="modal-image",
+            )
 
             # フレームサイズ切替用のUIコントロールは上部に移動したため削除
 
