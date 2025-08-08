@@ -3197,6 +3197,18 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # バッチ処理が停止されている場合はループを抜ける
         if batch_stopped:
             print(translate("バッチ処理ループを中断します"))
+            global last_output_filename
+            last_output_filename = batch_output_filename
+            yield (
+                batch_output_filename if batch_output_filename is not None else gr.skip(),
+                gr.update(value=None, visible=False),
+                translate("バッチ処理が中断されました"),
+                '',
+                gr.update(interactive=True),
+                gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False),
+                gr.update(),
+            )
             break
 
     generation_active = False
