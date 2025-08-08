@@ -85,6 +85,7 @@ from eichi_utils.notification_utils import play_completion_sound
 import queue
 import threading
 from collections import deque
+import weakref
 
 
 class FanoutQueue:
@@ -92,20 +93,27 @@ class FanoutQueue:
 
     def __init__(self, maxlen: int = 30, maxsize: int = 5):
         self._history = deque(maxlen=maxlen)
-        self._subscribers: list[queue.Queue] = []
+        self._subs = weakref.WeakSet()
         self._lock = threading.Lock()
         self._maxsize = maxsize
+        self._closed = False
 
     def publish(self, item) -> None:
         """Publish an item to all subscribers and store in history."""
         with self._lock:
+            if self._closed:
+                return
             self._history.append(item)
-            for q in list(self._subscribers):
+            for q in list(self._subs):
                 try:
                     q.put_nowait(item)
                 except queue.Full:
-                    # Skip if subscriber queue is full to avoid blocking
-                    pass
+                    # 満杯なら古い1件を捨てて最新を入れる（前進優先）
+                    try:
+                        _ = q.get_nowait()
+                        q.put_nowait(item)
+                    except Exception:
+                        pass
 
     def subscribe(self) -> queue.Queue:
         """Subscribe to the queue and receive the backlog immediately."""
@@ -116,14 +124,21 @@ class FanoutQueue:
                     q.put_nowait(item)
                 except queue.Full:
                     break
-            self._subscribers.append(q)
+            self._subs.add(q)
         return q
+
+    def unsubscribe(self, q: queue.Queue) -> None:
+        with self._lock:
+            try:
+                self._subs.discard(q)
+            except Exception:
+                pass
 
     def clear(self) -> None:
         """Clear history and all subscriber queues."""
         with self._lock:
             self._history.clear()
-            for q in self._subscribers:
+            for q in list(self._subs):
                 while not q.empty():
                     try:
                         q.get_nowait()
@@ -131,14 +146,24 @@ class FanoutQueue:
                         break
 
     def close(self) -> None:
-        """Close all subscriber queues and remove them."""
+        """Close all subscriber queues and remove them. Sentinel is guaranteed."""
         with self._lock:
-            for q in list(self._subscribers):
-                try:
-                    q.put_nowait((None, None))
-                except queue.Full:
-                    pass
-            self._subscribers.clear()
+            if self._closed:
+                return
+            self._closed = True
+            for q in list(self._subs):
+                # 満杯でも必ずセンチネルを届ける
+                delivered = False
+                while not delivered:
+                    try:
+                        q.put_nowait((None, None))  # 終端センチネル
+                        delivered = True
+                    except queue.Full:
+                        try:
+                            _ = q.get_nowait()  # 古い1件を捨てる
+                        except queue.Empty:
+                            break
+            self._subs.clear()
 
 
 class JobContext:
@@ -869,7 +894,7 @@ def get_reference_queue_files():
 # ワーカー関数
 @torch.no_grad()
 @log_and_continue("worker error")
-def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
+def worker(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
            gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files=None, lora_files2=None, lora_scales_text="0.8,0.8,0.8",
            output_dir=None, save_input_images=False, save_before_input_images=False, use_lora=False, fp8_optimization=False, resolution=640,
            latent_window_size=9, latent_index=0, use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
@@ -885,7 +910,8 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     # テキストエンコード結果をキャッシュするグローバル変数
     global cached_prompt, cached_n_prompt, cached_llama_vec, cached_llama_vec_n, cached_clip_l_pooler, cached_clip_l_pooler_n
     global cached_llama_attention_mask, cached_llama_attention_mask_n
-    global progress_bus
+
+    bus = ctx.bus
 
     # フラグ類は確実にbool化しておく
     reference_long_edge = _to_bool(reference_long_edge)
@@ -952,11 +978,11 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             desc = f"{progress_html}{time_info}"
 
         bar_html = make_progress_bar_html(percent, hint)
-        global last_progress_desc, last_progress_bar, last_preview_image, progress_bus
+        global last_progress_desc, last_progress_bar, last_preview_image
         last_progress_desc = desc
         last_progress_bar = bar_html
         last_preview_image = preview
-        progress_bus.publish(('progress', (preview, desc, bar_html)))
+        bus.publish(('progress', (preview, desc, bar_html)))
 
     if save_before_input_images:
         for p, suffix in [
@@ -2227,7 +2253,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 print(translate("1フレーム画像を保存しました: {0}").format(output_filename))
                 
                 # MP4保存はスキップして、画像ファイルパスを返す
-                progress_bus.publish(('file', output_filename))
+                bus.publish(('file', output_filename))
                 
             except Exception as e:
                 print(translate("1フレームの画像保存中にエラーが発生しました: {0}").format(e))
@@ -2330,14 +2356,12 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     
     # worker関数内では効果音を鳴らさない（バッチ処理全体の完了時のみ鳴らす）
     
-    progress_bus.publish(('end', None))
-    global cur_job
-    if cur_job is not None:
-        cur_job.done.set()
-        try:
-            cur_job.bus.close()
-        except Exception:
-            pass
+    bus.publish(('end', None))
+    ctx.done.set()
+    try:
+        ctx.bus.close()
+    except Exception:
+        pass
     return
 
 def handle_open_folder_btn(folder_name):
@@ -2462,10 +2486,13 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     current_seed = None
 
     # 進捗配信用のキューをリセット
-    global progress_bus, cur_job
     with ctx_lock:
-        cur_job = JobContext()
-        progress_bus = cur_job.bus
+        # 多重起動を制御したい場合は以下の2行を有効化
+        # if cur_job and not cur_job.done.is_set():
+        #     raise gr.Error("別ジョブが実行中です")
+        ctx = JobContext()
+        cur_job = ctx
+        progress_bus = ctx.bus  # 互換のため残す
 
     # ストリームを新規作成してキューをクリア
     stream = AsyncStream()
@@ -2914,7 +2941,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 break
                 
             # ワーカー実行 - 詳細設定パラメータを含む（キュー機能対応）
-            async_run(worker, current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
+            async_run(worker, ctx, current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
                      gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
                      output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, resolution,
                      current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
@@ -2931,10 +2958,16 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # ジョブ完了まで監視
         try:
             # ストリーム待機開始
-            listener_queue = cur_job.bus.subscribe()
-            while True:
-                try:
-                    flag, data = listener_queue.get()
+            listener_queue = ctx.bus.subscribe()
+            try:
+                while True:
+                    try:
+                        flag, data = listener_queue.get()
+                    except Exception:
+                        import traceback
+                        break
+                    if (flag, data) == (None, None):
+                        break
                     
                     if flag == 'file':
                         output_filename = data
@@ -3010,10 +3043,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         stream = AsyncStream()
                         return
                         
-                except Exception as e:
-                    import traceback
-                    # エラー後はループを抜ける
-                    break
+            finally:
+                ctx.bus.unsubscribe(listener_queue)
                     
         except KeyboardInterrupt:
             # 明示的なリソースクリーンアップ
@@ -3187,7 +3218,6 @@ def resync_status_handler():
     """ページ再読み込み後に進捗のストリーミングを再開する。"""
     global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
     global current_seed, generation_active, stream
-    global cur_job
 
     running = is_generation_running()
     yield (
@@ -3202,76 +3232,54 @@ def resync_status_handler():
         gr.update(value=current_seed) if current_seed is not None else gr.skip(),
     )
 
-    if not running or cur_job is None:
+    with ctx_lock:
+        ctx = cur_job
+    if not running or ctx is None:
         return
 
-    listener_queue = cur_job.bus.subscribe()
-    while True:
-        try:
-            flag, data = listener_queue.get()
-        except Exception:
-            generation_active = False
-            break
-
-        if flag == 'file':
-            last_output_filename = data
-            yield (
-                last_output_filename if last_output_filename is not None else gr.skip(),
-                gr.update(),
-                gr.update(),
-                gr.update(),
-                gr.update(interactive=False),
-                gr.update(interactive=True),
-                gr.update(interactive=True),
-                gr.update(interactive=True),
-                gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-            )
-
-        if flag == 'progress':
-            preview, desc, html = data
-            last_preview_image = preview
-            last_progress_desc = desc
-            last_progress_bar = html
-            yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
-
-        if flag == 'end':
-            generation_active = False
-            last_output_filename = last_output_filename or data
-            yield (
-                last_output_filename if last_output_filename is not None else gr.skip(),
-                gr.update(visible=False),
-                last_progress_desc,
-                last_progress_bar,
-                gr.update(interactive=True, value=translate("Start Generation")),
-                gr.update(interactive=False, value=translate("End Generation")),
-                gr.update(interactive=False),
-                gr.update(interactive=False),
-                gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-            )
-            try:
-                if cur_job is not None:
-                    cur_job.bus.clear()
-            except Exception:
-                pass
-            return
-
-    # Ensure state reset if loop exits without 'end'
-    yield (
-        last_output_filename if last_output_filename is not None else gr.skip(),
-        gr.update(visible=False),
-        last_progress_desc,
-        last_progress_bar,
-        gr.update(interactive=True, value=translate("Start Generation")),
-        gr.update(interactive=False, value=translate("End Generation")),
-        gr.update(interactive=False),
-        gr.update(interactive=False),
-        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-    )
+    q = ctx.bus.subscribe()
     try:
-        if cur_job is not None:
-            cur_job.bus.clear()
-    except Exception:
-        pass
+        while True:
+            item = q.get()
+            if item == (None, None):
+                break
+            flag, data = item
+            if flag == 'file':
+                last_output_filename = data
+                yield (
+                    last_output_filename if last_output_filename is not None else gr.skip(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(interactive=False),
+                    gr.update(interactive=True),
+                    gr.update(interactive=True),
+                    gr.update(interactive=True),
+                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                )
+            elif flag == 'progress':
+                preview, desc, html = data
+                last_preview_image = preview
+                last_progress_desc = desc
+                last_progress_bar = html
+                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+            elif flag == 'end':
+                generation_active = False
+                last_output_filename = last_output_filename or data
+                yield (
+                    last_output_filename if last_output_filename is not None else gr.skip(),
+                    gr.update(visible=False),
+                    last_progress_desc,
+                    last_progress_bar,
+                    gr.update(interactive=True, value=translate("Start Generation")),
+                    gr.update(interactive=False, value=translate("End Generation")),
+                    gr.update(interactive=False),
+                    gr.update(interactive=False),
+                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                )
+                break
+    finally:
+        ctx.bus.unsubscribe(q)
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
