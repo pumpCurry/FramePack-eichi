@@ -3174,6 +3174,7 @@ with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
 with open(os.path.join(os.path.dirname(__file__), "modal.js"), encoding="utf-8") as f:
     modal_js = f.read()
 
+
 # アプリケーション起動時に保存された設定を読み込む
 saved_app_settings = load_app_settings_oichi()
 
@@ -3203,6 +3204,7 @@ print(f"🆗 {translate('Startup_sequence_complete')}\n")
 # △ 起動シーケンスここまで △
 
 block = gr.Blocks(css=css, js=modal_js).queue()
+
 with block:
     # eichiと同じ半透明度スタイルを使用
     gr.HTML('<h1>FramePack<span class="title-suffix">-oichi</span></h1>')

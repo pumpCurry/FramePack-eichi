@@ -3360,6 +3360,7 @@ with open(os.path.join(os.path.dirname(__file__), "modal.js"), encoding="utf-8")
     modal_js = f.read()
 
 block = gr.Blocks(css=css, js=modal_js).queue()
+
 with block:
     gr.HTML('<h1>FramePack<span class="title-suffix">-eichi</span></h1>')
     gr.HTML('<dialog id="modal_dlg"><img /></dialog>')
