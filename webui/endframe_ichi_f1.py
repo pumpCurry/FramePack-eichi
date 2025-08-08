@@ -4561,7 +4561,12 @@ with block:
       }
       addButtons();
       const obs=new MutationObserver(addButtons);
-      obs.observe(root,{childList:true,subtree:true,attributes:true});
+      // Watching attribute mutations caused unnecessary stream activity
+      // during image uploads which resulted in "Method not implemented" and
+      // "Too many arguments" errors in the browser. Restrict observation to
+      // structural DOM changes so modal preview buttons can be inserted
+      // without interfering with Gradio's upload process.
+      obs.observe(root,{childList:true,subtree:true});
     }
     if(document.readyState !== 'loading'){
       setupOrigSize();

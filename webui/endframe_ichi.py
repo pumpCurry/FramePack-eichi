@@ -3423,7 +3423,10 @@ with block:
       }
       addButtons();
       const obs=new MutationObserver(addButtons);
-      obs.observe(root,{childList:true,subtree:true,attributes:true});
+      // Limiting observation to structural changes prevents attribute
+      // mutations from triggering extra upload events that previously caused
+      // console errors and blocked the image modal preview.
+      obs.observe(root,{childList:true,subtree:true});
     }
     if(document.readyState !== 'loading'){
       setupOrigSize();
