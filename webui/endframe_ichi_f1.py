@@ -4571,7 +4571,8 @@ with block:
       // "Too many arguments" errors in the browser. Restrict observation to
       // structural DOM changes so modal preview buttons can be inserted
       // without interfering with Gradio's upload process.
-      obs.observe(root,{childList:true,subtree:true});
+      const mutationOptions={childList:true,subtree:true};
+      obs.observe(root, mutationOptions);
     }
     if(document.readyState !== 'loading'){
       setupOrigSize();
