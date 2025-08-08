@@ -3357,8 +3357,10 @@ if saved_app_settings:
     lora_state_cache.set_cache_enabled(saved_app_settings.get("lora_cache", False))
 
 modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
+with open(modal_js_path, encoding="utf8") as f:
+    modal_js = f.read()
 
-block = gr.Blocks(css=css, js=modal_js_path).queue()
+block = gr.Blocks(css=css, js=modal_js).queue()
 
 with block:
     gr.HTML('<h1>FramePack<span class="title-suffix">-eichi</span></h1>')

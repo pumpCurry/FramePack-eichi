@@ -3228,6 +3228,8 @@ css = get_app_css()  # eichi_utilsのスタイルを使用
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
     css += f.read()
 modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
+with open(modal_js_path, encoding="utf8") as f:
+    modal_js = f.read()
 
 
 # アプリケーション起動時に保存された設定を読み込む
@@ -3258,7 +3260,7 @@ print("\n------------------------------------------------------------")
 print(f"🆗 {translate('Startup_sequence_complete')}\n")
 # △ 起動シーケンスここまで △
 
-block = gr.Blocks(css=css, js=modal_js_path).queue()
+block = gr.Blocks(css=css, js=modal_js).queue()
 
 with block:
     # eichiと同じ半透明度スタイルを使用
