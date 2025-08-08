@@ -3108,7 +3108,7 @@ def resync_status_handler():
         gr.update(interactive=running, value=translate("End Generation")),
         gr.update(interactive=running),
         gr.update(interactive=running),
-        gr.update(value=current_seed),
+        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
     )
 
     if not running or stream is None or not hasattr(stream, "output_queue"):
@@ -3133,7 +3133,7 @@ def resync_status_handler():
                 gr.update(interactive=True),
                 gr.update(interactive=True),
                 gr.update(interactive=True),
-                gr.update(value=current_seed),
+                gr.update(value=current_seed) if current_seed is not None else gr.skip(),
             )
 
         if flag == 'progress':
@@ -3155,7 +3155,7 @@ def resync_status_handler():
                 gr.update(interactive=False, value=translate("End Generation")),
                 gr.update(interactive=False),
                 gr.update(interactive=False),
-                gr.update(value=current_seed),
+                gr.update(value=current_seed) if current_seed is not None else gr.skip(),
             )
             try:
                 stream.output_queue.clear()
@@ -3173,7 +3173,7 @@ def resync_status_handler():
         gr.update(interactive=False, value=translate("End Generation")),
         gr.update(interactive=False),
         gr.update(interactive=False),
-        gr.update(value=current_seed),
+        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
     )
     try:
         stream.output_queue.clear()
