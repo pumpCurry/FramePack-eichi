@@ -222,6 +222,31 @@ def is_generation_running():
     """生成ジョブが実行中なら True を返す。"""
     return generation_active
 
+
+def progress_resync():
+    """再接続時に進捗を再送する購読専用ジェネレータ。"""
+    with ctx_lock:
+        ctx = cur_job
+    if not ctx:
+        return
+    q = ctx.bus.subscribe()
+    try:
+        while True:
+            item = q.get()
+            if item is None or item == (None, None):
+                break
+            kind, payload = item
+            if kind == 'progress':
+                preview, desc, bar_html = payload
+                yield preview, desc, bar_html
+            elif kind == 'file':
+                path = payload
+                yield None, f"Saved: {path}", None
+            elif kind == 'end':
+                break
+    finally:
+        ctx.bus.unsubscribe(q)
+
 # 進捗表示用グローバル変数
 progress_ref_idx = 0
 progress_ref_total = 0
@@ -892,9 +917,7 @@ def get_reference_queue_files():
     return image_files
 
 # ワーカー関数
-@torch.no_grad()
-@log_and_continue("worker error")
-def worker(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
+def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
            gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files=None, lora_files2=None, lora_scales_text="0.8,0.8,0.8",
            output_dir=None, save_input_images=False, save_before_input_images=False, use_lora=False, fp8_optimization=False, resolution=640,
            latent_window_size=9, latent_index=0, use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
@@ -2355,14 +2378,24 @@ def worker(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cfg, gs,
     print(translate("処理が完了しました"))
     
     # worker関数内では効果音を鳴らさない（バッチ処理全体の完了時のみ鳴らす）
-    
-    bus.publish(('end', None))
-    ctx.done.set()
-    try:
-        ctx.bus.close()
-    except Exception:
-        pass
     return
+
+
+@torch.no_grad()
+@log_and_continue("worker error")
+def worker(ctx: JobContext, *args, **kwargs):
+    try:
+        return _worker_impl(ctx, *args, **kwargs)
+    finally:
+        try:
+            ctx.bus.publish(('end', None))
+        except Exception:
+            pass
+        ctx.done.set()
+        try:
+            ctx.bus.close()
+        except Exception:
+            pass
 
 def handle_open_folder_btn(folder_name):
     """フォルダ名を保存し、そのフォルダを開く - endframe_ichiと同じ実装"""
@@ -2485,16 +2518,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     last_output_filename = None
     current_seed = None
 
-    # 進捗配信用のキューをリセット
-    with ctx_lock:
-        # 多重起動を制御したい場合は以下の2行を有効化
-        # if cur_job and not cur_job.done.is_set():
-        #     raise gr.Error("別ジョブが実行中です")
-        ctx = JobContext()
-        cur_job = ctx
-        progress_bus = ctx.bus  # 互換のため残す
-
-    # ストリームを新規作成してキューをクリア
+    # 進捗配信用のキューはバッチごとに作成する
+    ctx = None
     stream = AsyncStream()
     generation_active = True
 
@@ -2928,7 +2953,12 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         
         if batch_stopped:
             break
-            
+
+        with ctx_lock:
+            ctx = JobContext()
+            cur_job = ctx
+            progress_bus = ctx.bus  # 互換のため残す
+
         try:
             # 新しいストリームを作成
             stream = AsyncStream()
@@ -3126,6 +3156,9 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
     generation_active = False
     stream = AsyncStream()
+    with ctx_lock:
+        cur_job = None
+        progress_bus = None
     return
 
 def end_process():
