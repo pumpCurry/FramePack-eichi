@@ -80,6 +80,8 @@ set_lang(args.lang)
 )
 import shutil
 
+from eichi_utils.notification_utils import play_completion_sound
+
 # Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
 if sys.platform in ('win32', 'cygwin'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -163,15 +165,6 @@ if is_port_in_use(args.port):
     first_run = False  # 初回実行ではない
     time.sleep(10) # 10秒待機して続行
 
-try:
-    winsound = spinner_while_running(
-        translate("Load_winsound"),
-        importlib.import_module,
-        "winsound",
-    )
-    HAS_WINSOUND = True
-except ImportError:
-    HAS_WINSOUND = False
 
 if 'HF_HOME' not in os.environ:
     os.environ['HF_HOME'] = os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './hf_download')))
@@ -2996,13 +2989,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     user_abort_notified = False
     
     # 処理完了時の効果音（アラーム設定が有効な場合のみ）
-    if HAS_WINSOUND and alarm_on_completion:
-        try:
-            # Windows環境では完了音を鳴らす
-            winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS)
-            print(translate("Windows完了通知音を再生しました"))
-        except Exception as e:
-            print(translate("完了通知音の再生に失敗しました: {0}").format(e))
+    if alarm_on_completion:
+        play_completion_sound()
     
     # 処理状態に応じてメッセージを表示
     if batch_stopped or user_abort:
@@ -4382,9 +4370,9 @@ with block:
                 
                 # 完了時のアラーム設定
                 alarm_on_completion = gr.Checkbox(
-                    label=translate("完了時にアラームを鳴らす(Windows)"),
+                    label=translate("完了時にアラームを鳴らす"),
                     value=saved_app_settings.get("alarm_on_completion", True) if saved_app_settings else True,
-                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします（Windows）"),
+                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします。"),
                     elem_classes="saveable-setting",
                     interactive=True
                 )

@@ -45,11 +45,7 @@ args = parser.parse_args()
 from locales.i18n_extended import (set_lang, translate)
 set_lang(args.lang)
 
-try:
-    import winsound
-    HAS_WINSOUND = True
-except ImportError:
-    HAS_WINSOUND = False
+from eichi_utils.notification_utils import play_completion_sound
 import json
 import traceback
 from datetime import datetime, timedelta
@@ -3676,10 +3672,8 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         should_play_alarm = False
                 
                 if should_play_alarm:
-                    if HAS_WINSOUND:
-                        winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
-                    else:
-                        print(translate("処理が完了しました"))  # Linuxでの代替通知
+                    if not play_completion_sound():
+                        print(translate("処理が完了しました"))
 
                 # メモリ解放を明示的に実行
                 if torch.cuda.is_available():
@@ -5879,9 +5873,9 @@ with block:
                 # 完了時のアラーム設定
                 alarm_default_value = saved_app_settings.get("alarm_on_completion", True) if saved_app_settings else True
                 alarm_on_completion = gr.Checkbox(
-                    label=translate("完了時にアラームを鳴らす(Windows)"),
+                    label=translate("完了時にアラームを鳴らす"),
                     value=alarm_default_value,
-                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします（Windows）"),
+                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします。"),
                     elem_classes="saveable-setting",
                     interactive=True
                 )
