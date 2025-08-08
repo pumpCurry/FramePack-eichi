@@ -4497,7 +4497,10 @@ quick_prompts = [[x] for x in quick_prompts]
 css = get_app_css()
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
     css += f.read()
-block = gr.Blocks(css=css, js=os.path.join(os.path.dirname(__file__), "modal.js")).queue()
+with open(os.path.join(os.path.dirname(__file__), "modal.js"), encoding="utf-8") as f:
+    modal_js = f.read()
+block = gr.Blocks(css=css, js=modal_js).queue()
+
 with block:
     gr.HTML('<h1>FramePack<span class="title-suffix">-<s>eichi</s> F1</span></h1>')
     gr.HTML('<dialog id="modal_dlg"><img /></dialog>')
