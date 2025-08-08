@@ -3422,10 +3422,13 @@ with block:
       }
       addButtons();
       const obs=new MutationObserver(addButtons);
-      // Limiting observation to structural changes prevents attribute
-      // mutations from triggering extra upload events that previously caused
-      // console errors and blocked the image modal preview.
-      obs.observe(root,{childList:true,subtree:true});
+      // Watching attribute changes on Gradio's image upload components
+      // causes extra network traffic which surfaces "Method not
+      // implemented" and "Too many arguments" errors in the console. We
+      // only need to react to structural updates, so observe child list
+      // mutations and ignore attributes.
+      const mutationOptions={childList:true,subtree:true};
+      obs.observe(root, mutationOptions);
     }
     if(document.readyState !== 'loading'){
       setupOrigSize();
