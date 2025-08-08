@@ -3225,12 +3225,13 @@ with block:
       <img id='orig_size_img'>
     </div>
     <script>
+    const scriptRoot=document.currentScript?.getRootNode?.()||document;
     function setupOrigSize(){
-      const app=document.querySelector('gradio-app');
-      const root=app&&app.shadowRoot?app.shadowRoot:document;
+      const root=scriptRoot;
       const modal=root.getElementById('orig_size_modal');
       const imgElem=root.getElementById('orig_size_img');
       const closeBtn=root.getElementById('orig_size_close');
+      if(!modal||!imgElem||!closeBtn) return;
       closeBtn.addEventListener('click',()=>{modal.classList.remove('visible');imgElem.src='';});
       function addButtons(){
         const selector='button[aria-label="VIEW_IN_FULL_SCREEN_LABEL"],button[title="VIEW_IN_FULL_SCREEN_LABEL"],button[aria-label="View in full screen"],button[title="View in full screen"],button[aria-label="View fullscreen"],button[title="View fullscreen"],button[aria-label="View full screen"],button[title="View full screen"]';
