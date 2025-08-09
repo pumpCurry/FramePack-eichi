@@ -3240,27 +3240,6 @@ def toggle_stop_after_step():
         gr.update(interactive=True),
     )
 
-def request_stop_after_step():
-    global stop_after_step
-    stop_after_step = True
-    with ctx_lock:
-        ctx = cur_job
-    if ctx and not getattr(ctx, "_sent_end", False):
-        try:
-            ctx.stop_after_step_event.set()
-        except Exception:
-            pass
-        try:
-            ctx.stream.input_queue.push('end')
-            ctx._sent_end = True
-        except Exception:
-            pass
-
-
-def request_stop_after_current():
-    global stop_after_current
-    stop_after_current = True
-
 def on_resync_button_clicked():
     """Handle manual resync requests from UI."""
     global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed
