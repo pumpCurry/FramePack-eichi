@@ -3157,13 +3157,13 @@ def end_process():
     )
 
 
-# --- トグル式：この生成で打ち切り（即時ラベル更新＆未開始ならキャンセル可） ---
+# --- トグル式：この生成で打ち切り（押下で即“処理中”、未確定なら再クリックでキャンセル） ---
 def toggle_stop_after_current():
     global stop_after_current, batch_stopped
     with ctx_lock:
         ctx = cur_job
 
-    # まだリクエストされていない → リクエスト開始（UIは即時“処理中”）
+    # まだリクエストされていない → リクエスト開始（UIは即“処理中”）
     if not stop_after_current:
         stop_after_current = True
         print(translate("この生成で打ち切りをリクエストしました（再クリックでキャンセル）"))
@@ -3173,58 +3173,64 @@ def toggle_stop_after_current():
         )
 
     # すでにリクエスト中 → キャンセル判定
-    # ※「この生成で打ち切り」は 'end' を送っていないので、ジョブが終わる前なら基本キャンセル可能
-    #   ただし、他経路（ステップ打ち切り等）で既に 'end' が送信済みならキャンセル不可
+    # “この生成で打ち切り”は通常 'end' を即送らないので、送られていなければキャンセル可
     sent_end = False
     if ctx is not None:
-        sent_end = bool(getattr(ctx, "_sent_end", False))
+        try:
+            sent_end = bool(getattr(ctx, "_sent_end", False)) or (ctx.stream.input_queue.top() == 'end')
+        except Exception:
+            sent_end = bool(getattr(ctx, "_sent_end", False))
+
     if sent_end:
+        # もう止まる方向に確定しているのでキャンセル不可
         print(translate("キャンセル不可：既に停止指示が送信されました"))
         return (
             gr.update(value=translate("打ち切り処理中…"), interactive=False),
             gr.update(interactive=False),
         )
 
-    # キャンセルする
+    # キャンセルできる
     stop_after_current = False
     batch_stopped = False
     print(translate("この生成で打ち切りをキャンセルしました"))
     return (
         gr.update(value=translate("この生成で打ち切り"), interactive=True),
-        gr.update(interactive=True),
+        gr.update(interactive=True),  # Endボタンを復帰
     )
 
-# --- トグル式：このステップで打ち切り（即時ラベル更新＆未送信ならキャンセル可） ---
+# --- トグル式：このステップで打ち切り（押下で即“処理中”、未送信なら再クリックでキャンセル） ---
 def toggle_stop_after_step():
     global stop_after_step, stop_after_current, batch_stopped
     with ctx_lock:
         ctx = cur_job
 
-    # まだリクエストされていない → リクエスト開始（UIは即時“処理中”）
+    # まだリクエストされていない → リクエスト開始（UIは即“処理中”）
     if not stop_after_step:
         stop_after_step = True
-        # ステップ打ち切りは“次のステップ境界で止める”ため、ここでは 'end' を送らない
-        # 実際の 'end' 送信は callback 側（sampling内）で行う
-        stop_after_current = True  # 後続バッチにも進まない
+        stop_after_current = True  # 後続バッチも止める
+        # ★重要：ここでは 'end' を送らない。送信は sampling の callback 側に任せる
         print(translate("このステップで打ち切りをリクエストしました（再クリックでキャンセル）"))
         return (
             gr.update(value=translate("停止処理中…（再クリックでキャンセル）"), interactive=True),
             gr.update(interactive=False),  # Endボタンは誤操作防止で無効化
         )
 
-    # すでにリクエスト中 → キャンセル判定
+    # すでにリクエスト中 → キャンセル判定（callbackが 'end' を送っていなければ取り消し可能）
     sent_end = False
     if ctx is not None:
-        sent_end = bool(getattr(ctx, "_sent_end", False))
+        try:
+            sent_end = bool(getattr(ctx, "_sent_end", False)) or (ctx.stream.input_queue.top() == 'end')
+        except Exception:
+            sent_end = bool(getattr(ctx, "_sent_end", False))
+
     if sent_end:
-        # 既に callback 側が 'end' を送ってしまったら取り消せない
         print(translate("キャンセル不可：既に停止指示が送信されました（ステップ境界）"))
         return (
             gr.update(value=translate("停止処理中…"), interactive=False),
             gr.update(interactive=False),
         )
 
-    # キャンセルする（まだ 'end' 未送信のため取り消し可能）
+    # キャンセルできる
     stop_after_step = False
     stop_after_current = False
     batch_stopped = False
@@ -5117,11 +5123,19 @@ with block:
         ],
     )
     end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button], queue=False)
-    # 押下直後にボタン表示を“処理中”へ更新、再クリックでキャンセルも可能に
-    stop_after_button.click(fn=toggle_stop_after_current,
-                            inputs=[], outputs=[stop_after_button, end_button], queue=False)
-    stop_step_button.click(fn=toggle_stop_after_step,
-                           inputs=[], outputs=[stop_step_button, end_button], queue=False)
+    # 押下直後にラベルを“処理中”へ。再クリックでキャンセル可（未確定時）
+    stop_after_button.click(
+        fn=toggle_stop_after_current,
+        inputs=[],
+        outputs=[stop_after_button, end_button],
+        queue=False
+    )
+    stop_step_button.click(
+        fn=toggle_stop_after_step,
+        inputs=[],
+        outputs=[stop_step_button, end_button],
+        queue=False
+    )
     resync_status_btn.click(
         fn=on_resync_button_clicked,
         inputs=[],
