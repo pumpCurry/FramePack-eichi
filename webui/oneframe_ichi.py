@@ -290,13 +290,15 @@ def _stream_job_to_ui(ctx: JobContext):
     global last_output_filename, current_seed, batch_stopped
 
     running = is_generation_running()
+    # Disable End button while a stop toggle is active to prevent accidental stops
+    end_enabled = running and not (stop_after_current or stop_after_step)
     yield (
         last_output_filename if last_output_filename is not None else gr.skip(),
         gr.update(visible=last_preview_image is not None, value=last_preview_image),
         last_progress_desc,
         last_progress_bar,
         gr.update(interactive=not running, value=translate("Start Generation")),
-        gr.update(interactive=running, value=translate("End Generation")),
+        gr.update(interactive=end_enabled, value=translate("End Generation")),
         gr.update(interactive=running),
         gr.update(interactive=running),
         gr.update(value=current_seed) if current_seed is not None else gr.skip(),
@@ -335,13 +337,14 @@ def _stream_job_to_ui(ctx: JobContext):
             if flag == 'file':
                 output_filename = data
                 last_output_filename = data
+                end_enabled = is_generation_running() and not (stop_after_current or stop_after_step)
                 yield (
                     output_filename if output_filename is not None else gr.skip(),
                     gr.update(),
                     gr.update(),
                     gr.update(),
                     gr.update(interactive=False),
-                    gr.update(interactive=True),
+                    gr.update(interactive=end_enabled),
                     gr.update(interactive=True),
                     gr.update(interactive=True),
                     gr.update(value=current_seed) if current_seed is not None else gr.skip(),
@@ -351,7 +354,8 @@ def _stream_job_to_ui(ctx: JobContext):
                 last_preview_image = preview
                 last_progress_desc = desc
                 last_progress_bar = html
-                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+                end_enabled = is_generation_running() and not (stop_after_current or stop_after_step)
+                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=end_enabled), gr.update(interactive=True), gr.update(interactive=True), gr.update()
             elif flag == 'end':
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                 if batch_stopped:
@@ -3251,13 +3255,14 @@ def on_resync_button_clicked():
         yield from _stream_job_to_ui(ctx)
     else:
         running = is_generation_running()
+        end_enabled = running and not (stop_after_current or stop_after_step)
         yield (
             last_output_filename if last_output_filename is not None else gr.skip(),
             gr.update(visible=last_preview_image is not None, value=last_preview_image),
             last_progress_desc,
             last_progress_bar,
             gr.update(interactive=not running, value=translate("Start Generation")),
-            gr.update(interactive=running, value=translate("End Generation")),
+            gr.update(interactive=end_enabled, value=translate("End Generation")),
             gr.update(interactive=running),
             gr.update(interactive=running),
             gr.update(value=current_seed) if current_seed is not None else gr.skip(),
