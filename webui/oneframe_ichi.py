@@ -152,17 +152,15 @@ class FanoutQueue:
                 return
             self._closed = True
             for q in list(self._subs):
-                # 満杯でも必ずセンチネルを届ける
-                delivered = False
-                while not delivered:
+                while not q.empty():
                     try:
-                        q.put_nowait((None, None))  # 終端センチネル
-                        delivered = True
-                    except queue.Full:
-                        try:
-                            _ = q.get_nowait()  # 古い1件を捨てる
-                        except queue.Empty:
-                            break
+                        q.get_nowait()
+                    except queue.Empty:
+                        break
+                try:
+                    q.put_nowait((None, None))
+                except Exception:
+                    pass
             self._subs.clear()
 
 
@@ -933,18 +931,6 @@ spinner_while_running(
 # 出力フォルダのフルパスを生成
 outputs_folder = get_output_folder_path(output_folder_name)
 os.makedirs(outputs_folder, exist_ok=True)
-
-# グローバル変数
-g_frame_size_setting = "1フレーム"
-batch_stopped = False  # バッチ処理中断フラグ
-stop_after_current = False  # 現在の生成完了後に停止するフラグ
-queue_enabled = False  # キュー機能の有効/無効フラグ
-queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
-prompt_queue_file_path = None  # プロンプトキューのファイルパス
-image_queue_files = []  # イメージキューのファイルリスト
-input_folder_name_value = "inputs"  # 入力フォルダの名前（デフォルト値）
-reference_queue_files = []  # 参照画像キューのファイルリスト
-reference_input_folder_name_value = "references"  # 参照画像入力フォルダ名
 
 # イメージキューのための画像ファイルリストを取得する関数（グローバル関数）
 def get_image_queue_files():
@@ -2077,7 +2063,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             try:
                 # transformerモデルの内部パラメータを調整
                 # HunyuanVideoTransformerモデル内部のmax_positionに相当する値を変更する
-                if hasattr(transformer, 'max_pos_embed_window_size'):
+                if use_rope_batch and hasattr(transformer, 'max_pos_embed_window_size'):
                     original_value = transformer.max_pos_embed_window_size
                     print(translate("元のmax_pos_embed_window_size: {0}").format(original_value))
                     transformer.max_pos_embed_window_size = latent_window_size
@@ -2169,15 +2155,9 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 
                 # find_nearest_bucketの結果が間違っている可能性
                 # 入力画像のサイズから正しい値を計算
-                if input_image_np.shape[0] == 832 and input_image_np.shape[1] == 480:
-                    # 実際の画像サイズを使用
-                    actual_width = 480
-                    actual_height = 832
-                    print(translate("実際の画像サイズを使用: width={0}, height={1}").format(actual_width, actual_height))
-                else:
-                    # find_nearest_bucketの結果を使用
-                    actual_width = width
-                    actual_height = height
+                actual_width = width
+                actual_height = height
+                assert actual_width % 8 == 0 and actual_height % 8 == 0
                 
                 # 初回実行時の品質について説明
                 if not use_cache:
@@ -2436,11 +2416,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 
                 # 一括アンロード - endframe_ichiと同じアプローチでモデルを明示的に解放
                 if transformer is not None:
-                    # まずtransformer_managerの状態をリセット - これが重要
-                    transformer_manager.current_state['is_loaded'] = False
-                    # FP8最適化モードの有無に関わらず常にCPUに移動
-                    transformer.to('cpu')
-                    print(translate("transformerをCPUに移動しました"))
+                    transformer_manager.dispose_transformer()
 
                 # endframe_ichi.pyと同様に明示的にすべてのモデルを一括アンロード
                 # モデルを直接リストで渡す（引数展開ではなく）
@@ -2853,9 +2829,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("=== 現在の設定を自動保存します ==="))
         # 現在のUIの値を収集してアプリケーション設定として保存
         # Gradioオブジェクトから値を取得（直接値が渡る場合も考慮）
-        lora_cache_val = lora_cache_checkbox
-        if hasattr(lora_cache_checkbox, 'value'):
-            lora_cache_val = bool(lora_cache_checkbox.value)
+        lora_cache_val = False
 
         # Gradioオブジェクトの値を正規化
         log_enabled_val = log_enabled
@@ -2945,6 +2919,11 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
     ref_count = len(reference_images_list)
     total_batches = batch_count * ref_count
+    progress_ref_total = ref_count
+    progress_img_total = batch_count
+    progress_ref_idx = 0
+    progress_img_idx = 0
+    prev_reference_idx = -1
 
     for batch_index_total in range(total_batches):
         batch_index = batch_index_total % batch_count
@@ -3029,15 +3008,14 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         print(translate("イメージキュー実行中: バッチ {0}/{1} は画像数を超えているため入力画像を使用").format(batch_index+1, batch_count))
 
         # 進捗用グローバル変数を更新
-        progress_ref_idx = reference_idx + 1
-        progress_ref_total = ref_count
+        if reference_idx != prev_reference_idx:
+            progress_ref_idx += 1
+            progress_img_idx = 0
+            prev_reference_idx = reference_idx
+        progress_img_idx += 1
         progress_ref_name = os.path.basename(reference_image_current) if isinstance(reference_image_current, str) else translate("入力画像")
-        progress_img_idx = batch_index + 1
-        progress_img_total = batch_count
-        if isinstance(current_image, str):
-            progress_img_name = os.path.basename(current_image)
-        else:
-            progress_img_name = translate("入力画像")
+        progress_img_name = os.path.basename(current_image) if isinstance(current_image, str) else translate("入力画像")
+        push_progress(None, '', 0, '')
 
         # RoPE値バッチ処理の場合はRoPE値をインクリメント、それ以外は通常のシードインクリメント
         current_seed = original_seed
