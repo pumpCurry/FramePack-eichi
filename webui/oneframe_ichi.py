@@ -2974,7 +2974,24 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         progress_img_idx += 1
         progress_ref_name = os.path.basename(reference_image_current) if isinstance(reference_image_current, str) and reference_image_current else translate("入力画像")
         progress_img_name = os.path.basename(current_image) if isinstance(current_image, str) and current_image else translate("入力画像")
-        push_progress(None, '', 0, '')
+        last_progress_desc = (
+            f"<br/><strong>進捗:</strong> 《参考画像 {progress_ref_idx}/{progress_ref_total}》"
+            f"{(progress_ref_name or translate('入力画像'))} / 《イメージ {progress_img_idx}/{progress_img_total}》"
+            f"{(progress_img_name or translate('入力画像'))} <br/>"
+        )
+        last_progress_bar = make_progress_bar_html(0, '')
+        last_preview_image = None
+        yield (
+            gr.skip(),
+            gr.update(visible=False),
+            last_progress_desc,
+            last_progress_bar,
+            gr.update(interactive=False),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
+            gr.update()
+        )
 
         # RoPE値バッチ処理の場合はRoPE値をインクリメント、それ以外は通常のシードインクリメント
         current_seed = original_seed
