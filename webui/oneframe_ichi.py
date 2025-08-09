@@ -202,6 +202,9 @@ queue_enabled = False  # キュー機能の有効/無効フラグ
 queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
 image_queue_files = []  # イメージキューのファイルリスト
+input_folder_name_value = "inputs"
+reference_input_folder_name_value = "references"
+reference_queue_files = []
 
 # 再同期対応 - 最終進捗状態を保存
 last_progress_desc = ""
@@ -212,6 +215,27 @@ current_seed = None
 
 # 再同期処理に使用される生成状態フラグ
 generation_active = False
+
+def _cleanup_models(force: bool = False):
+    global transformer, vae, text_encoder, text_encoder_2, image_encoder
+    if not force and high_vram:
+        return
+    try:
+        transformer_manager.dispose_transformer()
+    except Exception:
+        pass
+    try:
+        unload_complete_models(text_encoder, text_encoder_2, image_encoder, vae, None)
+    except Exception:
+        pass
+    transformer = None
+    vae = None
+    text_encoder = None
+    text_encoder_2 = None
+    image_encoder = None
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
 
 def is_generation_running():
     """生成ジョブが実行中なら True を返す。"""
@@ -2157,7 +2181,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 # 入力画像のサイズから正しい値を計算
                 actual_width = width
                 actual_height = height
-                assert actual_width % 8 == 0 and actual_height % 8 == 0
+                if not (actual_width % 8 == 0 and actual_height % 8 == 0):
+                    raise ValueError(translate("幅/高さは8の倍数である必要があります: {0}x{1}").format(actual_width, actual_height))
                 
                 # 初回実行時の品質について説明
                 if not use_cache:
@@ -2353,9 +2378,10 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     print(translate("メタデータ埋め込みエラー: {0}").format(e))
                 
                 print(translate("1フレーム画像を保存しました: {0}").format(output_filename))
-                
+
                 # MP4保存はスキップして、画像ファイルパスを返す
                 bus.publish(('file', output_filename))
+                _cleanup_models()
                 
             except Exception as e:
                 print(translate("1フレームの画像保存中にエラーが発生しました: {0}").format(e))
@@ -2375,79 +2401,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
     except Exception as e:
         print(translate("処理中にエラーが発生しました: {0}").format(e))
         traceback.print_exc()
-        
-        # エラー時の詳細なメモリクリーンアップ
-        try:
-            if not high_vram:
-                print(translate("エラー発生時のメモリクリーンアップを実行..."))
-                
-                # 効率的なクリーンアップのために、重いモデルから順にアンロード
-                models_to_unload = [
-                    ('transformer', transformer), 
-                    ('vae', vae), 
-                    ('image_encoder', image_encoder), 
-                    ('text_encoder', text_encoder), 
-                    ('text_encoder_2', text_encoder_2)
-                ]
-                
-                # 各モデルを個別にアンロードして解放
-                for model_name, model in models_to_unload:
-                    if model is not None:
-                        try:
-                            print(translate("{0}をアンロード中...").format(model_name))
-                            # モデルをCPUに移動
-                            if hasattr(model, 'to'):
-                                model.to('cpu')
-                            # 参照を明示的に削除
-                            if model_name == 'transformer':
-                                transformer = None
-                            elif model_name == 'vae':
-                                vae = None
-                            elif model_name == 'image_encoder':
-                                image_encoder = None
-                            elif model_name == 'text_encoder':
-                                text_encoder = None
-                            elif model_name == 'text_encoder_2':
-                                text_encoder_2 = None
-                            # 各モデル解放後にすぐメモリ解放
-                            torch.cuda.empty_cache()
-                        except Exception as unload_error:
-                            print(translate("{0}のアンロード中にエラー: {1}").format(model_name, unload_error))
-                
-                # 一括アンロード - endframe_ichiと同じアプローチでモデルを明示的に解放
-                if transformer is not None:
-                    transformer_manager.dispose_transformer()
-
-                # endframe_ichi.pyと同様に明示的にすべてのモデルを一括アンロード
-                # モデルを直接リストで渡す（引数展開ではなく）
-                unload_complete_models(
-                    text_encoder, text_encoder_2, image_encoder, vae, transformer
-                )
-                print(translate("すべてのモデルをアンロードしました"))
-                
-                # 明示的なガベージコレクション（複数回）
-                import gc
-                print(translate("ガベージコレクション実行中..."))
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.empty_cache()
-                
-                # メモリ状態を報告
-                free_mem_gb = get_cuda_free_memory_gb(gpu)
-                print(translate("クリーンアップ後の空きVRAM {0} GB").format(free_mem_gb))
-                
-                # 追加の変数クリーンアップ
-                for var_name in ['start_latent', 'decoded_image', 'history_latents', 'real_history_latents', 
-                              'real_history_latents_gpu', 'generated_latents', 'input_image_pt', 'input_image_gpu']:
-                    if var_name in locals():
-                        try:
-                            exec(f"del {var_name}")
-                            print(translate("変数 {0} を解放しました").format(var_name))
-                        except:
-                            pass
-        except Exception as cleanup_error:
-            print(translate("メモリクリーンアップ中にエラー: {0}").format(cleanup_error))
+        _cleanup_models(force=True)
     
     # 処理完了を通知（個別バッチの完了）
     print(translate("処理が完了しました"))
@@ -2472,6 +2426,7 @@ def worker(ctx: JobContext, *args, **kwargs):
             ctx.bus.close()
         except Exception:
             pass
+        _cleanup_models(force=True)
         generation_active = False
         with ctx_lock:
             if cur_job is ctx:
@@ -2919,6 +2874,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
     ref_count = len(reference_images_list)
     total_batches = batch_count * ref_count
+    current_image = None
     progress_ref_total = ref_count
     progress_img_total = batch_count
     progress_ref_idx = 0
@@ -2985,7 +2941,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
                     if image_index < len(image_queue_files):
                         current_image = image_queue_files[image_index]
-                        image_filename = os.path.basename(current_image)
+                        if isinstance(current_image, str) and current_image:
+                            image_filename = os.path.basename(current_image)
+                        else:
+                            image_filename = translate("入力画像")
                         print(translate("イメージキュー実行中: バッチ {0}/{1} の画像「{2}」").format(batch_index+1, batch_count, image_filename))
                         print(translate("  └ 画像ファイルパス: {0}").format(current_image))
                         
@@ -3013,8 +2972,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             progress_img_idx = 0
             prev_reference_idx = reference_idx
         progress_img_idx += 1
-        progress_ref_name = os.path.basename(reference_image_current) if isinstance(reference_image_current, str) else translate("入力画像")
-        progress_img_name = os.path.basename(current_image) if isinstance(current_image, str) else translate("入力画像")
+        progress_ref_name = os.path.basename(reference_image_current) if isinstance(reference_image_current, str) and reference_image_current else translate("入力画像")
+        progress_img_name = os.path.basename(current_image) if isinstance(current_image, str) and current_image else translate("入力画像")
         push_progress(None, '', 0, '')
 
         # RoPE値バッチ処理の場合はRoPE値をインクリメント、それ以外は通常のシードインクリメント
