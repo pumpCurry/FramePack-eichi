@@ -636,30 +636,8 @@ HunyuanVideoTransformer3DModelPacked = spinner_while_running(
 # フォルダを開く関数
 def open_folder(folder_path):
     """指定されたフォルダをOSに依存せず開く"""
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path, exist_ok=True)
-        print(translate("フォルダを作成しました: {0}").format(folder_path))
-
     try:
-        if os.name == 'nt':  # Windows環境
-            try:
-                os.startfile(folder_path)
-            except Exception:
-                subprocess.Popen(['explorer', folder_path])
-            print(translate("フォルダを開きました: {0}").format(folder_path))
-        elif os.name == 'posix':
-            opener = None
-            if sys.platform == 'darwin' and shutil.which('open'):
-                opener = 'open'
-            else:
-                opener = shutil.which('xdg-open') or shutil.which('open')
-            if opener:
-                subprocess.Popen([opener, folder_path])
-                print(translate("フォルダを開きました: {0}").format(folder_path))
-            else:
-                print(translate("xdg-open/open が見つからないため自動でフォルダを開けません: {0}").format(folder_path))
-        else:
-            print(translate("このOSではフォルダを自動で開く機能はサポートされていません: {0}").format(folder_path))
+        open_output_folder(folder_path)
         return True
     except Exception as e:
         print(translate("フォルダを開く際にエラーが発生しました: {0}").format(e))
