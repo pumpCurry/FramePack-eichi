@@ -91,7 +91,7 @@ import weakref
 class FanoutQueue:
     """Thread-safe fan-out queue with replayable history."""
 
-    def __init__(self, maxlen: int = 30, maxsize: int = 5):
+    def __init__(self, maxlen: int = 200, maxsize: int = 64):
         self._history = deque(maxlen=maxlen)
         self._subs = weakref.WeakSet()
         self._lock = threading.Lock()
@@ -205,9 +205,6 @@ queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
 image_queue_files = []  # イメージキューのファイルリスト
 
-# 進捗を複数クライアントへ配信するためのキュー
-progress_bus = None  # type: FanoutQueue | None
-
 # 再同期対応 - 最終進捗状態を保存
 last_progress_desc = ""
 last_progress_bar = ""
@@ -244,6 +241,108 @@ def progress_resync():
                 yield None, f"Saved: {path}", None
             elif kind == 'end':
                 break
+    finally:
+        ctx.bus.unsubscribe(q)
+
+
+def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
+    """Create and start a new job with its own context."""
+    global generation_active, cur_job
+    ctx = JobContext()
+    with ctx_lock:
+        cur_job = ctx
+    generation_active = True
+    async_run(worker, ctx, *worker_args, **worker_kwargs)
+    return ctx
+
+
+def _stream_job_to_ui(ctx: JobContext):
+    """Stream job progress from the bus to the Gradio UI."""
+    global last_progress_desc, last_progress_bar, last_preview_image
+    global last_output_filename, current_seed, batch_stopped, stream
+
+    running = is_generation_running()
+    yield (
+        last_output_filename if last_output_filename is not None else gr.skip(),
+        gr.update(visible=last_preview_image is not None, value=last_preview_image),
+        last_progress_desc,
+        last_progress_bar,
+        gr.update(interactive=not running, value=translate("Start Generation")),
+        gr.update(interactive=running, value=translate("End Generation")),
+        gr.update(interactive=running),
+        gr.update(interactive=running),
+        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+    )
+
+    output_filename = None
+    q = ctx.bus.subscribe()
+    try:
+        while True:
+            item = q.get()
+            if item == (None, None):
+                break
+            flag, data = item
+            if flag == 'file':
+                output_filename = data
+                last_output_filename = data
+                yield (
+                    output_filename if output_filename is not None else gr.skip(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(interactive=False),
+                    gr.update(interactive=True),
+                    gr.update(interactive=True),
+                    gr.update(interactive=True),
+                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                )
+            elif flag == 'progress':
+                preview, desc, html = data
+                last_preview_image = preview
+                last_progress_desc = desc
+                last_progress_bar = html
+                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+            elif flag == 'end':
+                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
+                if batch_stopped:
+                    completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
+                else:
+                    completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(progress_img_total, progress_img_total)
+                completion_message = f"{completion_message} - {progress_summary}"
+                last_output_filename = output_filename or last_output_filename
+                last_progress_desc = completion_message
+                last_progress_bar = ''
+                last_preview_image = None
+                yield (
+                    last_output_filename if last_output_filename is not None else gr.skip(),
+                    gr.update(visible=False),
+                    completion_message,
+                    '',
+                    gr.update(interactive=True, value=translate("Start Generation")),
+                    gr.update(interactive=False, value=translate("End Generation")),
+                    gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                    gr.update(interactive=False, value=translate("このステップで打ち切り")),
+                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                )
+                break
+
+            if stream.input_queue.top() == 'end' or (batch_stopped and not stop_after_current):
+                batch_stopped = True
+                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
+                yield (
+                    output_filename if output_filename is not None else gr.skip(),
+                    gr.update(visible=False),
+                    translate("バッチ処理が中断されました") + f" - {progress_summary}",
+                    '',
+                    gr.update(interactive=True),
+                    gr.update(interactive=False, value=translate("End Generation")),
+                    gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                    gr.update(interactive=False, value=translate("このステップで打ち切り")),
+                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                )
+                generation_active = False
+                stream = AsyncStream()
+                return
     finally:
         ctx.bus.unsubscribe(q)
 
@@ -2384,6 +2483,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 @torch.no_grad()
 @log_and_continue("worker error")
 def worker(ctx: JobContext, *args, **kwargs):
+    global generation_active, cur_job
     try:
         return _worker_impl(ctx, *args, **kwargs)
     finally:
@@ -2396,6 +2496,10 @@ def worker(ctx: JobContext, *args, **kwargs):
             ctx.bus.close()
         except Exception:
             pass
+        generation_active = False
+        with ctx_lock:
+            if cur_job is ctx:
+                cur_job = None
 
 def handle_open_folder_btn(folder_name):
     """フォルダ名を保存し、そのフォルダを開く - endframe_ichiと同じ実装"""
@@ -2493,8 +2597,14 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     global last_output_filename
     global generation_active
     global last_progress_desc, last_progress_bar, last_preview_image
-    global progress_bus, cur_job
+    global cur_job, current_seed
 
+
+    with ctx_lock:
+        running_ctx = cur_job
+    if running_ctx and not running_ctx.done.is_set():
+        yield from _stream_job_to_ui(running_ctx)
+        return
 
     # 新たな処理開始時にグローバルフラグをリセット
     user_abort = False
@@ -2521,7 +2631,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # 進捗配信用のキューはバッチごとに作成する
     ctx = None
     stream = AsyncStream()
-    generation_active = True
 
     # bool値の正規化
     reference_long_edge = _to_bool(reference_long_edge)
@@ -2954,128 +3063,24 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         if batch_stopped:
             break
 
-        with ctx_lock:
-            ctx = JobContext()
-            cur_job = ctx
-            progress_bus = ctx.bus  # 互換のため残す
+        stream = AsyncStream()
+        ctx = _start_job_for_single_task(
+            current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
+            gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
+            output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, resolution,
+            current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
+            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
+            batch_index, use_queue, prompt_queue_file,
+            # Kisekaeichi関連パラメータを追加
+            use_reference_image, reference_image_current,
+            target_index, history_index, reference_long_edge, input_mask, reference_mask
+        )
 
         try:
-            # 新しいストリームを作成
-            stream = AsyncStream()
-            
-            # バッチインデックスをジョブIDに含める
-            batch_suffix = f"{batch_index_total}" if batch_index_total > 0 else ""
-            
-            # 中断フラグの再確認
-            if batch_stopped:
-                break
-                
-            # ワーカー実行 - 詳細設定パラメータを含む（キュー機能対応）
-            async_run(worker, ctx, current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
-                     gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
-                     output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, resolution,
-                     current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
-                     lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
-                     batch_index, use_queue, prompt_queue_file,
-                     # Kisekaeichi関連パラメータを追加
-                     use_reference_image, reference_image_current,
-                     target_index, history_index, reference_long_edge, input_mask, reference_mask)
-        except Exception as e:
-            import traceback
-        
-        output_filename = None
-        
-        # ジョブ完了まで監視
-        try:
-            # ストリーム待機開始
-            listener_queue = ctx.bus.subscribe()
-            try:
-                while True:
-                    try:
-                        flag, data = listener_queue.get()
-                    except Exception:
-                        import traceback
-                        break
-                    if (flag, data) == (None, None):
-                        break
-                    
-                    if flag == 'file':
-                        output_filename = data
-                        last_output_filename = data
-                        yield (
-                            output_filename if output_filename is not None else gr.skip(),
-                            gr.update(),
-                            gr.update(),
-                            gr.update(),
-                            gr.update(interactive=False),
-                            gr.update(interactive=True),
-                            gr.update(interactive=True),
-                            gr.update(interactive=True),
-                            gr.update(value=current_seed),
-                        )
-                    
-                    if flag == 'progress':
-                        preview, desc, html = data
-                        yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
-                    
-                    if flag == 'end':
-                        # endフラグを受信
-                        # バッチ処理中は最後の画像のみを表示
-                        if batch_index_total == total_batches - 1 or batch_stopped:  # 最後のバッチまたは中断された場合
-                            completion_message = ""
-                            progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                            if batch_stopped:
-                                completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches)
-                            else:
-                                completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(total_batches, total_batches)
-                            completion_message = f"{completion_message} - {progress_summary}"
+            yield from _stream_job_to_ui(ctx)
 
-                            # 完了メッセージでUIを更新し、再同期用に保存
-                            last_output_filename = output_filename
-                            last_progress_desc = completion_message
-                            last_progress_bar = ''
-                            last_preview_image = None
-                            yield (
-                                output_filename if output_filename is not None else gr.skip(),
-                                gr.update(visible=False),
-                                completion_message,
-                                '',
-                                gr.update(interactive=True, value=translate("Start Generation")),
-                                gr.update(interactive=False, value=translate("End Generation")),
-                                gr.update(interactive=False, value=translate("この生成で打ち切り")),
-                                gr.update(interactive=False, value=translate("このステップで打ち切り")),
-                                gr.update(value=original_seed),
-                            )
-                        break
-                        
-                    # ユーザーが中断した場合
-                    if stream.input_queue.top() == 'end' or (batch_stopped and not stop_after_current):
-                        batch_stopped = True
-                        # 処理ループ内での中断検出
-                        print(translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches))
-                        # 直前に保存した画像を結果に反映
-                        if output_filename is not None:
-                            last_output_filename = output_filename
-                        # endframe_ichiと同様のシンプルな実装に戻す
-                        progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                        yield (
-                            output_filename if output_filename is not None else gr.skip(),
-                            gr.update(visible=False),
-                            translate("バッチ処理が中断されました") + f" - {progress_summary}",
-                            '',
-                            gr.update(interactive=True),
-                            gr.update(interactive=False, value=translate("End Generation")),
-                            gr.update(interactive=False, value=translate("この生成で打ち切り")),
-                            gr.update(interactive=False, value=translate("このステップで打ち切り")),
-                            gr.update(value=original_seed),
-                        )
-                        generation_active = False
-                        stream = AsyncStream()
-                        return
-                        
-            finally:
-                ctx.bus.unsubscribe(listener_queue)
-                    
+            if batch_stopped and not stop_after_current:
+                return
         except KeyboardInterrupt:
             # 明示的なリソースクリーンアップ
             try:
@@ -3158,7 +3163,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     stream = AsyncStream()
     with ctx_lock:
         cur_job = None
-        progress_bus = None
     return
 
 def end_process():
@@ -3247,72 +3251,28 @@ def end_after_step_process():
             gr.update(interactive=False),
         )
 
-def resync_status_handler():
-    """ページ再読み込み後に進捗のストリーミングを再開する。"""
-    global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
-    global current_seed, generation_active, stream
-
-    running = is_generation_running()
-    yield (
-        last_output_filename if last_output_filename is not None else gr.skip(),
-        gr.update(visible=last_preview_image is not None, value=last_preview_image),
-        last_progress_desc,
-        last_progress_bar,
-        gr.update(interactive=not running, value=translate("Start Generation")),
-        gr.update(interactive=running, value=translate("End Generation")),
-        gr.update(interactive=running),
-        gr.update(interactive=running),
-        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-    )
+def on_resync_button_clicked():
+    """Handle manual resync requests from UI."""
+    global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed
 
     with ctx_lock:
         ctx = cur_job
-    if not running or ctx is None:
-        return
 
-    q = ctx.bus.subscribe()
-    try:
-        while True:
-            item = q.get()
-            if item == (None, None):
-                break
-            flag, data = item
-            if flag == 'file':
-                last_output_filename = data
-                yield (
-                    last_output_filename if last_output_filename is not None else gr.skip(),
-                    gr.update(),
-                    gr.update(),
-                    gr.update(),
-                    gr.update(interactive=False),
-                    gr.update(interactive=True),
-                    gr.update(interactive=True),
-                    gr.update(interactive=True),
-                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-                )
-            elif flag == 'progress':
-                preview, desc, html = data
-                last_preview_image = preview
-                last_progress_desc = desc
-                last_progress_bar = html
-                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
-            elif flag == 'end':
-                generation_active = False
-                last_output_filename = last_output_filename or data
-                yield (
-                    last_output_filename if last_output_filename is not None else gr.skip(),
-                    gr.update(visible=False),
-                    last_progress_desc,
-                    last_progress_bar,
-                    gr.update(interactive=True, value=translate("Start Generation")),
-                    gr.update(interactive=False, value=translate("End Generation")),
-                    gr.update(interactive=False),
-                    gr.update(interactive=False),
-                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-                )
-                break
-    finally:
-        ctx.bus.unsubscribe(q)
+    if ctx and is_generation_running():
+        yield from _stream_job_to_ui(ctx)
+    else:
+        running = is_generation_running()
+        yield (
+            last_output_filename if last_output_filename is not None else gr.skip(),
+            gr.update(visible=last_preview_image is not None, value=last_preview_image),
+            last_progress_desc,
+            last_progress_bar,
+            gr.update(interactive=not running, value=translate("Start Generation")),
+            gr.update(interactive=running, value=translate("End Generation")),
+            gr.update(interactive=running),
+            gr.update(interactive=running),
+            gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+        )
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
@@ -5156,7 +5116,7 @@ with block:
     stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button, end_button], queue=False)
     stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button, end_button], queue=False)
     resync_status_btn.click(
-        fn=resync_status_handler,
+        fn=on_resync_button_clicked,
         inputs=[],
         outputs=[
             result_image,
