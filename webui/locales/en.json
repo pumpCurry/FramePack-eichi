@@ -921,6 +921,7 @@
   "バッチ処理: {0}/{1}（共通プロンプト使用）": "Batch processing: {0}/{1} (Using common prompt)",
   "バッチ処理: {0}/{1}（共通プロンプト使用） - ": "Batch processing: {0}/{1} (Using common prompt) - ",
   "バッチ処理がユーザーによって中止されました": "Batch processing was cancelled by user",
+  "バッチ処理がユーザーによって中断されました": "Batch processing was interrupted by user",
   "バッチ処理が中断されました": "Batch processing was interrupted",
   "バッチ処理が中断されました。worker関数の実行をキャンセルします。": "Batch processing was interrupted. Canceling execution of worker function.",
   "バッチ処理が中断されました（{0}/{1}）": "Batch processing was interrupted ({0}/{1})",

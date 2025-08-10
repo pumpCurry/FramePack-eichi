@@ -1061,6 +1061,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
     # フラグ類は確実にbool化しておく
     reference_long_edge = _to_bool(reference_long_edge)
+    use_rope_batch = bool(use_rope_batch)
 
     # キュー状態のログ出力
     use_queue_flag = bool(use_queue)
@@ -2900,7 +2901,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         reference_image_current = reference_images_list[reference_idx]
         # 停止フラグが設定されている場合は全バッチ処理を中止
         if batch_stopped:
-            print(translate("バッチ処理がユーザーによって中止されました"))
+            print(translate("バッチ処理がユーザーによって中断されました"))
             yield (
                 gr.skip(),
                 gr.update(visible=False),
