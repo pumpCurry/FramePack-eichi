@@ -3276,63 +3276,30 @@ def on_resync_button_clicked():
 
 
 def follow_progress():
-    """現在のstreamにぶら下がって、進捗を流し続けるだけのジェネレータ"""
-    global stream
-    if stream is None:
+    """現在のジョブに再接続して、生成開始時と同じ9出力を最後までストリームする"""
+    with ctx_lock:
+        ctx = cur_job
+
+    # 実行中ジョブがなければ、直近の状態を1回だけ返して終了
+    if not ctx or ctx.done.is_set():
+        running = is_generation_running()
+        end_enabled = running and not (stop_after_current or stop_after_step)
         yield (
-            None,                    # video/file out
-            gr.update(visible=False),# preview
-            translate("進行中のジョブはありません"),
-            "",                      # progress bar html
-            gr.update(interactive=True),   # start btn
-            gr.update(interactive=False),  # end btn
-            gr.update(interactive=False),  # stop_after btn
-            gr.update(interactive=False),  # stop_step btn
-            gr.update(),                   # seed
+            last_output_filename if last_output_filename is not None else gr.skip(),  # 出力ファイル
+            gr.update(visible=last_preview_image is not None, value=last_preview_image),  # プレビュー
+            translate("進行中のジョブはありません"),  # 説明
+            "",  # 進捗バーHTML
+            gr.update(interactive=True,  value=translate("Start Generation")),  # Start
+            gr.update(interactive=False, value=translate("End Generation")),    # End
+            gr.update(interactive=False, value=translate("この生成で打ち切り")),      # Stop-after-current
+            gr.update(interactive=False, value=translate("このステップで打ち切り")),   # Stop-after-step
+            gr.update(value=current_seed) if current_seed is not None else gr.skip(),   # Seed（あれば）
         )
         return
 
-    while True:
-        flag, data = stream.output_queue.next()
-        if flag == "file":
-            batch_output_filename = data
-            yield (
-                batch_output_filename,
-                gr.update(value=None, visible=False),
-                gr.update(),
-                gr.update(),
-                gr.update(interactive=False),
-                gr.update(interactive=True),
-                gr.update(interactive=True),
-                gr.update(interactive=True),
-                gr.update(),
-            )
-        elif flag == "progress":
-            preview, desc, html = data
-            yield (
-                gr.update(),
-                gr.update(visible=True, value=preview),
-                desc,
-                html,
-                gr.update(interactive=False),
-                gr.update(interactive=True),
-                gr.update(interactive=True),
-                gr.update(interactive=True),
-                gr.update(),
-            )
-        elif flag == "end":
-            yield (
-                None,
-                gr.update(value=None, visible=False),
-                translate("同期終了（ジョブ完了）"),
-                "",
-                gr.update(interactive=True, value=translate("Start Generation")),
-                gr.update(interactive=False, value=translate("End Generation")),
-                gr.update(interactive=False, value=translate("この生成で打ち切り")),
-                gr.update(interactive=False, value=translate("このステップで打ち切り")),
-                gr.update(),
-            )
-            break
+    # 実行中なら、既存のストリーマーをそのまま使って継続配信
+    yield from _stream_job_to_ui(ctx)
+
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
