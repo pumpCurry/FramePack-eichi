@@ -3274,6 +3274,66 @@ def on_resync_button_clicked():
             gr.update(value=current_seed) if current_seed is not None else gr.skip(),
         )
 
+
+def follow_progress():
+    """現在のstreamにぶら下がって、進捗を流し続けるだけのジェネレータ"""
+    global stream
+    if stream is None:
+        yield (
+            None,                    # video/file out
+            gr.update(visible=False),# preview
+            translate("進行中のジョブはありません"),
+            "",                      # progress bar html
+            gr.update(interactive=True),   # start btn
+            gr.update(interactive=False),  # end btn
+            gr.update(interactive=False),  # stop_after btn
+            gr.update(interactive=False),  # stop_step btn
+            gr.update(),                   # seed
+        )
+        return
+
+    while True:
+        flag, data = stream.output_queue.next()
+        if flag == "file":
+            batch_output_filename = data
+            yield (
+                batch_output_filename,
+                gr.update(value=None, visible=False),
+                gr.update(),
+                gr.update(),
+                gr.update(interactive=False),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(),
+            )
+        elif flag == "progress":
+            preview, desc, html = data
+            yield (
+                gr.update(),
+                gr.update(visible=True, value=preview),
+                desc,
+                html,
+                gr.update(interactive=False),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(),
+            )
+        elif flag == "end":
+            yield (
+                None,
+                gr.update(value=None, visible=False),
+                translate("同期終了（ジョブ完了）"),
+                "",
+                gr.update(interactive=True, value=translate("Start Generation")),
+                gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                gr.update(interactive=False, value=translate("このステップで打ち切り")),
+                gr.update(),
+            )
+            break
+
 css = get_app_css()  # eichi_utilsのスタイルを使用
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
     css += f.read()
@@ -5127,7 +5187,7 @@ with block:
         queue=False
     )
     resync_status_btn.click(
-        fn=on_resync_button_clicked,
+        fn=follow_progress,
         inputs=[],
         outputs=[
             result_image,
