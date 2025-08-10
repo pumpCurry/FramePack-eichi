@@ -260,7 +260,7 @@ def progress_resync():
                 yield preview, desc, bar_html
             elif kind == 'file':
                 path = payload
-                yield None, f"Saved: {path}", None
+                yield None, translate("最終結果を保存しました: {0}").format(path), None
             elif kind == 'end':
                 break
     finally:
@@ -288,7 +288,7 @@ def _stream_job_to_ui(ctx: JobContext):
     """Stream job progress from the bus to the Gradio UI."""
     global last_progress_desc, last_progress_bar, last_preview_image
     global last_output_filename, current_seed, batch_stopped
-    global stop_after_current, stop_after_step
+    global stop_after_current, stop_after_step, generation_active
 
     running = is_generation_running()
     # Disable End button while a stop toggle is active to prevent accidental stops
@@ -315,7 +315,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 stop_after_step = False
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                 if batch_stopped:
-                    completion_message = translate("バッチ処理が中止されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
+                    completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
                 else:
                     completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(progress_img_total, progress_img_total)
                 completion_message = f"{completion_message} - {progress_summary}"
@@ -435,7 +435,7 @@ def is_port_in_use(port):
         return False
 
 # キャッシュ制御設定
-# ローカルファイルの優先的利用を無効化し安定性を向上
+# ローカルファイルを優先的に利用して高速化
 use_cache_files = True  # ファイルキャッシュは使用
 first_run = True  # 通常は初回起動として扱う
 
@@ -1045,7 +1045,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
            output_dir=None, save_input_images=False, save_before_input_images=False, use_lora=False, fp8_optimization=False, resolution=640,
            latent_window_size=9, latent_index=0, use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
            lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
-           batch_index=None, use_queue=False, prompt_queue_file=None,
+           batch_index=None, use_queue=False, prompt_queue_file=None, use_rope_batch=False,
            # Kisekaeichi関連のパラメータ
            use_reference_image=False, reference_image=None,
            target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None):
@@ -1061,6 +1061,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
     # フラグ類は確実にbool化しておく
     reference_long_edge = _to_bool(reference_long_edge)
+    use_rope_batch = bool(use_rope_batch)
 
     # キュー状態のログ出力
     use_queue_flag = bool(use_queue)
@@ -2900,11 +2901,11 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         reference_image_current = reference_images_list[reference_idx]
         # 停止フラグが設定されている場合は全バッチ処理を中止
         if batch_stopped:
-            print(translate("バッチ処理がユーザーによって中止されました"))
+            print(translate("バッチ処理がユーザーによって中断されました"))
             yield (
                 gr.skip(),
                 gr.update(visible=False),
-                translate("バッチ処理が中止されました。"),
+                translate("バッチ処理が中断されました"),
                 '',
                 gr.update(interactive=True),
                 gr.update(interactive=False, value=translate("End Generation")),
@@ -3036,7 +3037,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, resolution,
             current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
             lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
-            batch_index, use_queue, prompt_queue_file,
+            batch_index, use_queue, prompt_queue_file, use_rope_batch,
             # Kisekaeichi関連パラメータを追加
             use_reference_image, reference_image_current,
             target_index, history_index, reference_long_edge, input_mask, reference_mask
