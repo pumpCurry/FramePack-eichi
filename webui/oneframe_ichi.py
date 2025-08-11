@@ -336,7 +336,7 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
 def _stream_job_to_ui(ctx: JobContext):
     """Stream job progress from the bus to the Gradio UI."""
     global last_progress_desc, last_progress_bar, last_preview_image
-    global last_output_filename, current_seed, batch_stopped
+    global last_output_filename, current_seed, batch_stopped, last_stop_mode
     global stop_after_current, stop_after_step, generation_active
 
     running = is_generation_running()
@@ -362,7 +362,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 stop_after_current = False
                 stop_after_step = False
                 # 即時停止が掛かっていた場合は完了表示を中断扱いに寄せる
-                globals()['last_stop_mode'] = stop_state.get()
+                last_stop_mode = stop_state.get()
                 if last_stop_mode == StopMode.END_IMMEDIATE:
                     batch_stopped = True
                 stop_state.clear()
@@ -428,7 +428,7 @@ def _stream_job_to_ui(ctx: JobContext):
             elif flag == 'end':
                 stop_after_current = False
                 stop_after_step = False
-                globals()['last_stop_mode'] = stop_state.get()
+                last_stop_mode = stop_state.get()
                 stop_state.clear()
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                 # 即時停止の最終表示を正しく中断扱いにする
