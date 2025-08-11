@@ -361,6 +361,11 @@ def _stream_job_to_ui(ctx: JobContext):
             if item == (None, None):
                 stop_after_current = False
                 stop_after_step = False
+                # 即時停止が掛かっていた場合は完了表示を中断扱いに寄せる
+                globals()['last_stop_mode'] = stop_state.get()
+                if last_stop_mode == StopMode.END_IMMEDIATE:
+                    batch_stopped = True
+                stop_state.clear()
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                 if batch_stopped:
                     completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
@@ -372,7 +377,6 @@ def _stream_job_to_ui(ctx: JobContext):
                 globals()['last_progress_desc'] = completion_message
                 globals()['last_progress_bar'] = ''
                 globals()['last_preview_image'] = None
-                stop_state.clear()
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
                 yield (
                     final_output if final_output is not None else gr.skip(),
@@ -412,7 +416,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(running)
                 yield (
                     gr.skip(),
-                    gr.update(visible=True, value=preview),
+                    gr.update(visible=(preview is not None), value=preview),
                     desc,
                     html,
                     gr.update(interactive=False),
@@ -2560,12 +2564,15 @@ def toggle_stop_after_current():
         stop_state.request(StopMode.END_AFTER_GENERATION)
         stop_after_current = True
         stop_after_step = False
-    # ラベルも状態反映
+    # ラベル／ボタン状態を即時反映（Endはトグル待機中は無効化）
     label_current = translate("この生成で打ち切り") + (translate("（待機中：再クリックで取消）") if stop_state.get()==StopMode.END_AFTER_GENERATION else "")
     label_step    = translate("このステップで打ち切り")
+    running = is_generation_running()
+    end_enabled, _, _, _, _ = _compute_stop_controls(running)
     return (
         gr.update(interactive=True, value=label_current),
         gr.update(interactive=(stop_state.get()!=StopMode.END_AFTER_GENERATION), value=label_step),
+        gr.update(interactive=end_enabled, value=translate("End Generation")),
     )
 
 def toggle_stop_after_step():
@@ -2579,12 +2586,15 @@ def toggle_stop_after_step():
         stop_state.request(StopMode.END_AFTER_STEP)
         stop_after_step = True
         stop_after_current = False
-    # ラベルも状態反映
+    # ラベル／ボタン状態を即時反映（Endはトグル待機中は無効化）
     label_current = translate("この生成で打ち切り")
     label_step    = translate("このステップで打ち切り") + (translate("（待機中：再クリックで取消）") if stop_state.get()==StopMode.END_AFTER_STEP else "")
+    running = is_generation_running()
+    end_enabled, _, _, _, _ = _compute_stop_controls(running)
     return (
         gr.update(interactive=(stop_state.get()!=StopMode.END_AFTER_STEP), value=label_current),
         gr.update(interactive=True, value=label_step),
+        gr.update(interactive=end_enabled, value=translate("End Generation")),
     )
 
 def handle_open_folder_btn(folder_name):
@@ -2928,6 +2938,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
         end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(True)
+        globals()['current_seed'] = seed
         yield (
             gr.skip(),
             None,
@@ -5168,12 +5179,12 @@ with block:
     end_button.click(fn=press_end_generation, outputs=[end_button, stop_after_button, stop_step_button], queue=False)
     stop_after_button.click(
         fn=toggle_stop_after_current,
-        outputs=[stop_after_button, stop_step_button],
+        outputs=[stop_after_button, stop_step_button, end_button],
         queue=False
     )
     stop_step_button.click(
         fn=toggle_stop_after_step,
-        outputs=[stop_after_button, stop_step_button],
+        outputs=[stop_after_button, stop_step_button, end_button],
         queue=False
     )
     resync_status_btn.click(
