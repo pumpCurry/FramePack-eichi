@@ -1,5 +1,6 @@
 
 import os
+import traceback
 # 即座に起動しているファイル名をまずは出力して、画面に応答を表示する
 print(f"\n------------------------------------------------------------")
 print(f"{os.path.basename(__file__)} : Starting....")
@@ -284,7 +285,7 @@ def _cleanup_models(force: bool = False):
     image_encoder = None
     import gc
     gc.collect()
-    torch.cuda.empty_cache()
+    empty_cuda_cache()
 
 def is_generation_running():
     """生成ジョブが実行中なら True を返す。"""
@@ -329,6 +330,11 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
         cur_job = ctx
     generation_active = True
     stop_state.clear()  # 停止状態を初期化
+    try:
+        bar = make_progress_bar_html(0, "Init")
+        ctx.bus.publish(('progress', (None, translate("初期化中..."), bar)))
+    except Exception:
+        pass
     async_run(worker, ctx, *worker_args, **worker_kwargs)
     return ctx
 
@@ -378,6 +384,12 @@ def _stream_job_to_ui(ctx: JobContext):
                 globals()['last_progress_bar'] = ''
                 globals()['last_preview_image'] = None
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
+                print(translate("処理が完了しました。"))
+                if batch_stopped or last_stop_mode in (StopMode.END_IMMEDIATE, StopMode.END_AFTER_GENERATION, StopMode.END_AFTER_STEP):
+                    print(translate("生成終了が指定されたため、後続のバッチを停止します"))
+                print("**************************************************")
+                print(translate("【全バッチ処理完了】 プロセスが完了しました - {0}").format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                print("**************************************************")
                 yield (
                     final_output if final_output is not None else gr.skip(),
                     gr.update(visible=False),
@@ -389,6 +401,7 @@ def _stream_job_to_ui(ctx: JobContext):
                     gr.update(interactive=stop_step_enabled,    value=stop_step_label),
                     gr.update(value=current_seed) if current_seed is not None else gr.skip(),
                 )
+                generation_active = False
                 break
             flag, data = item
             if flag == 'file':
@@ -447,6 +460,12 @@ def _stream_job_to_ui(ctx: JobContext):
                 last_progress_bar = ''
                 last_preview_image = None
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
+                print(translate("処理が完了しました。"))
+                if batch_stopped or last_stop_mode in (StopMode.END_IMMEDIATE, StopMode.END_AFTER_GENERATION, StopMode.END_AFTER_STEP):
+                    print(translate("生成終了が指定されたため、後続のバッチを停止します"))
+                print("**************************************************")
+                print(translate("【全バッチ処理完了】 プロセスが完了しました - {0}").format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                print("**************************************************")
                 yield (
                     last_output_filename if last_output_filename is not None else gr.skip(),
                     gr.update(visible=False),
@@ -458,6 +477,7 @@ def _stream_job_to_ui(ctx: JobContext):
                     gr.update(interactive=stop_step_enabled,    value=stop_step_label),
                     gr.update(value=current_seed) if current_seed is not None else gr.skip(),
                 )
+                generation_active = False
                 break
 
             # 即時終了 or 中断指示時は完了メッセージで締める
@@ -685,6 +705,10 @@ np = spinner_while_running(
     importlib.import_module,
     "numpy",
 )
+
+def empty_cuda_cache():
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 math = spinner_while_running(
     translate("Load_math"),
@@ -1135,8 +1159,12 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
     # テキストエンコード結果をキャッシュするグローバル変数
     global cached_prompt, cached_n_prompt, cached_llama_vec, cached_llama_vec_n, cached_clip_l_pooler, cached_clip_l_pooler_n
     global cached_llama_attention_mask, cached_llama_attention_mask_n
+    global batch_stopped, current_seed
 
     bus = ctx.bus
+
+    seed = int(seed) if seed is not None else 0
+    current_seed = seed
 
     # フラグ類は確実にbool化しておく
     reference_long_edge = _to_bool(reference_long_edge)
@@ -1435,7 +1463,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 
                 # 入力をCPUに戻す
                 del input_image_gpu
-                torch.cuda.empty_cache()
+                empty_cuda_cache()
             
             # ローVRAMモードでは使用後すぐにCPUに戻す
             if not high_vram:
@@ -1447,14 +1475,14 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 print(translate("VAEエンコードで使用したVRAM: {0} GB").format(free_mem_before_encode - free_mem_after_encode))
                 
                 # メモリクリーンアップ
-                torch.cuda.empty_cache()
+                empty_cuda_cache()
         except Exception as e:
             print(translate("VAEエンコードエラー: {0}").format(e))
             
             # エラー発生時のメモリ解放
             if 'input_image_gpu' in locals():
                 del input_image_gpu
-            torch.cuda.empty_cache()
+            empty_cuda_cache()
             
             raise e
         
@@ -1561,7 +1589,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 print(translate("CLIP Vision エンコード後の空きVRAM {0} GB").format(free_mem_gb))
                 
                 # メモリクリーンアップ
-                torch.cuda.empty_cache()
+                empty_cuda_cache()
         except Exception as e:
             print(translate("CLIP Vision エンコードエラー: {0}").format(e))
             raise e
@@ -1702,7 +1730,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     print(translate("テキストエンコード後の空きVRAM {0} GB").format(free_mem_gb))
                     
                     # メモリクリーンアップ
-                    torch.cuda.empty_cache()
+                    empty_cuda_cache()
                 
                 # エンコード結果をキャッシュ
                 print(translate("エンコード結果をキャッシュします"))
@@ -1758,7 +1786,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             text_encoder, text_encoder_2 = None, None
             text_encoder_manager.dispose_text_encoders()
             # 明示的なキャッシュクリア
-            torch.cuda.empty_cache()
+            empty_cuda_cache()
         
         # 1フレームモード用の設定
         push_progress(None, '', 0, 'Start sampling ...')
@@ -1988,11 +2016,14 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             else:
                 transformer.initialize_teacache(enable_teacache=False)
             
+            last_preview_latent = {"x": None}  # 割り込み時に直近のプレビューを保存するバッファ
+
             def callback(d):
                 try:
-                    preview = d['denoised']
-                    preview = vae_decode_fake(preview)
+                    preview_latent = d['denoised']
+                    last_preview_latent["x"] = preview_latent.detach().clone()
 
+                    preview = vae_decode_fake(preview_latent)
                     preview = (preview * 255.0).detach().cpu().numpy().clip(0, 255).astype(np.uint8)
                     preview = einops.rearrange(preview, 'b c t h w -> (b h) (t w) c')
 
@@ -2002,11 +2033,13 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                         if not getattr(ctx, "_sent_end", False):
                             ctx.stream.input_queue.push('end')
                             ctx._sent_end = True
-                        return {'user_interrupt': True}
+                        raise KeyboardInterrupt("END_IMMEDIATE")
+
                     if mode == StopMode.END_AFTER_STEP and not getattr(ctx, "_sent_end", False):
                         # 現在ステップ完了で停止（1回だけ）
                         ctx.stream.input_queue.push('end')
                         ctx._sent_end = True
+                        raise KeyboardInterrupt("END_AFTER_STEP")
 
                     current_step = d['i'] + 1
                     percentage = int(100.0 * current_step / steps)
@@ -2014,17 +2047,16 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     desc = translate('1フレームモード: サンプリング中...')
                     push_progress(preview, desc, percentage, hint)
                 except KeyboardInterrupt:
-                    return {'user_interrupt': True}
-                except Exception as e:
-                    import traceback
+                    # 上位で処理するため再送
+                    raise
+                except Exception:
+                    # UIにエラー発生を知らせ、サンプラを確実に停止
                     traceback.print_exc()
-                    # UIにエラー発生を知らせ、ジョブを確実に停止
                     try:
                         ctx.bus.publish(('progress', (None, translate('サンプリング中にエラーが発生しました'), '')))
                     except Exception:
                         pass
-                    # サンプラ側に中断を明示
-                    return {'user_interrupt': True}
+                    raise KeyboardInterrupt("CALLBACK_ERROR")
             
             # 異常な次元数を持つテンソルを処理
             try:
@@ -2212,84 +2244,80 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             image_encoder = None
             vae = None
             # 明示的なキャッシュクリア
-            torch.cuda.empty_cache()
+            empty_cuda_cache()
             
             # sample_hunyuan関数呼び出し部分
+            # --------------------------------------------------------------------------------
+            # 【設計ノート / 参照画像の扱い】
+            # - 参照画像の「CLIP Vision 特徴」は、現状は直接は使わない方針。
+            #   理由: Hunyuan の RoPE/位置埋め込み周辺で形状/窓サイズ不整合が生じやすく、
+            #         安定性を優先して「latent のみ反映」に限定する暫定回避策。
+            # - 将来、安定化が検証できたら再導入を検討（このコメントは判断の経緯を残すため温存）。
+            #
+            # 【one_frame モードの indices/latents 調整方針】
+            # - 参照画像なし: 入力画像の先頭 1フレーム/1要素のみを使用。
+            # - 参照画像あり: 参照フレームを保持。オプション no_2x/no_4x に従い 2x/4x を間引く。
+            #
+            # 【width/height の注意】
+            # - ここでの width/height は「実画像サイズ」（8の倍数必須）。latent の空間サイズではない。
+            #   誤って latent サイズを渡すとサンプリング内部で shape mismatch を誘発する。
             try:
                 # BFloat16に変換（通常の処理）
                 if image_encoder_last_hidden_state is not None:
                     image_encoder_last_hidden_state = image_encoder_last_hidden_state.to(dtype=torch.bfloat16)
-                                
-                # 参照画像のCLIP Vision特徴を使用する場合は、注意深く処理
-                # 現在の実装では参照画像のCLIP特徴を使用しない（latentのみ使用）
-                # これはエラーを避けるための一時的な対策
+
+                # 参照画像のCLIP Vision特徴を使用する場合は注意（現在は使用しない）
+                #   → 上記「設計ノート / 参照画像の扱い」を参照
                 if use_reference_image and reference_encoder_output is not None:
-                    # 参照画像のCLIP特徴は直接使用せず、latentでのみ反映
-                    # これによりrotary embedding関連のエラーを回避
+                    # 参照画像のCLIP特徴は直接使用せず、latentでのみ反映（暫定回避策）
                     pass
-                
-                # PRの実装に従い、one_frame_inferenceモードではsample_num_framesをサンプリングに使用
+
                 if sample_num_frames == 1:
                     # latent_indicesと同様に、clean_latent_indicesも調整する必要がある
                     # 参照画像を使用しない場合のみ、最初の1要素に制限
                     if clean_latent_indices.shape[1] > 1 and not use_reference_image:
                         clean_latent_indices = clean_latent_indices[:, 0:1]  # 入力画像（最初の1要素）のみ
-                    # 参照画像使用時は両方のインデックスを保持（何もしない）
-                    
-                    # clean_latentsも調整（最後の1フレームのみ）
-                    # ただし、kisekaeichi機能の場合は、参照画像も保持する必要がある
                     # clean_latentsの調整 - 複数フレームがある場合の処理
                     if clean_latents.shape[2] > 1 and not use_reference_image:
                         # 参照画像を使用しない場合のみ、最初の1フレームに制限
                         clean_latents = clean_latents[:, :, 0:1]  # 入力画像（最初の1フレーム）のみ
-                        
-                    # 参照画像使用時は、両方のフレームを保持するため何もしない
-                    
-                    # clean_latentsの処理
+                    # 参照画像使用時のオプション処理
+                    # - no_2x/no_4x は VRAM と安定性のトレードオフ。必要がなければ間引く。
                     if use_reference_image:
-                        # PRのkisekaeichi実装オプション
-                        # target_indexとhistory_indexの処理は既に上で実行済み
-                        
-                        # オプション処理
                         if not use_clean_latents_2x:  # PRの"no_2x"オプション
                             clean_latents_2x = None
                             clean_latent_2x_indices = None
-                            
                         if not use_clean_latents_4x:  # PRの"no_4x"オプション
                             clean_latents_4x = None
                             clean_latent_4x_indices = None
-                        
-                    # clean_latents_2xとclean_latents_4xも必要に応じて調整
+                    # clean_latents_2x / clean_latents_4x は最後の 1 フレームだけ残す（履歴最終状態を使用）
                     if clean_latents_2x is not None and clean_latents_2x.shape[2] > 1:
                         clean_latents_2x = clean_latents_2x[:, :, -1:]  # 最後の1フレームのみ
-                    
                     if clean_latents_4x is not None and clean_latents_4x.shape[2] > 1:
                         clean_latents_4x = clean_latents_4x[:, :, -1:]  # 最後の1フレームのみ
-                    
                     # clean_latent_2x_indicesとclean_latent_4x_indicesも調整
                     if clean_latent_2x_indices is not None and clean_latent_2x_indices.shape[1] > 1:
                         clean_latent_2x_indices = clean_latent_2x_indices[:, -1:]
-                    
                     if clean_latent_4x_indices is not None and clean_latent_4x_indices.shape[1] > 1:
                         clean_latent_4x_indices = clean_latent_4x_indices[:, -1:]
-                                
-                # 最も重要な問題：widthとheightが間違っている可能性
-                # エラーログから、widthが60、heightが104になっているのが問題
-                # これらはlatentサイズであり、実際の画像サイズではない
+
+                # 最も重要な問題：
+                # - width/height は latent の空間次元ではなく、実画像サイズを渡す。
+                # - find_nearest_bucket の誤設定（latent サイズを拾う等）を避ける。
                 print(translate("実際の画像サイズを再確認"))
                 print(translate("入力画像のサイズ: {0}").format(input_image_np.shape))
-                
-                # find_nearest_bucketの結果が間違っている可能性
-                # 入力画像のサイズから正しい値を計算
+
                 actual_width = width
                 actual_height = height
                 if not (actual_width % 8 == 0 and actual_height % 8 == 0):
                     raise ValueError(translate("幅/高さは8の倍数である必要があります: {0}x{1}").format(actual_width, actual_height))
-                
+
                 # 初回実行時の品質について説明
+                # - Anti-drifting Sampling の履歴がない初回はノイズが目立つことがある。
+                #   期待動作。数回回すと履歴が蓄積して安定してくる。
                 if not use_cache:
                     print(translate("【初回実行について】初回は Anti-drifting Sampling の履歴データがないため、ノイズが入る場合があります"))
-                
+
                 generated_latents = sample_hunyuan(
                     transformer=transformer,
                     sampler='unipc',
@@ -2319,42 +2347,75 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     clean_latent_4x_indices=clean_latent_4x_indices,
                     callback=callback,
                 )
-                
-                # コールバックからの戻り値をチェック（コールバック関数が特殊な値を返した場合）
-                if isinstance(generated_latents, dict) and generated_latents.get('user_interrupt'):
-                    # ユーザーが中断したことを検出したが、メッセージは出さない（既に表示済み）
-                    # 現在のバッチは完了させる（KeyboardInterruptは使わない）
-                    print(translate("バッチ内処理を完了します"))
-                else:
-                    print(translate("生成は正常に完了しました"))
-                
-                # サンプリング直後のメモリクリーンアップ（重要）
-                # transformerの中間状態を明示的にクリア（KVキャッシュに相当）
+
+                print(translate("生成は正常に完了しました"))
+                # --- コールバック設計概要 ---
+                # ・プレビューは denoised latent を簡易 decode して UI に出す。
+                # ・停止モード:
+                #    - END_IMMEDIATE: 直ちに KeyboardInterrupt を投げて sampler を中断。
+                #    - END_AFTER_STEP: 現ステップ完了をもって KeyboardInterrupt。
+                #    - END_AFTER_GENERATION: 外層でジョブ単位の停止（次ジョブへ進まない）。
+                # ・Interrupt 捕捉側では、直近プレビュー latent を本 VAE で decode し、PNG を保存して 'file' を publish。
+
+                # サンプリング直後のメモリクリーンアップ
                 if hasattr(transformer, 'enable_teacache'):
                     transformer.enable_teacache = False
                     print(translate("transformerのキャッシュをクリア"))
-                
+
                 # 不要なモデル変数を積極的に解放
-                torch.cuda.empty_cache()
-                
-            except KeyboardInterrupt:
+                empty_cuda_cache()
+
+            except KeyboardInterrupt as ki:
                 print(translate("キーボード割り込みを検出しました - 安全に停止します"))
-                # リソースのクリーンアップ
-                del llama_vec, llama_vec_n, llama_attention_mask, llama_attention_mask_n
-                del clip_l_pooler, clip_l_pooler_n
-                try:
-                    # モデルをCPUに移動（可能な場合のみ）
-                    if 'transformer' in locals() and transformer is not None:
-                        if hasattr(transformer, 'cpu'):
-                            transformer.cpu()
-                    # GPUキャッシュをクリア
-                    torch.cuda.empty_cache()
-                except Exception as cleanup_e:
-                    print(translate("停止時のクリーンアップでエラー: {0}").format(cleanup_e))
-                # バッチ停止フラグを設定
                 batch_stopped = True
+
+                # 直近ステップのプレビューがあれば復元して保存
+                try:
+                    if last_preview_latent["x"] is not None:
+                        if vae is None:
+                            # VAE が未ロードなら再ロード
+                            vae = AutoencoderKLHunyuanVideo.from_pretrained(
+                                "hunyuanvideo-community/HunyuanVideo",
+                                subfolder='vae', torch_dtype=torch.float16
+                            ).cpu()
+                            setup_vae_if_loaded()
+                        load_model_as_complete(vae, target_device=gpu)
+
+                        with torch.no_grad():
+                            lat = last_preview_latent["x"].to(gpu)
+                            decoded = vae_decode(lat, vae).cpu()
+
+                        frame = decoded[0, :, 0, :, :]
+                        frame = torch.clamp(frame, -1., 1.) * 127.5 + 127.5
+                        frame = frame.detach().cpu().to(torch.uint8)
+                        frame = einops.rearrange(frame, 'c h w -> h w c').numpy()
+
+                        os.makedirs(outputs_folder, exist_ok=True)
+                        output_filename = os.path.join(outputs_folder, f'{job_id}_oneframe.png')
+                        Image.fromarray(frame).save(output_filename)
+
+                        try:
+                            embed_metadata_to_png(output_filename, {PROMPT_KEY: prompt, SEED_KEY: int(seed)})
+                        except Exception as e:
+                            print(translate("メタデータ埋め込みエラー: {0}").format(e))
+
+                        bus.publish(('file', output_filename))
+                        print(translate("ステップ完了時点のプレビューを保存しました: {0}").format(output_filename))
+                    else:
+                        print(translate("保存可能なプレビューがありませんでした"))
+                except Exception as e:
+                    print(translate("割り込み後の保存に失敗しました: {0}").format(e))
+                    traceback.print_exc()
+                finally:
+                    # 最終的なリソース解放
+                    try:
+                        if vae is not None and not high_vram:
+                            vae.to('cpu')
+                    except:
+                        pass
+                    empty_cuda_cache()
                 return None
-                
+
             except RuntimeError as e:
                 error_msg = str(e)
                 if "size of tensor" in error_msg:
@@ -2403,14 +2464,14 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 print(translate("VAEロード後の空きVRAM {0} GB").format(free_mem_gb_after_vae))
                 
                 # 追加のメモリクリーンアップ
-                torch.cuda.empty_cache()
+                empty_cuda_cache()
             
             # 実際に使用するラテントを抽出
             real_history_latents = history_latents[:, :, :total_generated_latent_frames, :, :]
             
             # 使用していないテンソルを早めに解放
             del history_latents
-            torch.cuda.empty_cache()
+            empty_cuda_cache()
             
             # 1フレームモードではVAEデコードを行い、画像を直接保存
             try:
@@ -2438,12 +2499,12 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     
                     # 不要なGPU上のラテントをすぐに解放
                     del real_history_latents_gpu
-                    torch.cuda.empty_cache()
+                    empty_cuda_cache()
                 
                 # デコード後にVAEをCPUに移動してメモリを解放
                 if not high_vram and vae is not None:
                     vae.to('cpu')
-                    torch.cuda.empty_cache()
+                    empty_cuda_cache()
                 
                 # デコード後のメモリを確認
                 free_mem_after_decode = get_cuda_free_memory_gb(gpu)
@@ -2457,7 +2518,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 # デコード結果を解放
                 del decoded_image
                 del real_history_latents
-                torch.cuda.empty_cache()
+                empty_cuda_cache()
                 
                 # メタデータを設定
                 metadata = {
@@ -2496,7 +2557,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     del real_history_latents
                 if 'decoded_image' in locals():
                     del decoded_image
-                torch.cuda.empty_cache()
+                empty_cuda_cache()
             
             break  # 1フレーム生成は1回のみ
             
@@ -3226,9 +3287,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
         try:
             yield from _stream_job_to_ui(ctx)
-
-            if batch_stopped:
-                return
         except KeyboardInterrupt:
             # 明示的なリソースクリーンアップ
             try:
@@ -3257,7 +3315,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                     except: pass
                 
                 # GPUキャッシュの完全クリア
-                torch.cuda.empty_cache()
+                empty_cuda_cache()
             except Exception as cleanup_e:
                 # クリーンアップ中のエラーを無視
                 pass
@@ -3300,11 +3358,11 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         finally:
             pass
 
-        # 1ジョブ完了後、"この生成で打ち切り" が立っていたら後続を止める
-        if last_stop_mode == StopMode.END_AFTER_GENERATION:
-            print(translate("この生成で打ち切りが指定されたため、後続のバッチを停止します"))
+        # 各ジョブ終了直後の共通ガード（次ジョブに進む前）
+        if stop_state.get() in (StopMode.END_AFTER_GENERATION, StopMode.END_IMMEDIATE) or batch_stopped:
             batch_stopped = True
-            last_stop_mode = StopMode.NONE
+            last_stop_mode = stop_state.get()
+            stop_state.clear()
             break
         last_stop_mode = StopMode.NONE
 
