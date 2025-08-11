@@ -427,10 +427,16 @@ def _stream_job_to_ui(ctx: JobContext):
                 last_stop_mode = stop_state.get()
                 stop_state.clear()
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                if batch_stopped:
-                    completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
+                # 即時停止の最終表示を正しく中断扱いにする
+                if last_stop_mode == StopMode.END_IMMEDIATE or batch_stopped:
+                    completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(
+                        progress_img_idx, progress_img_total
+                    )
+                    batch_stopped = True
                 else:
-                    completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(progress_img_total, progress_img_total)
+                    completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(
+                        progress_img_total, progress_img_total
+                    )
                 completion_message = f"{completion_message} - {progress_summary}"
                 last_output_filename = output_filename or last_output_filename
                 last_progress_desc = completion_message
@@ -2529,6 +2535,9 @@ def worker(ctx: JobContext, *args, **kwargs):
 def press_end_generation():
     """{生成終了}: 即時停止（保存しない・キャンセル不可）。"""
     stop_state.request(StopMode.END_IMMEDIATE)
+    global batch_stopped
+    # 保険として中断フラグも立てる（最終文言の取りこぼし防止）
+    batch_stopped = True
     with ctx_lock:
         ctx = cur_job
     if ctx and not getattr(ctx, "_sent_end", False):
