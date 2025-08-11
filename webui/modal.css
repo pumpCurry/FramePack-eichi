@@ -2,17 +2,22 @@
   border: none;
   padding: 0;
   background: none;
+  z-index: 100000; /* gradio overlay より前面に */
+  cursor: zoom-out;
 }
 #modal_dlg::backdrop {
   background: rgba(0,0,0,0.8);
 }
 #modal_dlg img {
-  max-width: 90vw;
-  max-height: 90vh;
+  max-width: 96vw;
+  max-height: 96vh;
 }
 .icon-button-wrapper .view-modal-btn,
 .gr-image__tool .view-modal-btn {
   background: transparent;
   border: none;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
