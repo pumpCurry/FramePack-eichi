@@ -428,7 +428,8 @@ def _stream_job_to_ui(ctx: JobContext):
             elif flag == 'end':
                 stop_after_current = False
                 stop_after_step = False
-                last_stop_mode = stop_state.get()
+                globals()['last_stop_mode'] = stop_state.get()
+                last_stop_mode = globals()['last_stop_mode']
                 stop_state.clear()
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                 # 即時停止の最終表示を正しく中断扱いにする
@@ -2902,6 +2903,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     
     # 生成開始直後の初期UI（ボタン状態・ラベルを _compute_stop_controls に合わせる）
     end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(True)
+    globals()['current_seed'] = seed  # ランダムで後から変えてもここで初期値は同期
     yield (
         gr.skip(),
         None,
