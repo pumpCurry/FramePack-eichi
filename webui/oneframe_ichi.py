@@ -2013,7 +2013,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             else:
                 transformer.initialize_teacache(enable_teacache=False)
             
-            last_preview_latent = {"x": None}
+            last_preview_latent = {"x": None}  # 割り込み時に直近のプレビューを保存するバッファ
 
             def callback(d):
                 try:
@@ -2026,12 +2026,14 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
                     mode = stop_state.get()
                     if mode == StopMode.END_IMMEDIATE:
+                        # 即時停止：保存せず終了
                         if not getattr(ctx, "_sent_end", False):
                             ctx.stream.input_queue.push('end')
                             ctx._sent_end = True
                         raise KeyboardInterrupt("END_IMMEDIATE")
 
                     if mode == StopMode.END_AFTER_STEP and not getattr(ctx, "_sent_end", False):
+                        # 現在ステップ完了で停止（1回だけ）
                         ctx.stream.input_queue.push('end')
                         ctx._sent_end = True
                         raise KeyboardInterrupt("END_AFTER_STEP")
@@ -2042,8 +2044,10 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     desc = translate('1フレームモード: サンプリング中...')
                     push_progress(preview, desc, percentage, hint)
                 except KeyboardInterrupt:
+                    # 上位で処理するため再送
                     raise
                 except Exception:
+                    # UIにエラー発生を知らせ、サンプラを確実に停止
                     traceback.print_exc()
                     try:
                         ctx.bus.publish(('progress', (None, translate('サンプリング中にエラーが発生しました'), '')))
@@ -2245,30 +2249,41 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 if image_encoder_last_hidden_state is not None:
                     image_encoder_last_hidden_state = image_encoder_last_hidden_state.to(dtype=torch.bfloat16)
 
+                # 参照画像のCLIP Vision特徴を使用する場合は注意（現在は使用しない）
                 if use_reference_image and reference_encoder_output is not None:
+                    # 参照画像のCLIP特徴は直接使用せず、latentでのみ反映（暫定回避策）
                     pass
 
                 if sample_num_frames == 1:
+                    # latent_indicesと同様に、clean_latent_indicesも調整する必要がある
+                    # 参照画像を使用しない場合のみ、最初の1要素に制限
                     if clean_latent_indices.shape[1] > 1 and not use_reference_image:
-                        clean_latent_indices = clean_latent_indices[:, 0:1]
+                        clean_latent_indices = clean_latent_indices[:, 0:1]  # 入力画像（最初の1要素）のみ
+                    # clean_latentsの調整 - 複数フレームがある場合の処理
                     if clean_latents.shape[2] > 1 and not use_reference_image:
-                        clean_latents = clean_latents[:, :, 0:1]
+                        # 参照画像を使用しない場合のみ、最初の1フレームに制限
+                        clean_latents = clean_latents[:, :, 0:1]  # 入力画像（最初の1フレーム）のみ
+                    # 参照画像使用時のオプション処理
                     if use_reference_image:
-                        if not use_clean_latents_2x:
+                        if not use_clean_latents_2x:  # PRの"no_2x"オプション
                             clean_latents_2x = None
                             clean_latent_2x_indices = None
-                        if not use_clean_latents_4x:
+                        if not use_clean_latents_4x:  # PRの"no_4x"オプション
                             clean_latents_4x = None
                             clean_latent_4x_indices = None
+                    # clean_latents_2xとclean_latents_4xも必要に応じて調整
                     if clean_latents_2x is not None and clean_latents_2x.shape[2] > 1:
-                        clean_latents_2x = clean_latents_2x[:, :, -1:]
+                        clean_latents_2x = clean_latents_2x[:, :, -1:]  # 最後の1フレームのみ
                     if clean_latents_4x is not None and clean_latents_4x.shape[2] > 1:
-                        clean_latents_4x = clean_latents_4x[:, :, -1:]
+                        clean_latents_4x = clean_latents_4x[:, :, -1:]  # 最後の1フレームのみ
+                    # clean_latent_2x_indicesとclean_latent_4x_indicesも調整
                     if clean_latent_2x_indices is not None and clean_latent_2x_indices.shape[1] > 1:
                         clean_latent_2x_indices = clean_latent_2x_indices[:, -1:]
                     if clean_latent_4x_indices is not None and clean_latent_4x_indices.shape[1] > 1:
                         clean_latent_4x_indices = clean_latent_4x_indices[:, -1:]
 
+                # 最も重要な問題：widthとheightはlatentサイズではなく実画像サイズを使用する
+                # find_nearest_bucketの誤設定を避けるため、入力画像のサイズから再計算
                 print(translate("実際の画像サイズを再確認"))
                 print(translate("入力画像のサイズ: {0}").format(input_image_np.shape))
 
@@ -2277,6 +2292,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 if not (actual_width % 8 == 0 and actual_height % 8 == 0):
                     raise ValueError(translate("幅/高さは8の倍数である必要があります: {0}x{1}").format(actual_width, actual_height))
 
+                # 初回実行時の品質について説明
                 if not use_cache:
                     print(translate("【初回実行について】初回は Anti-drifting Sampling の履歴データがないため、ノイズが入る場合があります"))
 
@@ -2312,19 +2328,23 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
                 print(translate("生成は正常に完了しました"))
 
+                # サンプリング直後のメモリクリーンアップ
                 if hasattr(transformer, 'enable_teacache'):
                     transformer.enable_teacache = False
                     print(translate("transformerのキャッシュをクリア"))
 
+                # 不要なモデル変数を積極的に解放
                 empty_cuda_cache()
 
             except KeyboardInterrupt as ki:
                 print(translate("キーボード割り込みを検出しました - 安全に停止します"))
                 batch_stopped = True
 
+                # 直近ステップのプレビューがあれば復元して保存
                 try:
                     if last_preview_latent["x"] is not None:
                         if vae is None:
+                            # VAE が未ロードなら再ロード
                             vae = AutoencoderKLHunyuanVideo.from_pretrained(
                                 "hunyuanvideo-community/HunyuanVideo",
                                 subfolder='vae', torch_dtype=torch.float16
@@ -2358,6 +2378,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     print(translate("割り込み後の保存に失敗しました: {0}").format(e))
                     traceback.print_exc()
                 finally:
+                    # 最終的なリソース解放
                     try:
                         if vae is not None and not high_vram:
                             vae.to('cpu')
