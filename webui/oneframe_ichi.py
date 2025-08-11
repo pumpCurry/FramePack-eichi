@@ -429,7 +429,6 @@ def _stream_job_to_ui(ctx: JobContext):
                 stop_after_current = False
                 stop_after_step = False
                 globals()['last_stop_mode'] = stop_state.get()
-                last_stop_mode = globals()['last_stop_mode']
                 stop_state.clear()
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                 # 即時停止の最終表示を正しく中断扱いにする
@@ -2961,6 +2960,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
         # UI更新（値は変更しない）
         end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(True)
+        globals()['current_seed'] = seed
         yield (
             gr.skip(),
             None,
