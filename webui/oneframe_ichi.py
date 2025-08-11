@@ -1,5 +1,6 @@
 
 import os
+import traceback
 # 即座に起動しているファイル名をまずは出力して、画面に応答を表示する
 print(f"\n------------------------------------------------------------")
 print(f"{os.path.basename(__file__)} : Starting....")
@@ -400,6 +401,7 @@ def _stream_job_to_ui(ctx: JobContext):
                     gr.update(interactive=stop_step_enabled,    value=stop_step_label),
                     gr.update(value=current_seed) if current_seed is not None else gr.skip(),
                 )
+                generation_active = False
                 break
             flag, data = item
             if flag == 'file':
@@ -475,6 +477,7 @@ def _stream_job_to_ui(ctx: JobContext):
                     gr.update(interactive=stop_step_enabled,    value=stop_step_label),
                     gr.update(value=current_seed) if current_seed is not None else gr.skip(),
                 )
+                generation_active = False
                 break
 
             # 即時終了 or 中断指示時は完了メッセージで締める
@@ -2244,12 +2247,27 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             empty_cuda_cache()
             
             # sample_hunyuan関数呼び出し部分
+            # --------------------------------------------------------------------------------
+            # 【設計ノート / 参照画像の扱い】
+            # - 参照画像の「CLIP Vision 特徴」は、現状は直接は使わない方針。
+            #   理由: Hunyuan の RoPE/位置埋め込み周辺で形状/窓サイズ不整合が生じやすく、
+            #         安定性を優先して「latent のみ反映」に限定する暫定回避策。
+            # - 将来、安定化が検証できたら再導入を検討（このコメントは判断の経緯を残すため温存）。
+            #
+            # 【one_frame モードの indices/latents 調整方針】
+            # - 参照画像なし: 入力画像の先頭 1フレーム/1要素のみを使用。
+            # - 参照画像あり: 参照フレームを保持。オプション no_2x/no_4x に従い 2x/4x を間引く。
+            #
+            # 【width/height の注意】
+            # - ここでの width/height は「実画像サイズ」（8の倍数必須）。latent の空間サイズではない。
+            #   誤って latent サイズを渡すとサンプリング内部で shape mismatch を誘発する。
             try:
                 # BFloat16に変換（通常の処理）
                 if image_encoder_last_hidden_state is not None:
                     image_encoder_last_hidden_state = image_encoder_last_hidden_state.to(dtype=torch.bfloat16)
 
                 # 参照画像のCLIP Vision特徴を使用する場合は注意（現在は使用しない）
+                #   → 上記「設計ノート / 参照画像の扱い」を参照
                 if use_reference_image and reference_encoder_output is not None:
                     # 参照画像のCLIP特徴は直接使用せず、latentでのみ反映（暫定回避策）
                     pass
@@ -2264,6 +2282,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                         # 参照画像を使用しない場合のみ、最初の1フレームに制限
                         clean_latents = clean_latents[:, :, 0:1]  # 入力画像（最初の1フレーム）のみ
                     # 参照画像使用時のオプション処理
+                    # - no_2x/no_4x は VRAM と安定性のトレードオフ。必要がなければ間引く。
                     if use_reference_image:
                         if not use_clean_latents_2x:  # PRの"no_2x"オプション
                             clean_latents_2x = None
@@ -2271,7 +2290,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                         if not use_clean_latents_4x:  # PRの"no_4x"オプション
                             clean_latents_4x = None
                             clean_latent_4x_indices = None
-                    # clean_latents_2xとclean_latents_4xも必要に応じて調整
+                    # clean_latents_2x / clean_latents_4x は最後の 1 フレームだけ残す（履歴最終状態を使用）
                     if clean_latents_2x is not None and clean_latents_2x.shape[2] > 1:
                         clean_latents_2x = clean_latents_2x[:, :, -1:]  # 最後の1フレームのみ
                     if clean_latents_4x is not None and clean_latents_4x.shape[2] > 1:
@@ -2282,8 +2301,9 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     if clean_latent_4x_indices is not None and clean_latent_4x_indices.shape[1] > 1:
                         clean_latent_4x_indices = clean_latent_4x_indices[:, -1:]
 
-                # 最も重要な問題：widthとheightはlatentサイズではなく実画像サイズを使用する
-                # find_nearest_bucketの誤設定を避けるため、入力画像のサイズから再計算
+                # 最も重要な問題：
+                # - width/height は latent の空間次元ではなく、実画像サイズを渡す。
+                # - find_nearest_bucket の誤設定（latent サイズを拾う等）を避ける。
                 print(translate("実際の画像サイズを再確認"))
                 print(translate("入力画像のサイズ: {0}").format(input_image_np.shape))
 
@@ -2293,6 +2313,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     raise ValueError(translate("幅/高さは8の倍数である必要があります: {0}x{1}").format(actual_width, actual_height))
 
                 # 初回実行時の品質について説明
+                # - Anti-drifting Sampling の履歴がない初回はノイズが目立つことがある。
+                #   期待動作。数回回すと履歴が蓄積して安定してくる。
                 if not use_cache:
                     print(translate("【初回実行について】初回は Anti-drifting Sampling の履歴データがないため、ノイズが入る場合があります"))
 
@@ -2327,6 +2349,13 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 )
 
                 print(translate("生成は正常に完了しました"))
+                # --- コールバック設計概要 ---
+                # ・プレビューは denoised latent を簡易 decode して UI に出す。
+                # ・停止モード:
+                #    - END_IMMEDIATE: 直ちに KeyboardInterrupt を投げて sampler を中断。
+                #    - END_AFTER_STEP: 現ステップ完了をもって KeyboardInterrupt。
+                #    - END_AFTER_GENERATION: 外層でジョブ単位の停止（次ジョブへ進まない）。
+                # ・Interrupt 捕捉側では、直近プレビュー latent を本 VAE で decode し、PNG を保存して 'file' を publish。
 
                 # サンプリング直後のメモリクリーンアップ
                 if hasattr(transformer, 'enable_teacache'):
