@@ -2008,10 +2008,13 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
+                    # UIにエラー発生を知らせ、ジョブを確実に停止
                     try:
-                        ctx.bus.publish(('progress', (None, translate('プレビュー生成中にエラーが発生しました'), '')))
+                        ctx.bus.publish(('progress', (None, translate('サンプリング中にエラーが発生しました'), '')))
                     except Exception:
                         pass
+                    # サンプラ側に中断を明示
+                    return {'user_interrupt': True}
             
             # 異常な次元数を持つテンソルを処理
             try:
@@ -3255,6 +3258,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             return
         except Exception as e:
             import traceback
+            traceback.print_exc()
             # UIをリセット
             stop_state.clear()
             end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
