@@ -320,7 +320,7 @@ def attach_to_running_job():
     end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(running)
     yield _ui_tuple(
         last_output_filename if last_output_filename is not None else gr.skip(),
-        gr.update(visible=last_preview_image is not None, value=last_preview_image),
+        gr.update(value=last_preview_image) if last_preview_image is not None else gr.skip(),
         last_progress_desc,
         last_progress_bar,
         gr.update(interactive=not running, value=translate("Start Generation")),
@@ -367,7 +367,7 @@ def _stream_job_to_ui(ctx: JobContext):
     end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(running)
     yield _ui_tuple(
         last_output_filename if last_output_filename is not None else gr.skip(),
-        gr.update(visible=last_preview_image is not None, value=last_preview_image),
+        gr.update(value=last_preview_image) if last_preview_image is not None else gr.skip(),
         last_progress_desc,
         last_progress_bar,
         gr.update(interactive=not running, value=translate("Start Generation")),
@@ -408,9 +408,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 print(translate("【全バッチ処理完了】 プロセスが完了しました - {0}").format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                 print("**************************************************")
                 generation_active = False
-                preview_update = gr.update(
-                    visible=(last_preview_image is not None), value=last_preview_image
-                )
+                preview_update = gr.update(value=last_preview_image) if last_preview_image is not None else gr.skip()
                 yield _ui_tuple(
                     final_output if final_output is not None else gr.skip(),
                     preview_update,
@@ -433,7 +431,7 @@ def _stream_job_to_ui(ctx: JobContext):
 
                     _img = _PILImage.open(output_filename).convert("RGB")
                     last_preview_image = _np.array(_img)
-                    preview_update = gr.update(visible=True, value=last_preview_image)
+                    preview_update = gr.update(value=last_preview_image)
                 except Exception:
                     preview_update = gr.skip()
                 running = is_generation_running()
@@ -456,7 +454,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 last_progress_bar = html
                 running = is_generation_running()
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(running)
-                preview_update = gr.update(visible=True, value=preview) if preview is not None else gr.skip()
+                preview_update = gr.update(value=preview) if preview is not None else gr.skip()
                 yield _ui_tuple(
                     gr.skip(),
                     preview_update,
@@ -496,9 +494,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 print(translate("【全バッチ処理完了】 プロセスが完了しました - {0}").format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                 print("**************************************************")
                 generation_active = False
-                preview_update = gr.update(
-                    visible=(last_preview_image is not None), value=last_preview_image
-                )
+                preview_update = gr.update(value=last_preview_image) if last_preview_image is not None else gr.skip()
                 yield _ui_tuple(
                     last_output_filename if last_output_filename is not None else gr.skip(),
                     preview_update,
@@ -522,9 +518,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 stop_state.clear()
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
                 generation_active = False
-                preview_update = gr.update(
-                    visible=(last_preview_image is not None), value=last_preview_image
-                )
+                preview_update = gr.update(value=last_preview_image) if last_preview_image is not None else gr.skip()
                 yield _ui_tuple(
                     output_filename if output_filename is not None else gr.skip(),
                     preview_update,
@@ -2617,14 +2611,19 @@ def worker(ctx: JobContext, *args, **kwargs):
     try:
         return _worker_impl(ctx, *args, **kwargs)
     finally:
-        # 即時終了（END_IMMEDIATE）などの直後は、余計な「終了処理中...」を出さない
+        # 即時終了（END_IMMEDIATE）の直後は、余計な「終了処理中...」を出さない
         try:
-            if last_stop_mode not in (StopMode.END_IMMEDIATE,):
+            mode = stop_state.get()
+            if mode != StopMode.END_IMMEDIATE:
                 try:
                     ctx.bus.publish(('progress', (None, translate('生成の終了処理中...'), '')))
                 except Exception:
                     pass
             ctx.bus.publish(('end', None))
+            try:
+                ctx._sent_end = True
+            except Exception:
+                pass
         except Exception:
             pass
         ctx.done.set()
@@ -3188,7 +3187,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         if batch_stopped:
             print(translate("バッチ処理がユーザーによって中断されました"))
             preview_update = (
-                gr.update(visible=True, value=last_preview_image)
+                gr.update(value=last_preview_image)
                 if last_preview_image is not None else gr.skip()
             )
             yield _ui_tuple(
@@ -3210,7 +3209,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
             preview_update = (
-                gr.update(visible=True, value=last_preview_image)
+                gr.update(value=last_preview_image)
                 if last_preview_image is not None else gr.skip()
             )
             yield _ui_tuple(
