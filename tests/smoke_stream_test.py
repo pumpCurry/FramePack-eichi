@@ -3,6 +3,52 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__) + "/.."))
 sys.path.append(os.path.abspath(os.path.dirname(__file__) + "/../webui"))
 sys.argv = [sys.argv[0]]  # argparse対策
 
+# --- minimal stubs for PIL / numpy (tests may run without these deps) ---
+if 'PIL' not in sys.modules:
+    pil_pkg = types.ModuleType("PIL")
+    image_mod = types.ModuleType("PIL.Image")
+    class _Img:
+        def convert(self, *a, **k):
+            return self
+        @staticmethod
+        def open(*a, **k):
+            return _Img()
+        @staticmethod
+        def fromarray(*a, **k):
+            return _Img()
+    image_mod.open = _Img.open
+    image_mod.fromarray = _Img.fromarray
+    png_mod = types.ModuleType("PIL.PngImagePlugin")
+    class _PngInfo:
+        def add_text(self, *a, **k):
+            pass
+    png_mod.PngInfo = _PngInfo
+    pil_pkg.Image = image_mod
+    pil_pkg.PngImagePlugin = png_mod
+    sys.modules['PIL'] = pil_pkg
+    sys.modules['PIL.Image'] = image_mod
+    sys.modules['PIL.PngImagePlugin'] = png_mod
+
+if 'numpy' not in sys.modules:
+    np_stub = types.ModuleType("numpy")
+    np_stub.array = lambda x, *a, **k: x
+    sys.modules['numpy'] = np_stub
+
+if 'tqdm' not in sys.modules:
+    tqdm_mod = types.ModuleType("tqdm")
+    class _Tqdm:
+        @staticmethod
+        def write(*a, **k):
+            pass
+    tqdm_mod.tqdm = _Tqdm
+    sys.modules['tqdm'] = tqdm_mod
+
+if 'yaml' not in sys.modules:
+    yaml_mod = types.ModuleType("yaml")
+    yaml_mod.safe_load = lambda *a, **k: {}
+    yaml_mod.dump = lambda *a, **k: ""
+    sys.modules['yaml'] = yaml_mod
+
 # ---- 必要モジュールのダミー化 ----
 # torch / safetensors / huggingface_hub / gradio など重い依存をスタブする
 torch_stub = types.ModuleType("torch")

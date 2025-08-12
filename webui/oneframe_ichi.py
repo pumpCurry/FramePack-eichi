@@ -393,7 +393,7 @@ def _start_job_for_single_task(*worker_args, reuse_ctx: bool = True, **worker_kw
 
 def _finalize_batch_job():
     """Finalize the batch job once and perform cleanup."""
-    global cur_job, generation_active, job_ended_at
+    global cur_job, generation_active, job_ended_at, batch_stopped
     with ctx_lock:
         ctx = cur_job
     if not ctx:
@@ -405,7 +405,12 @@ def _finalize_batch_job():
         ts_end = job_ended_at.strftime("%Y-%m-%d %H:%M:%S")
         # 進捗の合計と現在値をまとめてサマる
         progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-        completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") + ts_end + " - " + progress_summary
+        mode = stop_state.get()
+        was_stopped = (mode in (StopMode.END_IMMEDIATE, StopMode.END_AFTER_GENERATION, StopMode.END_AFTER_STEP)) or batch_stopped
+        if was_stopped:
+            completion_message = translate("バッチ処理が中断されました") + " - " + progress_summary + " - " + ts_end
+        else:
+            completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") + ts_end + " - " + progress_summary
         print(completion_message)
         try:
             ctx.bus.publish(('progress', (None, completion_message, '')))
@@ -2695,35 +2700,31 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 @torch.no_grad()
 @log_and_continue("worker error")
 def worker(ctx: JobContext, *args, **kwargs):
-    global generation_active, cur_job
-    try:
-        # --- Safety valve 1: 誤って ctx が *args 先頭に混入していたら捨てる ---
-        if args and isinstance(args[0], JobContext):
-            args = args[1:]
+    """
+    _worker_impl へ安全に橋渡しするラッパ。
+    - 誤って ctx が *args 先頭に紛れた場合は捨てる
+    - _worker_impl が *args を受けない場合は受け入れ数を超える位置引数を間引く
+    """
+    # --- Safety valve 1: 先頭 JobContext 混入を除去 ---
+    if args and isinstance(args[0], JobContext):
+        args = args[1:]
 
-        # --- Safety valve 2: _worker_impl 受け入れ数を超える位置引数は間引く ---
-        try:
-            import inspect
-            sig = inspect.signature(_worker_impl)
-            params = list(sig.parameters.values())
-            # 先頭は ctx。以降で *args が無ければ、受け入れ可能な位置引数数を数える
-            has_var_pos = any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params[1:])
-            if not has_var_pos:
-                max_positional = 0
-                for p in params[1:]:
-                    if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
-                                  inspect.Parameter.POSITIONAL_OR_KEYWORD):
-                        max_positional += 1
-                if len(args) > max_positional:
-                    args = args[:max_positional]
-        except Exception:
-            # ここでの失敗は致命ではないので握りつぶす
-            pass
-        # -------------------------------------------------------------------
-        return _worker_impl(ctx, *args, **kwargs)
-    finally:
-        # フレームごとのワーカー終了では、バッチ終端の _finalize_batch_job() に一任
+    # --- Safety valve 2: 位置引数をシグネチャに合わせて制限 ---
+    try:
+        import inspect
+        sig = inspect.signature(_worker_impl)
+        params = list(sig.parameters.values())
+        has_var_pos = any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params[1:])
+        if not has_var_pos:
+            max_pos = sum(
+                p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                for p in params[1:]
+            )
+            args = args[:max_pos]
+    except Exception:
         pass
+
+    return _worker_impl(ctx, *args, **kwargs)
 
 # ---------- Stop ボタン用（UIバインド向けの軽量ハンドラ） ----------
 def press_end_generation():
