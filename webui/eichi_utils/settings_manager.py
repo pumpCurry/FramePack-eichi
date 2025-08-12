@@ -6,6 +6,9 @@ endframe_ichi.pyから外出しした設定ファイル関連処理を含む
 import os
 import json
 import subprocess
+import sys
+import shutil
+import platform
 from locales.i18n_extended import translate
 
 def get_settings_file_path():
@@ -19,8 +22,16 @@ def get_output_folder_path(folder_name=None):
     """出力フォルダの絶対パスを取得する"""
     # eichi_utils直下からwebuiフォルダに移動
     webui_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if not folder_name or not folder_name.strip():
+
+    # ブール値やNoneが入り込んだ場合は空文字列に変換
+    if isinstance(folder_name, bool) or folder_name is None:
+        folder_name = ""
+
+    # 文字列化してから空判定を行う
+    folder_name = str(folder_name)
+    if not folder_name.strip():
         folder_name = "outputs"
+
     return os.path.join(webui_path, folder_name)
 
 def initialize_settings():
@@ -62,6 +73,17 @@ def load_settings():
                 for key, value in default_settings.items():
                     if key not in settings:
                         settings[key] = value
+
+                # 出力フォルダ名を正規化
+                folder_name = settings.get('output_folder', 'outputs')
+                if isinstance(folder_name, bool) or folder_name is None:
+                    folder_name = 'outputs'
+                else:
+                    folder_name = str(folder_name)
+                    if not folder_name.strip():
+                        folder_name = 'outputs'
+                settings['output_folder'] = folder_name
+
                 return settings
         except Exception as e:
             print(translate("設定読み込みエラー: {0}").format(e))
@@ -84,24 +106,60 @@ def save_settings(settings):
         print(translate("設定保存エラー: {0}").format(e))
         return False
 
+def _is_wsl() -> bool:
+    """WSL 環境で実行されているかを判定"""
+    return "microsoft" in platform.release().lower() or "WSL_DISTRO_NAME" in os.environ
+
+
 def open_output_folder(folder_path):
     """指定されたフォルダをOSに依存せず開く"""
+    # ブール値やNoneが渡されてもエラーにならないよう文字列に変換
+    if isinstance(folder_path, bool) or folder_path is None:
+        folder_path = ""
+    folder_path = os.path.abspath(os.path.realpath(str(folder_path)))
+
     if not os.path.exists(folder_path):
         os.makedirs(folder_path, exist_ok=True)
 
     try:
         if os.name == 'nt':  # Windows
-            subprocess.Popen(['explorer', folder_path])
-        elif os.name == 'posix':  # Linux/Mac
             try:
-                subprocess.Popen(['xdg-open', folder_path])
-            except:
-                subprocess.Popen(['open', folder_path])
-        print(translate("フォルダを開きました: {0}").format(folder_path))
-        return True
+                os.startfile(folder_path)
+            except Exception:
+                subprocess.Popen(['explorer', folder_path])
+            print(translate("フォルダを開きました: {0}").format(folder_path))
+        elif os.name == 'posix':
+            if _is_wsl() and shutil.which('explorer.exe'):
+                win_path = folder_path
+                try:
+                    win_path = (
+                        subprocess.check_output(['wslpath', '-w', folder_path])
+                        .decode()
+                        .strip()
+                    )
+                except Exception:
+                    pass
+                subprocess.Popen(['explorer.exe', win_path])
+                print(translate("フォルダを開きました: {0}").format(folder_path))
+            else:
+                opener = None
+                if sys.platform == 'darwin' and shutil.which('open'):
+                    opener = 'open'
+                else:
+                    opener = shutil.which('xdg-open') or shutil.which('open')
+                if opener:
+                    subprocess.Popen([opener, folder_path])
+                    print(translate("フォルダを開きました: {0}").format(folder_path))
+                else:
+                    print(
+                        translate(
+                            "xdg-open/open が見つからないため自動でフォルダを開けません: {0}"
+                        ).format(folder_path)
+                    )
+        else:
+            print(translate("このOSではフォルダを自動で開く機能はサポートされていません: {0}").format(folder_path))
     except Exception as e:
         print(translate("フォルダを開く際にエラーが発生しました: {0}").format(e))
-        return False
 
 def get_localized_default_value(key, current_lang="ja"):
     """言語に応じたデフォルト値を返す
@@ -150,6 +208,7 @@ def get_default_app_settings(current_lang="ja"):
         
         # パフォーマンス設定
         "use_teacache": True,
+        "use_prompt_cache": True,
         "gpu_memory_preservation": 6,
         "use_vae_cache": False,
         
@@ -248,6 +307,9 @@ def get_default_app_settings_oichi():
         
         # 最適化設定
         "fp8_optimization": True,
+
+        # LoRAキャッシュ設定
+        "lora_cache": False,
         
         # バッチ設定
         "batch_count": 1,
@@ -257,8 +319,13 @@ def get_default_app_settings_oichi():
         
         # キュー設定
         "use_queue": False,
-        
+
+        # 参照画像長辺合わせ
+        "reference_long_edge": True,
+
         # 自動保存・アラーム設定
+        "save_input_images": False,
+        "save_before_input_images": False,
         "save_settings_on_start": False,
         "alarm_on_completion": True
     }

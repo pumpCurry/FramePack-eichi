@@ -68,12 +68,7 @@ from locales.i18n_extended import set_lang, translate
 
 set_lang(args.lang)
 
-try:
-    import winsound
-
-    HAS_WINSOUND = True
-except ImportError:
-    HAS_WINSOUND = False
+from .notification_utils import play_completion_sound
 import traceback
 
 if "HF_HOME" not in os.environ:
@@ -136,6 +131,7 @@ from eichi_utils.preset_manager import (
     save_preset,
     delete_preset,
 )
+from eichi_utils.path_utils import safe_path_join, ensure_dir
 
 # 拡張キーフレーム処理モジュールをインポート
 from eichi_utils.keyframe_handler_extended import extended_mode_length_change_handler
@@ -204,6 +200,12 @@ print(translate("High-VRAM Mode: {0}").format(high_vram))
 from eichi_utils.model_downloader import ModelDownloader
 
 ModelDownloader().download_original()
+
+def _norm_dropdown(val):
+    """Return a clean str or None from a Gr.Dropdown value."""
+    if val in (None, False, True, 0, "0", 0.0) or val == translate("なし"):
+        return None
+    return str(val)
 
 # グローバルなモデル状態管理インスタンスを作成
 # 通常モードではuse_f1_model=Falseを指定（デフォルト値なので省略可）
@@ -359,6 +361,7 @@ print(translate("設定から入力フォルダを読み込み: {0}").format(inp
 
 # 出力フォルダのフルパスを生成
 outputs_folder = get_output_folder_path(output_folder_name)
+outputs_folder = ensure_dir(outputs_folder, "outputs")
 os.makedirs(outputs_folder, exist_ok=True)
 
 # 入力フォルダも存在確認して作成
@@ -519,6 +522,7 @@ def worker(
         print(translate("デフォルト出力フォルダを使用: {0}").format(outputs_folder))
 
     # フォルダが存在しない場合は作成
+    outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
 
     # 処理時間計測の開始
@@ -817,6 +821,11 @@ def worker(
 
         # -------- LoRA 設定 START ---------
 
+        # sanitise raw UI values (can be bool when allow_custom_value=True)
+        lora_dropdown1 = _norm_dropdown(lora_dropdown1)
+        lora_dropdown2 = _norm_dropdown(lora_dropdown2)
+        lora_dropdown3 = _norm_dropdown(lora_dropdown3)
+
         # UI設定のuse_loraフラグ値を保存
         original_use_lora = use_lora
         print(f"[DEBUG] UI設定のuse_loraフラグの値: {original_use_lora}")
@@ -839,24 +848,7 @@ def worker(
         if lora_mode == translate("ディレクトリから選択") and has_lora_support:
             # ディレクトリからドロップダウンで選択されたLoRAが1つでもあるか確認
             has_selected_lora = False
-            for dropdown in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
-                dropdown_value = (
-                    dropdown.value if hasattr(dropdown, "value") else dropdown
-                )
-
-                # 通常の値が0や0.0などの数値の場合の特別処理（GradioのUIの問題によるもの）
-                if (
-                    dropdown_value == 0
-                    or dropdown_value == "0"
-                    or dropdown_value == 0.0
-                ):
-                    # 数値の0を"なし"として扱う
-                    dropdown_value = translate("なし")
-
-                # 型チェックと文字列変換を追加
-                if not isinstance(dropdown_value, str) and dropdown_value is not None:
-                    dropdown_value = str(dropdown_value)
-
+            for dropdown_value in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
                 if dropdown_value and dropdown_value != translate("なし"):
                     has_selected_lora = True
                     break
@@ -1109,7 +1101,7 @@ def worker(
                     )
 
                     if dropdown_value and dropdown_value != translate("なし"):
-                        lora_path = os.path.join(lora_dir, dropdown_value)
+                        lora_path = safe_path_join(lora_dir, dropdown_value)
                         print(
                             translate("[DEBUG] {name}のロード試行: パス={path}").format(
                                 name=dropdown_name, path=lora_path
@@ -1135,7 +1127,7 @@ def worker(
                                 )
                             else:
                                 # 直接ファイル名だけで試行
-                                lora_path_retry = os.path.join(
+                                lora_path_retry = safe_path_join(
                                     lora_dir, os.path.basename(str(dropdown_value))
                                 )
                                 print(
@@ -1864,10 +1856,8 @@ def worker(
             )
 
         # 処理終了時に通知
-        if HAS_WINSOUND:
-            winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
-        else:
-            print(translate("\n✓ 処理が完了しました！"))  # Linuxでの代替通知
+        if not play_completion_sound():
+            print(translate("\n✓ 処理が完了しました！"))
 
         # メモリ解放を明示的に実行
         if torch.cuda.is_available():
@@ -2250,44 +2240,17 @@ def process(
             selected_lora_names = []
 
             # 各ドロップダウンを確認
-            for dropdown, dropdown_name in [
+            for dropdown_value, dropdown_name in [
                 (lora_dropdown1, "LoRA1"),
                 (lora_dropdown2, "LoRA2"),
                 (lora_dropdown3, "LoRA3"),
             ]:
-                # ドロップダウンの値を取得（gr.Dropdownオブジェクトの場合はvalueプロパティを使用）
-                dropdown_value = (
-                    dropdown.value if hasattr(dropdown, "value") else dropdown
-                )
+                if not dropdown_value or dropdown_value == translate("なし"):
+                    continue
 
-                # 通常の値が0や0.0などの数値の場合の特別処理（GradioのUIの問題によるもの）
-                if (
-                    dropdown_value == 0
-                    or dropdown_value == "0"
-                    or dropdown_value == 0.0
-                ):
-                    # 数値の0を"なし"として扱う
-                    print(
-                        translate(
-                            "[DEBUG] 情報表示: {name}の値が数値0として検出されました。'なし'として扱います"
-                        ).format(name=dropdown_name)
-                    )
-                    dropdown_value = translate("なし")
-
-                # 型チェックと文字列変換を追加
-                if not isinstance(dropdown_value, str) and dropdown_value is not None:
-                    print(
-                        translate(
-                            "[DEBUG] 情報表示: {name}の値のタイプ変換が必要: {type}"
-                        ).format(name=dropdown_name, type=type(dropdown_value).__name__)
-                    )
-                    dropdown_value = str(dropdown_value)
-
-                if dropdown_value and dropdown_value != translate("なし"):
-                    lora_path = os.path.join(lora_dir, dropdown_value)
-                    # よりわかりやすい表記に
-                    model_name = f"LoRA{dropdown_name[-1]}: {dropdown_value}"
-                    selected_lora_names.append(model_name)
+                lora_path = safe_path_join(lora_dir, str(dropdown_value))
+                model_name = f"LoRA{dropdown_name[-1]}: {dropdown_value}"
+                selected_lora_names.append(model_name)
 
             # 選択されたLoRAモデルの情報出力を明確に
             if selected_lora_names:
@@ -3218,19 +3181,19 @@ with block:
                                     label=translate("LoRAモデル選択 1"),
                                     choices=[],
                                     value=None,
-                                    allow_custom_value=False,
+                                    allow_custom_value=True,
                                 )
                                 lora_dropdown2 = gr.Dropdown(
                                     label=translate("LoRAモデル選択 2"),
                                     choices=[],
                                     value=None,
-                                    allow_custom_value=False,
+                                    allow_custom_value=True,
                                 )
                                 lora_dropdown3 = gr.Dropdown(
                                     label=translate("LoRAモデル選択 3"),
                                     choices=[],
                                     value=None,
-                                    allow_custom_value=False,
+                                    allow_custom_value=True,
                                 )
                                 # スキャンボタン
                                 lora_scan_button = gr.Button(

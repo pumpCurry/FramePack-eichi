@@ -6,6 +6,9 @@
 import os
 import sys
 import datetime
+import subprocess
+import shutil
+import platform
 from locales.i18n_extended import translate
 
 # グローバル変数
@@ -24,11 +27,17 @@ _webui_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def get_absolute_path(path):
     """
     相対パスを絶対パスに変換する
+
+    パスに真偽値やNoneが渡されると ``os.path`` 関数で例外が発生するため、
+    その場合は空文字列として扱う。
     """
+    if isinstance(path, bool) or path is None:
+        path = ""
+
     if os.path.isabs(path):
         return path
     else:
-        return os.path.normpath(os.path.join(_webui_path, path))
+        return os.path.normpath(os.path.join(_webui_path, str(path)))
 
 class LoggerWriter:
     """
@@ -224,6 +233,11 @@ def set_log_folder(folder_path):
     global _log_folder
     
     print(f"[DEBUG] set_log_folder呼び出し: 現在={_log_folder}, 新規={folder_path}")
+
+    if isinstance(folder_path, bool) or folder_path is None:
+        # 真偽値やNoneが渡された場合はデフォルトの"logs"を使用
+        print(f"[WARNING] 不正なフォルダパスを受け取ったため 'logs' を使用します: {folder_path}")
+        folder_path = "logs"
     
     # 現在ログが有効な場合は一度無効化する
     if _log_enabled:
@@ -243,34 +257,62 @@ def set_log_folder(folder_path):
     print(f"[DEBUG] ログフォルダを設定: {os.path.abspath(_log_folder)}")
     return True
 
+def _is_wsl() -> bool:
+    """WSL 環境で実行されているかを判定"""
+    return "microsoft" in platform.release().lower() or "WSL_DISTRO_NAME" in os.environ
+
+
 def open_log_folder():
-    """
-    ログフォルダをOSに依存せず開く
-    """
-    folder_path = _log_folder
-    
+    """ログフォルダをOSに依存せず開く"""
+    # ブール値が入り込むと os.path.exists で例外となるため正規化
+    folder_path = get_absolute_path(_log_folder)
+
     if not os.path.exists(folder_path):
         try:
             os.makedirs(folder_path, exist_ok=True)
         except Exception as e:
             print(translate("ログフォルダの作成に失敗しました: {0} - {1}").format(folder_path, str(e)))
-            return False
-    
+            return
+
     try:
         if os.name == 'nt':  # Windows
-            import subprocess
-            subprocess.Popen(['explorer', folder_path])
-        elif os.name == 'posix':  # Linux/Mac
-            import subprocess
             try:
-                subprocess.Popen(['xdg-open', folder_path])
-            except:
-                subprocess.Popen(['open', folder_path])
-        print(translate("ログフォルダを開きました: {0}").format(folder_path))
-        return True
+                os.startfile(folder_path)
+            except Exception:
+                subprocess.Popen(['explorer', folder_path])
+            print(translate("ログフォルダを開きました: {0}").format(folder_path))
+        elif os.name == 'posix':
+            if _is_wsl() and shutil.which('explorer.exe'):
+                win_path = folder_path
+                try:
+                    win_path = (
+                        subprocess.check_output(['wslpath', '-w', folder_path])
+                        .decode()
+                        .strip()
+                    )
+                except Exception:
+                    pass
+                subprocess.Popen(['explorer.exe', win_path])
+                print(translate("ログフォルダを開きました: {0}").format(folder_path))
+            else:
+                opener = None
+                if sys.platform == 'darwin' and shutil.which('open'):
+                    opener = 'open'
+                else:
+                    opener = shutil.which('xdg-open') or shutil.which('open')
+                if opener:
+                    subprocess.Popen([opener, folder_path])
+                    print(translate("ログフォルダを開きました: {0}").format(folder_path))
+                else:
+                    print(
+                        translate(
+                            "xdg-open/open が見つからないため自動でフォルダを開けません: {0}"
+                        ).format(folder_path)
+                    )
+        else:
+            print(translate("このOSではフォルダを自動で開く機能はサポートされていません: {0}").format(folder_path))
     except Exception as e:
         print(translate("ログフォルダを開く際にエラーが発生しました: {0}").format(e))
-        return False
 
 def get_default_log_settings():
     """

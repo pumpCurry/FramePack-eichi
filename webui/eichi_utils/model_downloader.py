@@ -9,16 +9,21 @@ class ModelDownloader:
         self.max_workers_per_model = max_workers_per_model
 
     def _download_models(self, models_to_download):
-        def download_model(model_info):
+        total = len(models_to_download)
+
+        def download_model(model_info, idx):
+            repo_id = model_info["repo_id"]
+            print(f"[{idx}/{total}] download start: {repo_id}")
             kwargs = {
-                "repo_id": model_info["repo_id"],
+                "repo_id": repo_id,
                 "allow_patterns": model_info.get("allow_patterns", "*"),
                 "max_workers": self.max_workers_per_model,
             }
             snapshot_download(**kwargs)
+            print(f"[{idx}/{total}] download complete: {repo_id}")
 
         with ThreadPoolExecutor(max_workers=self.max_parallel_models) as executor:
-            futures = [executor.submit(download_model, model) for model in models_to_download]
+            futures = [executor.submit(download_model, model, i + 1) for i, model in enumerate(models_to_download)]
             for future in as_completed(futures):
                 future.result()
     
