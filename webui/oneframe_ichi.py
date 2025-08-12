@@ -376,7 +376,8 @@ def _start_job_for_single_task(*worker_args, reuse_ctx: bool = True, **worker_kw
             return worker(ctx, *a, **kw)
         finally:
             ctx._busy = False
-    async_run(_wrap, ctx, *worker_args, **worker_kwargs)
+    # ctx は _wrap のクロージャで持つので渡さない
+    async_run(_wrap, *worker_args, **worker_kwargs)
     return ctx
 
 
@@ -2696,7 +2697,11 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 def worker(ctx: JobContext, *args, **kwargs):
     global generation_active, cur_job
     try:
-        # --- Safety valve: trim overflow positional args for _worker_impl ---
+        # --- Safety valve 1: 誤って ctx が *args 先頭に混入していたら捨てる ---
+        if args and isinstance(args[0], JobContext):
+            args = args[1:]
+
+        # --- Safety valve 2: _worker_impl 受け入れ数を超える位置引数は間引く ---
         try:
             import inspect
             sig = inspect.signature(_worker_impl)
