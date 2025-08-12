@@ -455,16 +455,17 @@ def _stream_job_to_ui(ctx: JobContext):
                 last_progress_bar = html
                 running = is_generation_running()
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(running)
+                preview_update = gr.update(visible=True, value=preview) if preview is not None else gr.skip()
                 yield _ui_tuple(
                     gr.skip(),
-                    gr.update(visible=(preview is not None), value=preview),
+                    preview_update,
                     desc,
                     html,
                     gr.update(interactive=False),
                     gr.update(interactive=end_enabled),
                     gr.update(interactive=stop_current_enabled, value=stop_current_label),
                     gr.update(interactive=stop_step_enabled, value=stop_step_label),
-                    gr.update()
+                    gr.update(),
                 )
             elif flag == 'end':
                 stop_after_current = False
@@ -3180,9 +3181,13 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # 停止フラグが設定されている場合は全バッチ処理を中止
         if batch_stopped:
             print(translate("バッチ処理がユーザーによって中断されました"))
+            preview_update = (
+                gr.update(visible=True, value=last_preview_image)
+                if last_preview_image is not None else gr.skip()
+            )
             yield _ui_tuple(
                 gr.skip(),
-                gr.update(visible=False),
+                preview_update,
                 translate("バッチ処理が中断されました"),
                 '',
                 gr.update(interactive=True),
@@ -3198,9 +3203,13 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
+            preview_update = (
+                gr.update(visible=True, value=last_preview_image)
+                if last_preview_image is not None else gr.skip()
+            )
             yield _ui_tuple(
                 gr.skip(),
-                gr.update(visible=False),
+                preview_update,
                 batch_info,
                 "",
                 gr.update(interactive=False),
