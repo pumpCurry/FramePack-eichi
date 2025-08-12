@@ -261,6 +261,8 @@ last_progress_bar = ""
 last_preview_image = None
 last_output_filename = None
 current_seed = None
+job_started_at = None
+job_ended_at = None
 
 # 再同期処理に使用される生成状態フラグ
 generation_active = False
@@ -366,12 +368,16 @@ def _start_job_for_single_task(*worker_args, reuse_ctx: bool = True, **worker_kw
     stop_state.clear()  # 停止状態を初期化
     if should_init:
         try:
-            # 初期化バー
+            # 1) 初期化バー
             bar = make_progress_bar_html(0, "Init")
             ctx.bus.publish(('progress', (None, translate("初期化中..."), bar)))
-            # 開始メッセージ（時刻付き）
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            ctx.bus.publish(('progress', (None, translate("開始しています... ") + ts, '')))
+            # 2) 開始メッセージ（時刻付き）
+            from datetime import datetime as _dt
+            globals()['job_started_at'] = _dt.now()
+            ts = job_started_at.strftime("%Y-%m-%d %H:%M:%S")
+            msg = translate("開始しています... ") + ts
+            print(msg)
+            ctx.bus.publish(('progress', (None, msg, '')))
         except Exception:
             pass
     ctx._busy = True
@@ -387,18 +393,25 @@ def _start_job_for_single_task(*worker_args, reuse_ctx: bool = True, **worker_kw
 
 def _finalize_batch_job():
     """Finalize the batch job once and perform cleanup."""
-    global cur_job, generation_active
+    global cur_job, generation_active, job_ended_at
     with ctx_lock:
         ctx = cur_job
     if not ctx:
         return
     try:
-        mode = stop_state.get()
-        if mode != StopMode.END_IMMEDIATE and not getattr(ctx, "_sent_end", False):
-            try:
-                ctx.bus.publish(('progress', (None, translate('生成の終了処理中...'), '')))
-            except Exception:
-                pass
+        # 1) 終了サマリ（GUIにもCUIにも必ず出す）
+        from datetime import datetime as _dt
+        job_ended_at = _dt.now()
+        ts_end = job_ended_at.strftime("%Y-%m-%d %H:%M:%S")
+        # 進捗の合計と現在値をまとめてサマる
+        progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
+        completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") + ts_end + " - " + progress_summary
+        print(completion_message)
+        try:
+            ctx.bus.publish(('progress', (None, completion_message, '')))
+        except Exception:
+            pass
+        # 2) end イベントは1回だけ
         if not getattr(ctx, "_sent_end", False):
             ctx._sent_end = True
             ctx.bus.publish(('end', None))
@@ -422,6 +435,11 @@ def _finalize_batch_job():
     with ctx_lock:
         if cur_job is ctx:
             cur_job = None
+    # 3) close は必ずここで（購読側にセンチネルを届ける）
+    try:
+        ctx.bus.close()
+    except Exception:
+        pass
 
 
 def _stream_job_to_ui(ctx: JobContext):
@@ -458,29 +476,19 @@ def _stream_job_to_ui(ctx: JobContext):
                 if last_stop_mode == StopMode.END_IMMEDIATE:
                     batch_stopped = True
                 stop_state.clear()
-                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                if batch_stopped:
-                    completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
-                else:
-                    completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(progress_img_total, progress_img_total)
-                completion_message = f"{completion_message} - {progress_summary}"
+                # 最終メッセージは _finalize_batch_job が progress で流しているので last_* をそのまま出す
+                completion_message = last_progress_desc or translate("処理が完了しました。")
                 final_output = output_filename or last_output_filename
                 globals()['last_output_filename'] = final_output
                 globals()['last_progress_desc'] = completion_message
                 globals()['last_progress_bar'] = ''
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
-                print(translate("処理が完了しました。"))
-                if batch_stopped or last_stop_mode in (StopMode.END_IMMEDIATE, StopMode.END_AFTER_GENERATION, StopMode.END_AFTER_STEP):
-                    print(translate("生成終了が指定されたため、後続のバッチを停止します"))
-                print("**************************************************")
-                print(translate("【全バッチ処理完了】 プロセスが完了しました - {0}").format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                print("**************************************************")
                 generation_active = False
                 preview_update = _preview_update(last_preview_image)
                 yield _ui_tuple(
                     final_output if final_output is not None else gr.skip(),
                     preview_update,
-                    completion_message,  # ここで最終サマリを UI に確実に流す
+                    completion_message,
                     '',
                     gr.update(interactive=True, value=translate("Start Generation")),
                     gr.update(interactive=end_enabled, value=translate("End Generation")),
@@ -540,28 +548,12 @@ def _stream_job_to_ui(ctx: JobContext):
                 stop_after_step = False
                 last_stop_mode = stop_state.get()
                 stop_state.clear()
-                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                # 即時停止の最終表示を正しく中断扱いにする
-                if last_stop_mode == StopMode.END_IMMEDIATE or batch_stopped:
-                    completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(
-                        progress_img_idx, progress_img_total
-                    )
-                    batch_stopped = True
-                else:
-                    completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(
-                        progress_img_total, progress_img_total
-                    )
-                completion_message = f"{completion_message} - {progress_summary}"
+                # 最終メッセージは finalize が投げてあるのでそれを表示
+                completion_message = last_progress_desc or translate("処理が完了しました。")
                 last_output_filename = output_filename or last_output_filename
                 last_progress_desc = completion_message
                 last_progress_bar = ''
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
-                print(translate("処理が完了しました。"))
-                if batch_stopped or last_stop_mode in (StopMode.END_IMMEDIATE, StopMode.END_AFTER_GENERATION, StopMode.END_AFTER_STEP):
-                    print(translate("生成終了が指定されたため、後続のバッチを停止します"))
-                print("**************************************************")
-                print(translate("【全バッチ処理完了】 プロセスが完了しました - {0}").format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                print("**************************************************")
                 generation_active = False
                 preview_update = _preview_update(last_preview_image)
                 yield _ui_tuple(
@@ -602,8 +594,11 @@ def _stream_job_to_ui(ctx: JobContext):
                 return
     finally:
         ctx.bus.unsubscribe(q)
-        # ストリーム側で close してセンチネルを配る（購読側が確実にいるタイミング）
-        ctx.bus.close()
+        # close は finalize 側が実施。万一未実施なら握りつぶしで再実行しても害なし。
+        try:
+            ctx.bus.close()
+        except Exception:
+            pass
 
 # 進捗表示用グローバル変数
 progress_ref_idx = 0

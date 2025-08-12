@@ -1,6 +1,7 @@
 import sys, os, time, threading, types
 sys.path.append(os.path.abspath(os.path.dirname(__file__) + "/.."))
 sys.path.append(os.path.abspath(os.path.dirname(__file__) + "/../webui"))
+sys.argv = [sys.argv[0]]  # argparse対策
 
 # ---- 必要モジュールのダミー化 ----
 # torch / safetensors / huggingface_hub / gradio など重い依存をスタブする
@@ -191,20 +192,22 @@ one.progress_img_idx = 3
 ctx = one.JobContext()
 
 def producer():
-    # 開始メッセージ（_start_job_for_single_task が出す想定の progress）
+    # start: 通常は _start_job_for_single_task が出す
     ts = one.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ctx.bus.publish(('progress', (None, one.translate("開始しています... ") + ts, '')))
     time.sleep(0.05)
-    # 画像ができた通知
+    # file 通知
     dummy = os.path.abspath("dummy.png")
-    open(dummy, "wb").write(b"\x89PNG\r\n\x1a\n")  # 空のダミー
+    open(dummy, "wb").write(b"\x89PNG\r\n\x1a\n")
     ctx.bus.publish(('file', dummy))
     time.sleep(0.05)
-    # 終了処理開始メッセージ
-    ctx.bus.publish(('progress', (None, one.translate("生成の終了処理中..."), '')))
-    time.sleep(0.05)
-    # 終了イベント
+    # finalize: 終了サマリ -> end -> close
+    ts = one.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    msg = one.translate("【全バッチ処理完了】プロセスが完了しました - ") + ts + " - " + \
+          f"参考画像 {one.progress_ref_idx}/{one.progress_ref_total} ,イメージ {one.progress_img_idx}/{one.progress_img_total}"
+    ctx.bus.publish(('progress', (None, msg, '')))
     ctx.bus.publish(('end', None))
+    ctx.bus.close()
 
 # ストリームを消費して UI タプルを受け取る
 
@@ -216,17 +219,14 @@ def consume():
     return out
 
 
-t = threading.Thread(target=producer, daemon=True)
-t.start()
-descs = consume()
-
-print("---- STREAM DESC LOG ----")
-for d in descs:
-    print(d)
-
-# 成功判定（最低限）
-ok_start = any("開始しています" in (d or "") for d in descs)
-ok_end   = any(("完了" in (d or "")) or ("中断されました" in (d or "")) for d in descs)
-assert ok_start, "開始メッセージが流れていません"
-assert ok_end,   "終了サマリが流れていません"
-print("OK: 開始/終了のUIメッセージが流れました。")
+def test_smoke_stream():
+    t = threading.Thread(target=producer, daemon=True)
+    t.start()
+    descs = consume()
+    print("---- STREAM DESC LOG ----")
+    for d in descs:
+        print(d)
+    ok_start = any("開始しています" in (d or "") for d in descs)
+    ok_end   = any("全バッチ処理完了" in (d or "") for d in descs)
+    assert ok_start, "開始メッセージが流れていません"
+    assert ok_end,   "終了サマリが流れていません"
