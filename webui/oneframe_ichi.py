@@ -344,12 +344,14 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
     with ctx_lock:
         cur_job = ctx
     generation_active = True
+    should_init = stop_state.get() == StopMode.NONE
     stop_state.clear()  # 停止状態を初期化
-    try:
-        bar = make_progress_bar_html(0, "Init")
-        ctx.bus.publish(('progress', (None, translate("初期化中..."), bar)))
-    except Exception:
-        pass
+    if should_init:
+        try:
+            bar = make_progress_bar_html(0, "Init")
+            ctx.bus.publish(('progress', (None, translate("初期化中..."), bar)))
+        except Exception:
+            pass
     async_run(worker, ctx, *worker_args, **worker_kwargs)
     return ctx
 
@@ -407,6 +409,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 preview_update = gr.update(
                     visible=(last_preview_image is not None), value=last_preview_image
                 )
+                generation_active = False
                 yield _ui_tuple(
                     final_output if final_output is not None else gr.skip(),
                     preview_update,
@@ -418,7 +421,6 @@ def _stream_job_to_ui(ctx: JobContext):
                     gr.update(interactive=stop_step_enabled, value=stop_step_label),
                     gr.update(value=current_seed) if current_seed is not None else gr.skip(),
                 )
-                generation_active = False
                 break
             flag, data = item
             if flag == 'file':
@@ -494,6 +496,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 preview_update = gr.update(
                     visible=(last_preview_image is not None), value=last_preview_image
                 )
+                generation_active = False
                 yield _ui_tuple(
                     last_output_filename if last_output_filename is not None else gr.skip(),
                     preview_update,
@@ -505,7 +508,6 @@ def _stream_job_to_ui(ctx: JobContext):
                     gr.update(interactive=stop_step_enabled, value=stop_step_label),
                     gr.update(value=current_seed) if current_seed is not None else gr.skip(),
                 )
-                generation_active = False
                 break
 
             # 即時終了 or 中断指示時は完了メッセージで締める
@@ -3196,7 +3198,17 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+            yield _ui_tuple(
+                gr.skip(),
+                gr.update(visible=False),
+                batch_info,
+                "",
+                gr.update(interactive=False),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(),
+            )
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
         current_prompt = prompt
@@ -3357,6 +3369,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             # UIをリセット
             stop_state.clear()
             end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
+            generation_active = False
             yield _ui_tuple(
                 None,
                 gr.update(visible=False),
@@ -3368,7 +3381,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 gr.update(interactive=stop_step_enabled, value=stop_step_label),
                 gr.update(),
             )
-            generation_active = False
             return
         except Exception as e:
             import traceback
@@ -3376,6 +3388,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             # UIをリセット
             stop_state.clear()
             end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
+            generation_active = False
             yield _ui_tuple(
                 None,
                 gr.update(visible=False),
@@ -3387,7 +3400,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 gr.update(interactive=stop_step_enabled, value=stop_step_label),
                 gr.update(),
             )
-            generation_active = False
             return
         finally:
             pass
