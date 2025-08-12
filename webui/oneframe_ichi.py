@@ -347,6 +347,8 @@ def _start_job_for_single_task(*worker_args, reuse_ctx: bool = True, **worker_kw
     with ctx_lock:
         if reuse_ctx and cur_job and not getattr(cur_job, "_closed", False) and not cur_job.done.is_set():
             ctx = cur_job
+            if getattr(ctx, "_busy", False):
+                raise RuntimeError("Job worker is already running for this context.")
         else:
             ctx = JobContext()
             # ジョブ専用のstreamとフラグを持たせる
@@ -354,6 +356,7 @@ def _start_job_for_single_task(*worker_args, reuse_ctx: bool = True, **worker_kw
             ctx.stop_after_step_event = threading.Event()
             ctx._sent_end = False
             ctx._closed = False
+            ctx._busy = False
             # 既存コードの互換性のため、グローバルにも参照を残す（参照先はこのctx）
             globals()['stream'] = ctx.stream
             cur_job = ctx
@@ -367,7 +370,13 @@ def _start_job_for_single_task(*worker_args, reuse_ctx: bool = True, **worker_kw
             ctx.bus.publish(('progress', (None, translate("初期化中..."), bar)))
         except Exception:
             pass
-    async_run(worker, ctx, *worker_args, **worker_kwargs)
+    ctx._busy = True
+    def _wrap(*a, **kw):
+        try:
+            return worker(ctx, *a, **kw)
+        finally:
+            ctx._busy = False
+    async_run(_wrap, ctx, *worker_args, **worker_kwargs)
     return ctx
 
 
@@ -2668,16 +2677,8 @@ def worker(ctx: JobContext, *args, **kwargs):
     try:
         return _worker_impl(ctx, *args, **kwargs)
     finally:
-        # フレームごとのワーカー終了では end/close などは行わず、必要なら進捗のみ通知
-        try:
-            mode = stop_state.get()
-            if mode != StopMode.END_IMMEDIATE:
-                try:
-                    ctx.bus.publish(('progress', (None, translate('生成の終了処理中...'), '')))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        # フレームごとのワーカー終了では、バッチ終端の _finalize_batch_job() に一任
+        pass
 
 # ---------- Stop ボタン用（UIバインド向けの軽量ハンドラ） ----------
 def press_end_generation():
