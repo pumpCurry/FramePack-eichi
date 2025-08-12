@@ -366,8 +366,12 @@ def _start_job_for_single_task(*worker_args, reuse_ctx: bool = True, **worker_kw
     stop_state.clear()  # 停止状態を初期化
     if should_init:
         try:
+            # 初期化バー
             bar = make_progress_bar_html(0, "Init")
             ctx.bus.publish(('progress', (None, translate("初期化中..."), bar)))
+            # 開始メッセージ（時刻付き）
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ctx.bus.publish(('progress', (None, translate("開始しています... ") + ts, '')))
         except Exception:
             pass
     ctx._busy = True
@@ -446,6 +450,7 @@ def _stream_job_to_ui(ctx: JobContext):
         while True:
             item = q.get()
             if item == (None, None):
+                ctx._sent_end = True
                 stop_after_current = False
                 stop_after_step = False
                 # 即時停止が掛かっていた場合は完了表示を中断扱いに寄せる
@@ -475,7 +480,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 yield _ui_tuple(
                     final_output if final_output is not None else gr.skip(),
                     preview_update,
-                    completion_message,
+                    completion_message,  # ここで最終サマリを UI に確実に流す
                     '',
                     gr.update(interactive=True, value=translate("Start Generation")),
                     gr.update(interactive=end_enabled, value=translate("End Generation")),
@@ -530,6 +535,7 @@ def _stream_job_to_ui(ctx: JobContext):
                     gr.update(),
                 )
             elif flag == 'end':
+                ctx._sent_end = True
                 stop_after_current = False
                 stop_after_step = False
                 last_stop_mode = stop_state.get()
@@ -596,6 +602,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 return
     finally:
         ctx.bus.unsubscribe(q)
+        # ストリーム側で close してセンチネルを配る（購読側が確実にいるタイミング）
         ctx.bus.close()
 
 # 進捗表示用グローバル変数
