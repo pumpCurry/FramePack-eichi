@@ -1013,6 +1013,26 @@ def _to_bool(val):
         return bool(val.value)
     return bool(val)
 
+def _to_int(val, default=None, *, min_val=None, max_val=None):
+    """Gradio等から来る値を安全にint化する（空文字・None・数値文字列・np型などを吸収）。"""
+    try:
+        if val is None:
+            return default
+        if isinstance(val, str):
+            s = val.strip()
+            if s == "":
+                return default
+            x = int(s, 10)
+        else:
+            x = int(val)
+        if min_val is not None and x < min_val:
+            x = min_val
+        if max_val is not None and x > max_val:
+            x = max_val
+        return x
+    except Exception:
+        return default
+
 def resize_and_pad_with_edge_color(image_np, target_width, target_height):
     """画像を目標サイズに合わせてリサイズし、縁の色で余白を埋める。"""
     pil_image = Image.fromarray(image_np)
@@ -1260,7 +1280,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
     bus = ctx.bus
 
-    seed = int(seed) if seed is not None else 0
+    # 空文字・空白・Noneも安全に0へフォールバック
+    seed = _to_int(seed, 0)
     current_seed = seed
 
     # フラグ類は確実にbool化しておく
