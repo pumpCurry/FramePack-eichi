@@ -3052,6 +3052,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     for img in reference_images_list:
         expanded_refs.extend([img] * reference_repeat_count)
     reference_images_list = expanded_refs if expanded_refs else [None]
+
+    # --- progress totals ---
+    globals()['progress_ref_total'] = len(reference_images_list)
+    globals()['progress_img_total'] = batch_count
     
     # 出力フォルダの設定
     global outputs_folder
@@ -3475,7 +3479,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 gr.update(interactive=stop_step_enabled, value=stop_step_label),
                 gr.update(),
             )
-            _finalize_batch_job()
             return
         except Exception as e:
             import traceback
@@ -3495,7 +3498,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 gr.update(interactive=stop_step_enabled, value=stop_step_label),
                 gr.update(),
             )
-            _finalize_batch_job()
             return
         finally:
             pass
@@ -3508,50 +3510,36 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             break
         last_stop_mode = StopMode.NONE
 
-    # すべてのバッチ処理が正常に完了した場合と中断された場合で表示メッセージを分ける
-    if batch_stopped:
-        print(translate("バッチ処理が中断されました"))
-    else:
-        print(translate("全てのバッチ処理が完了しました"))
-    
-    # バッチ処理終了後は必ずフラグをリセット
-    batch_stopped = False
-    stop_after_current = False
-    stop_after_step = False
-    last_stop_mode = StopMode.NONE
+    try:
+        # すべてのバッチ処理が正常に完了した場合と中断された場合で表示メッセージを分ける
+        if batch_stopped:
+            print(translate("バッチ処理が中断されました"))
+        else:
+            print(translate("全てのバッチ処理が完了しました"))
 
-    # 処理完了時の効果音（アラーム設定が有効な場合のみ）
-    if alarm_on_completion:
-        play_completion_sound()
+        # バッチ処理終了後は必ずフラグをリセット
+        batch_stopped = False
+        stop_after_current = False
+        stop_after_step = False
+        last_stop_mode = StopMode.NONE
 
-    # 処理状態に応じてメッセージを表示
-    if batch_stopped:
-        print("-" * 50)
-        print(translate("【停止】処理は中断されました - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
-        print("-" * 50)
-    else:
-        print("*" * 50)
-        print(translate("【全バッチ処理完了】プロセスが完了しました - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
-        print("*" * 50)
+        # 処理完了時の効果音（アラーム設定が有効な場合のみ）
+        if alarm_on_completion:
+            play_completion_sound()
 
-    # バッチ終了処理（内部状態のリセットはここで実施）
-    _finalize_batch_job()
+        # 処理状態に応じてメッセージを表示
+        if batch_stopped:
+            print("-" * 50)
+            print(translate("【停止】処理は中断されました - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
+            print("-" * 50)
+        else:
+            print("*" * 50)
+            print(translate("【全バッチ処理完了】プロセスが完了しました - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
+            print("*" * 50)
+    finally:
+        # バッチ終了処理（内部状態のリセットはここで実施）
+        _finalize_batch_job()
 
-    # --- 最終 UI 更新（Start を再有効化し、完了メッセージと時刻を出す）---
-    completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") \
-        + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
-    yield _ui_tuple(
-        last_output_filename if last_output_filename is not None else gr.skip(),
-        _preview_update(last_preview_image),
-        completion_message,
-        '',
-        gr.update(interactive=True,  value=translate("Start Generation")),
-        gr.update(interactive=end_enabled, value=translate("End Generation")),
-        gr.update(interactive=stop_current_enabled, value=stop_current_label),
-        gr.update(interactive=stop_step_enabled,   value=stop_step_label),
-        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-    )
     return
 
 

@@ -1,4 +1,4 @@
-import sys, os, time, threading, types
+import sys, os, time, threading, types, re
 sys.path.append(os.path.abspath(os.path.dirname(__file__) + "/.."))
 sys.path.append(os.path.abspath(os.path.dirname(__file__) + "/../webui"))
 sys.argv = [sys.argv[0]]  # argparse対策
@@ -229,25 +229,25 @@ import importlib
 one = importlib.import_module("webui.oneframe_ichi")
 one.gr = gr  # monkey patch
 
-# 進捗カウンタを仮で設定（終了サマリに数が出るかを見る）
-one.progress_ref_total = 2
-one.progress_img_total = 3
-one.progress_ref_idx = 2
-one.progress_img_idx = 3
+timestamp_re = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 
-ctx = one.JobContext()
 
-def producer():
-    # start: 通常は _start_job_for_single_task が出す
+def _set_progress_counts():
+    one.progress_ref_total = 2
+    one.progress_img_total = 3
+    one.progress_ref_idx = 2
+    one.progress_img_idx = 3
+
+
+def producer_complete(ctx):
+    _set_progress_counts()
     ts = one.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ctx.bus.publish(('progress', (None, one.translate("開始しています... ") + ts, '')))
     time.sleep(0.05)
-    # file 通知
     dummy = os.path.abspath("dummy.png")
     open(dummy, "wb").write(b"\x89PNG\r\n\x1a\n")
     ctx.bus.publish(('file', dummy))
     time.sleep(0.05)
-    # finalize: 終了サマリ -> end -> close
     ts = one.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg = one.translate("【全バッチ処理完了】プロセスが完了しました - ") + ts + " - " + \
           f"参考画像 {one.progress_ref_idx}/{one.progress_ref_total} ,イメージ {one.progress_img_idx}/{one.progress_img_total}"
@@ -255,24 +255,49 @@ def producer():
     ctx.bus.publish(('end', None))
     ctx.bus.close()
 
-# ストリームを消費して UI タプルを受け取る
 
-def consume():
+def producer_abort(ctx):
+    _set_progress_counts()
+    ts = one.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ctx.bus.publish(('progress', (None, one.translate("開始しています... ") + ts, '')))
+    time.sleep(0.05)
+    ts = one.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    msg = one.translate("バッチ処理が中断されました") + " - " + \
+          f"参考画像 {one.progress_ref_idx}/{one.progress_ref_total} ,イメージ {one.progress_img_idx}/{one.progress_img_total} - " + ts
+    ctx.bus.publish(('progress', (None, msg, '')))
+    ctx.bus.publish(('end', None))
+    ctx.bus.close()
+
+
+def consume(ctx):
     out = []
     for ui in one._stream_job_to_ui(ctx):
-        # ui は (_filename, _preview, desc, bar, start_btn, end_btn, stop_cur, stop_step, seed_upd)
-        out.append(ui[2])  # desc を蓄積
+        out.append(ui[2])
     return out
 
 
 def test_smoke_stream():
-    t = threading.Thread(target=producer, daemon=True)
+    ctx = one.JobContext()
+    t = threading.Thread(target=producer_complete, args=(ctx,), daemon=True)
     t.start()
-    descs = consume()
+    descs = consume(ctx)
     print("---- STREAM DESC LOG ----")
     for d in descs:
         print(d)
-    ok_start = any("開始しています" in (d or "") for d in descs)
-    ok_end   = any("全バッチ処理完了" in (d or "") for d in descs)
-    assert ok_start, "開始メッセージが流れていません"
-    assert ok_end,   "終了サマリが流れていません"
+    start_msgs = [d for d in descs if "開始しています" in (d or "")]
+    end_msgs = [d for d in descs if "全バッチ処理完了" in (d or "")]
+    assert start_msgs, "開始メッセージが流れていません"
+    assert end_msgs, "終了サマリが流れていません"
+    assert timestamp_re.search(start_msgs[0]), "開始メッセージに時刻が含まれていません"
+    assert timestamp_re.search(end_msgs[-1]), "終了サマリに時刻が含まれていません"
+
+
+def test_smoke_stream_interrupted():
+    ctx = one.JobContext()
+    t = threading.Thread(target=producer_abort, args=(ctx,), daemon=True)
+    t.start()
+    descs = consume(ctx)
+    mid_msgs = [d for d in descs if "中断されました" in (d or "")]
+    assert mid_msgs, "中断メッセージが流れていません"
+    assert any("開始しています" in (d or "") for d in descs), "開始メッセージが流れていません"
+    assert timestamp_re.search(mid_msgs[-1]), "中断メッセージに時刻が含まれていません"
