@@ -344,6 +344,7 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
     with ctx_lock:
         cur_job = ctx
     generation_active = True
+    # 直前が即時終了などの停止モードなら初期化 Progress を抑止
     should_init = stop_state.get() == StopMode.NONE
     stop_state.clear()  # 停止状態を初期化
     if should_init:
@@ -406,10 +407,10 @@ def _stream_job_to_ui(ctx: JobContext):
                 print("**************************************************")
                 print(translate("【全バッチ処理完了】 プロセスが完了しました - {0}").format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                 print("**************************************************")
+                generation_active = False
                 preview_update = gr.update(
                     visible=(last_preview_image is not None), value=last_preview_image
                 )
-                generation_active = False
                 yield _ui_tuple(
                     final_output if final_output is not None else gr.skip(),
                     preview_update,
@@ -494,10 +495,10 @@ def _stream_job_to_ui(ctx: JobContext):
                 print("**************************************************")
                 print(translate("【全バッチ処理完了】 プロセスが完了しました - {0}").format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                 print("**************************************************")
+                generation_active = False
                 preview_update = gr.update(
                     visible=(last_preview_image is not None), value=last_preview_image
                 )
-                generation_active = False
                 yield _ui_tuple(
                     last_output_filename if last_output_filename is not None else gr.skip(),
                     preview_update,
@@ -520,10 +521,10 @@ def _stream_job_to_ui(ctx: JobContext):
                 last_stop_mode = stop_state.get()
                 stop_state.clear()
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
+                generation_active = False
                 preview_update = gr.update(
                     visible=(last_preview_image is not None), value=last_preview_image
                 )
-                generation_active = False
                 yield _ui_tuple(
                     output_filename if output_filename is not None else gr.skip(),
                     preview_update,
@@ -2616,8 +2617,13 @@ def worker(ctx: JobContext, *args, **kwargs):
     try:
         return _worker_impl(ctx, *args, **kwargs)
     finally:
+        # 即時終了（END_IMMEDIATE）などの直後は、余計な「終了処理中...」を出さない
         try:
-            ctx.bus.publish(('progress', (None, translate('生成の終了処理中...'), '')))
+            if last_stop_mode not in (StopMode.END_IMMEDIATE,):
+                try:
+                    ctx.bus.publish(('progress', (None, translate('生成の終了処理中...'), '')))
+                except Exception:
+                    pass
             ctx.bus.publish(('end', None))
         except Exception:
             pass
