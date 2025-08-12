@@ -405,10 +405,6 @@ def _finalize_batch_job():
     except Exception:
         pass
     try:
-        ctx.bus.close()
-    except Exception:
-        pass
-    try:
         ctx._closed = True
     except Exception:
         pass
@@ -600,6 +596,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 return
     finally:
         ctx.bus.unsubscribe(q)
+        ctx.bus.close()
 
 # 進捗表示用グローバル変数
 progress_ref_idx = 0
@@ -2663,7 +2660,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
                 # MP4保存はスキップして、画像ファイルパスを返す
                 bus.publish(('file', output_filename))
-                _cleanup_models()
+                # ここではメモリの一時解放だけに留める（最終解放は _finalize_batch_job に一任）
+                empty_cuda_cache()
                 
             except Exception as e:
                 print(translate("1フレームの画像保存中にエラーが発生しました: {0}").format(e))
@@ -2683,7 +2681,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
     except Exception as e:
         print(translate("処理中にエラーが発生しました: {0}").format(e))
         traceback.print_exc()
-        _cleanup_models(force=True)
+        empty_cuda_cache()
     
     # 処理完了を通知（個別バッチの完了）
     print(translate("処理が完了しました"))
@@ -3533,8 +3531,24 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("【全バッチ処理完了】プロセスが完了しました - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
         print("*" * 50)
 
-    # バッチ終了処理
+    # バッチ終了処理（内部状態のリセットはここで実施）
     _finalize_batch_job()
+
+    # --- 最終 UI 更新（Start を再有効化し、完了メッセージと時刻を出す）---
+    completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") \
+        + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
+    yield _ui_tuple(
+        last_output_filename if last_output_filename is not None else gr.skip(),
+        _preview_update(last_preview_image),
+        completion_message,
+        '',
+        gr.update(interactive=True,  value=translate("Start Generation")),
+        gr.update(interactive=end_enabled, value=translate("End Generation")),
+        gr.update(interactive=stop_current_enabled, value=stop_current_label),
+        gr.update(interactive=stop_step_enabled,   value=stop_step_label),
+        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+    )
     return
 
 
