@@ -2675,6 +2675,25 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 def worker(ctx: JobContext, *args, **kwargs):
     global generation_active, cur_job
     try:
+        # --- Safety valve: trim overflow positional args for _worker_impl ---
+        try:
+            import inspect
+            sig = inspect.signature(_worker_impl)
+            params = list(sig.parameters.values())
+            # 先頭は ctx。以降で *args が無ければ、受け入れ可能な位置引数数を数える
+            has_var_pos = any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params[1:])
+            if not has_var_pos:
+                max_positional = 0
+                for p in params[1:]:
+                    if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
+                                  inspect.Parameter.POSITIONAL_OR_KEYWORD):
+                        max_positional += 1
+                if len(args) > max_positional:
+                    args = args[:max_positional]
+        except Exception:
+            # ここでの失敗は致命ではないので握りつぶす
+            pass
+        # -------------------------------------------------------------------
         return _worker_impl(ctx, *args, **kwargs)
     finally:
         # フレームごとのワーカー終了では、バッチ終端の _finalize_batch_job() に一任
