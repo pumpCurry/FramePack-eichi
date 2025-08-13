@@ -324,12 +324,11 @@ def _ui_tuple(filename, preview, desc, bar, start, end_btn, stop_cur, stop_step,
 
 
 def _preview_update(img):
-    """Return a preview update that only changes the value.
-
-    Preview visibility is never toggled here so that the last image remains
-    unless the user hides it manually.
     """
-    return gr.update(value=img) if img is not None else gr.skip()
+    途中経過の最初の画像が「非表示のまま」になる退行を防ぐため、
+    値が来たら必ず visible=True も立てる。
+    """
+    return gr.update(value=img, visible=True) if img is not None else gr.skip()
 
 
 def attach_to_running_job():
@@ -3077,56 +3076,37 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # イメージキューの処理
     elif queue_enabled and queue_ui_value and use_queue:
         # イメージキューが選択された場合
-        queue_type = "image"  # キュータイプをイメージに設定
+        try:
+            get_image_queue_files()
+        except Exception:
+            pass
 
-        # 入力フォルダから画像ファイルリストを取得
-        get_image_queue_files()
+    # --- 参照画像リストの組み立て（入力参照＋参照キュー）＆繰り返し展開 ---
+    ref_list = []
+    if use_reference_image and reference_image:
+        ref_list.append(reference_image)
+    if use_reference_queue:
+        try:
+            qs = get_reference_queue_files()
+        except Exception:
+            qs = reference_queue_files or []
+        ref_list.extend([p for p in (qs or []) if p])
+    if not ref_list:
+        ref_list = [None]  # 参照なしでも 1 と数える
+    # 繰り返し
+    repeat = max(1, int(reference_batch_count or 1))
+    ref_list = ref_list * repeat
+    reference_images_list = ref_list
 
-        # イメージキューの数を確認
-        image_queue_count = len(image_queue_files)
-        print(translate("イメージキュー: {0}個の画像ファイルを読み込みました").format(image_queue_count))
+    # --- 画像キューの倍率（指定がない/空は 1 倍） ---
+    img_mult = 1
+    if queue_enabled and queue_type == "image":
+        if isinstance(image_queue_files, list) and len(image_queue_files) > 0:
+            img_mult = len(image_queue_files)
 
-        if image_queue_count > 0:
-            # 入力画像とキュー画像をqueue_repeat_count回ずつ処理する
-            total_needed_batches = (1 + image_queue_count) * queue_repeat_count
-
-            # 設定されたバッチ数より必要数が多い場合は調整
-            if total_needed_batches > batch_count:
-                print(translate("画像キュー数+1と繰り返し回数に合わせてバッチ数を自動調整: {0} → {1}").format(
-                    batch_count, total_needed_batches))
-                batch_count = total_needed_batches
-
-    # 参照画像キューの処理
-    reference_images_list = []
-    if use_reference_image:
-        if reference_image is not None:
-            reference_images_list.append(reference_image)
-        if use_reference_queue:
-            get_reference_queue_files()
-            reference_images_list.extend(reference_queue_files)
-    else:
-        reference_images_list = [None]
-
-    base_reference_count = len(reference_images_list)
-
-    if use_reference_queue and base_reference_count > 1:
-        print(translate("参照画像キュー: 有効, 参照画像数={0}個, 繰り返し回数={1}回").format(base_reference_count, reference_repeat_count))
-        for ref_path in reference_queue_files:
-            ref_name = os.path.basename(ref_path)
-            print(translate("   └ {0} x {1}").format(ref_name, reference_repeat_count))
-        if reference_image is not None:
-            print(translate("   └ 入力参照画像 x {0}").format(reference_repeat_count))
-
-    # 参照画像リストを繰り返し回数分拡張
-    expanded_refs = []
-    for img in reference_images_list:
-        expanded_refs.extend([img] * reference_repeat_count)
-    reference_images_list = expanded_refs if expanded_refs else [None]
-
-    # --- progress totals ---
-    ref_total = len(reference_images_list)
-    total_batches = batch_count * max(1, ref_total)
-    globals()['progress_ref_total'] = ref_total
+    ref_count = len(reference_images_list)
+    total_batches = batch_count * ref_count * img_mult
+    globals()['progress_ref_total'] = ref_count
     globals()['progress_img_total'] = total_batches
     
     # 出力フォルダの設定
@@ -3157,7 +3137,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     output_dir = outputs_folder
     
     # バッチ処理のパラメータチェック
-    batch_count = max(1, min(int(batch_count), 100))  # 1〜100の間に制限
+    # 100 上限を撤廃（要件）。不正値だけガード。
+    batch_count = max(1, int(batch_count))
     print(translate("バッチ処理回数: {0}回").format(batch_count))
     
     # 入力画像チェック - 厳格なチェックを避け、エラーを出力するだけに変更
@@ -3165,7 +3146,15 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("入力画像が指定されていません。デフォルトの画像を生成します。"))
         # 空の入力画像を生成
         # ここではNoneのままとし、実際のworker関数内でNoneの場合に対応する
-    
+
+    # 生成開始直前に「初期化中…」を必ずスナップショットへ記録（Bus取りこぼし対策）
+    try:
+        globals()['last_progress_desc'] = translate("初期化中...")
+        from eichi_utils.progress_bar import make_progress_bar_html
+        globals()['last_progress_bar'] = make_progress_bar_html(0, "Init")
+    except Exception:
+        pass
+
     # 生成開始直後の初期UI（ボタン状態・ラベルを _compute_stop_controls に合わせる）
     end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(True)
     globals()['current_seed'] = seed  # ランダムで後から変えてもここで初期値は同期
@@ -3489,6 +3478,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         if batch_stopped:
             break
 
+        # === 生成の起動とUIストリームの中継 ===
         ctx = _start_job_for_single_task(
             current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
             gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
@@ -3502,6 +3492,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         )
 
         try:
+            # Bus 経由の progress/file/end/sentinel を UI へライブ転送
             yield from _stream_job_to_ui(ctx)
         except KeyboardInterrupt:
             # 明示的なリソースクリーンアップ
