@@ -485,8 +485,17 @@ def _stream_job_to_ui(ctx: JobContext):
                 if last_stop_mode == StopMode.END_IMMEDIATE:
                     batch_stopped = True
                 stop_state.clear()
-                # 最終メッセージは _finalize_batch_job が progress で流しているので last_* をそのまま出す
-                completion_message = last_progress_desc or translate("処理が完了しました。")
+                # 最終メッセージは finalize が流すが、未流通のときはここで時刻＋件数入りを合成
+                from datetime import datetime as _dt
+                _ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                _summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
+                if last_progress_desc:
+                    completion_message = last_progress_desc
+                else:
+                    if batch_stopped or last_stop_mode in (StopMode.END_IMMEDIATE, StopMode.END_AFTER_GENERATION, StopMode.END_AFTER_STEP):
+                        completion_message = translate("バッチ処理が中断されました") + " - " + _summary + " - " + _ts
+                    else:
+                        completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") + _ts + " - " + _summary
                 final_output = output_filename or last_output_filename
                 globals()['last_output_filename'] = final_output
                 globals()['last_progress_desc'] = completion_message
@@ -3548,6 +3557,26 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # バッチ終了処理（内部状態のリセットはここで実施）
         _finalize_batch_job()
 
+    # --- 最終 UI 更新（Start を再有効化し、完了メッセージと時刻・件数を出す）---
+    from datetime import datetime as _dt
+    _ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    _summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
+    if last_progress_desc:
+        completion_message = last_progress_desc
+    else:
+        completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") + _ts + " - " + _summary
+    end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
+    yield _ui_tuple(
+        last_output_filename if last_output_filename is not None else gr.skip(),
+        _preview_update(last_preview_image),
+        completion_message,
+        '',
+        gr.update(interactive=True,  value=translate("Start Generation")),
+        gr.update(interactive=end_enabled, value=translate("End Generation")),
+        gr.update(interactive=stop_current_enabled, value=stop_current_label),
+        gr.update(interactive=stop_step_enabled,   value=stop_step_label),
+        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+    )
     return
 
 
