@@ -488,7 +488,7 @@ def _stream_job_to_ui(ctx: JobContext):
 
     running = is_generation_running()
     end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(running)
-    yield _remember_ui(_ui_tuple(
+    first_ui = _remember_ui(_ui_tuple(
         last_output_filename if last_output_filename is not None else gr.skip(),
         _preview_update(last_preview_image),
         last_progress_desc,
@@ -499,6 +499,7 @@ def _stream_job_to_ui(ctx: JobContext):
         gr.update(interactive=stop_step_enabled, value=stop_step_label),
         gr.update(value=current_seed) if current_seed is not None else gr.skip(),
     ))
+    yield first_ui
 
     output_filename = None
     q = ctx.bus.subscribe()
@@ -508,7 +509,7 @@ def _stream_job_to_ui(ctx: JobContext):
     except Exception:
         _ga = False
     _snap = globals().get('last_ui_snapshot', None)
-    if _ga and _snap is not None:
+    if _ga and _snap is not None and _snap is not first_ui:
         yield _snap
     try:
         while True:
@@ -611,7 +612,10 @@ def _stream_job_to_ui(ctx: JobContext):
                     from datetime import datetime as _dt
                     _ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
                     _summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                    completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") + _ts + " - " + _summary
+                    if last_stop_mode in (StopMode.END_IMMEDIATE, StopMode.END_AFTER_GENERATION, StopMode.END_AFTER_STEP):
+                        completion_message = translate("バッチ処理が中断されました") + " - " + _summary + " - " + _ts
+                    else:
+                        completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") + _ts + " - " + _summary
                 last_output_filename = output_filename or last_output_filename
                 last_progress_desc = completion_message
                 last_progress_bar = ''
@@ -645,8 +649,14 @@ def _stream_job_to_ui(ctx: JobContext):
                 preview_update = _preview_update(last_preview_image)
                 from datetime import datetime as _dt
                 _ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                # --- 最終状態をグローバルに確実に残す ---
+                final_output = output_filename or last_output_filename
+                globals()['last_output_filename'] = final_output
+                globals()['last_progress_desc'] = translate("バッチ処理が中断されました") + f" - {progress_summary} - " + _ts
+                globals()['last_progress_bar'] = ''
+                globals()['last_preview_image'] = last_preview_image
                 yield _remember_ui(_ui_tuple(
-                    output_filename if output_filename is not None else gr.skip(),
+                    final_output if final_output is not None else gr.skip(),
                     preview_update,
                     translate("バッチ処理が中断されました") + f" - {progress_summary} - " + _ts,
                     '',

@@ -473,7 +473,6 @@ def test_in_progress_resync_snapshot_and_follow_updates(monkeypatch):
     g1 = one._stream_job_to_ui(ctx)
     next(g1)  # 初期スナップショット
     ctx.bus.publish(('progress', (None, "進行中1", "bar1")))
-    _ = next(g1)  # 再同期スナップショットを消費
     first1 = next(g1)
     assert "進行中" in (first1[2] or "")
     g2 = one._stream_job_to_ui(ctx)
