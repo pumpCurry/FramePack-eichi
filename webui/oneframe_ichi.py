@@ -3150,8 +3150,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # 生成開始直前に「初期化中…」を必ずスナップショットへ記録（Bus取りこぼし対策）
     try:
         globals()['last_progress_desc'] = translate("初期化中...")
+
         from eichi_utils.progress_bar import make_progress_bar_html as _mk
         globals()['last_progress_bar'] = _mk(0, "Init")
+
     except Exception:
         pass
 
