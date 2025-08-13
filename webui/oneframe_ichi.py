@@ -589,10 +589,12 @@ def _stream_job_to_ui(ctx: JobContext):
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
                 generation_active = False
                 preview_update = _preview_update(last_preview_image)
+                from datetime import datetime as _dt
+                _ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
                 yield _ui_tuple(
                     output_filename if output_filename is not None else gr.skip(),
                     preview_update,
-                    translate("バッチ処理が中断されました") + f" - {progress_summary}",
+                    translate("バッチ処理が中断されました") + f" - {progress_summary} - " + _ts,
                     '',
                     gr.update(interactive=True, value=translate("Start Generation")),
                     gr.update(interactive=end_enabled, value=translate("End Generation")),
