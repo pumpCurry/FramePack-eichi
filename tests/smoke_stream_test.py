@@ -1,6 +1,53 @@
-import sys, os, time, threading, types
+import sys, os, time, threading, types, re
 sys.path.append(os.path.abspath(os.path.dirname(__file__) + "/.."))
 sys.path.append(os.path.abspath(os.path.dirname(__file__) + "/../webui"))
+sys.argv = [sys.argv[0]]  # argparse対策
+
+# --- minimal stubs for PIL / numpy (tests may run without these deps) ---
+if 'PIL' not in sys.modules:
+    pil_pkg = types.ModuleType("PIL")
+    image_mod = types.ModuleType("PIL.Image")
+    class _Img:
+        def convert(self, *a, **k):
+            return self
+        @staticmethod
+        def open(*a, **k):
+            return _Img()
+        @staticmethod
+        def fromarray(*a, **k):
+            return _Img()
+    image_mod.open = _Img.open
+    image_mod.fromarray = _Img.fromarray
+    png_mod = types.ModuleType("PIL.PngImagePlugin")
+    class _PngInfo:
+        def add_text(self, *a, **k):
+            pass
+    png_mod.PngInfo = _PngInfo
+    pil_pkg.Image = image_mod
+    pil_pkg.PngImagePlugin = png_mod
+    sys.modules['PIL'] = pil_pkg
+    sys.modules['PIL.Image'] = image_mod
+    sys.modules['PIL.PngImagePlugin'] = png_mod
+
+if 'numpy' not in sys.modules:
+    np_stub = types.ModuleType("numpy")
+    np_stub.array = lambda x, *a, **k: x
+    sys.modules['numpy'] = np_stub
+
+if 'tqdm' not in sys.modules:
+    tqdm_mod = types.ModuleType("tqdm")
+    class _Tqdm:
+        @staticmethod
+        def write(*a, **k):
+            pass
+    tqdm_mod.tqdm = _Tqdm
+    sys.modules['tqdm'] = tqdm_mod
+
+if 'yaml' not in sys.modules:
+    yaml_mod = types.ModuleType("yaml")
+    yaml_mod.safe_load = lambda *a, **k: {}
+    yaml_mod.dump = lambda *a, **k: ""
+    sys.modules['yaml'] = yaml_mod
 
 # ---- 必要モジュールのダミー化 ----
 # torch / safetensors / huggingface_hub / gradio など重い依存をスタブする
@@ -182,51 +229,110 @@ import importlib
 one = importlib.import_module("webui.oneframe_ichi")
 one.gr = gr  # monkey patch
 
-# 進捗カウンタを仮で設定（終了サマリに数が出るかを見る）
-one.progress_ref_total = 2
-one.progress_img_total = 3
-one.progress_ref_idx = 2
-one.progress_img_idx = 3
+timestamp_re = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 
-ctx = one.JobContext()
 
-def producer():
-    # 開始メッセージ（_start_job_for_single_task が出す想定の progress）
+def _set_progress_counts():
+    one.progress_ref_total = 2
+    one.progress_img_total = 3
+    one.progress_ref_idx = 2
+    one.progress_img_idx = 3
+
+
+def producer_complete(ctx):
+    _set_progress_counts()
     ts = one.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ctx.bus.publish(('progress', (None, one.translate("開始しています... ") + ts, '')))
     time.sleep(0.05)
-    # 画像ができた通知
     dummy = os.path.abspath("dummy.png")
-    open(dummy, "wb").write(b"\x89PNG\r\n\x1a\n")  # 空のダミー
+    open(dummy, "wb").write(b"\x89PNG\r\n\x1a\n")
     ctx.bus.publish(('file', dummy))
     time.sleep(0.05)
-    # 終了処理開始メッセージ
-    ctx.bus.publish(('progress', (None, one.translate("生成の終了処理中..."), '')))
-    time.sleep(0.05)
-    # 終了イベント
+    ts = one.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    msg = one.translate("【全バッチ処理完了】プロセスが完了しました - ") + ts + " - " + \
+          f"参考画像 {one.progress_ref_idx}/{one.progress_ref_total} ,イメージ {one.progress_img_idx}/{one.progress_img_total}"
+    ctx.bus.publish(('progress', (None, msg, '')))
     ctx.bus.publish(('end', None))
+    ctx.bus.close()
 
-# ストリームを消費して UI タプルを受け取る
 
-def consume():
+def producer_abort(ctx):
+    _set_progress_counts()
+    ts = one.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ctx.bus.publish(('progress', (None, one.translate("開始しています... ") + ts, '')))
+    time.sleep(0.05)
+    ts = one.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    msg = one.translate("バッチ処理が中断されました") + " - " + \
+          f"参考画像 {one.progress_ref_idx}/{one.progress_ref_total} ,イメージ {one.progress_img_idx}/{one.progress_img_total} - " + ts
+    ctx.bus.publish(('progress', (None, msg, '')))
+    ctx.bus.publish(('end', None))
+    ctx.bus.close()
+
+
+def consume(ctx):
     out = []
     for ui in one._stream_job_to_ui(ctx):
-        # ui は (_filename, _preview, desc, bar, start_btn, end_btn, stop_cur, stop_step, seed_upd)
-        out.append(ui[2])  # desc を蓄積
+        out.append(ui[2])
     return out
 
 
-t = threading.Thread(target=producer, daemon=True)
-t.start()
-descs = consume()
+def test_smoke_stream():
+    ctx = one.JobContext()
+    t = threading.Thread(target=producer_complete, args=(ctx,), daemon=True)
+    t.start()
+    descs = consume(ctx)
+    print("---- STREAM DESC LOG ----")
+    for d in descs:
+        print(d)
+    start_msgs = [d for d in descs if "開始しています" in (d or "")]
+    end_msgs = [d for d in descs if "全バッチ処理完了" in (d or "")]
+    assert start_msgs, "開始メッセージが流れていません"
+    assert end_msgs, "終了サマリが流れていません"
+    assert timestamp_re.search(start_msgs[0]), "開始メッセージに時刻が含まれていません"
+    assert timestamp_re.search(end_msgs[-1]), "終了サマリに時刻が含まれていません"
 
-print("---- STREAM DESC LOG ----")
-for d in descs:
-    print(d)
 
-# 成功判定（最低限）
-ok_start = any("開始しています" in (d or "") for d in descs)
-ok_end   = any(("完了" in (d or "")) or ("中断されました" in (d or "")) for d in descs)
-assert ok_start, "開始メッセージが流れていません"
-assert ok_end,   "終了サマリが流れていません"
-print("OK: 開始/終了のUIメッセージが流れました。")
+def test_smoke_stream_interrupted():
+    ctx = one.JobContext()
+    t = threading.Thread(target=producer_abort, args=(ctx,), daemon=True)
+    t.start()
+    descs = consume(ctx)
+    mid_msgs = [d for d in descs if "中断されました" in (d or "")]
+    assert mid_msgs, "中断メッセージが流れていません"
+    assert any("開始しています" in (d or "") for d in descs), "開始メッセージが流れていません"
+    assert timestamp_re.search(mid_msgs[-1]), "中断メッセージに時刻が含まれていません"
+
+
+def test_progress_totals_multiple_refs(tmp_path, monkeypatch):
+    # prepare two dummy reference images
+    img1 = tmp_path / "ref1.png"
+    img2 = tmp_path / "ref2.png"
+    img1.write_bytes(b"\x89PNG\r\n\x1a\n")
+    img2.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    one.progress_img_total = 0
+    one.progress_ref_total = 0
+
+    one.reference_queue_files = [str(img2)]
+    monkeypatch.setattr(one, "get_reference_queue_files", lambda: one.reference_queue_files)
+    monkeypatch.setattr(one, "get_output_folder_path", lambda path=None: str(tmp_path))
+    monkeypatch.setattr(one, "ensure_dir", lambda p, name: p)
+    monkeypatch.setattr(one, "load_settings", lambda: {})
+    monkeypatch.setattr(one, "save_settings", lambda *a, **k: True)
+    monkeypatch.setattr(one, "_compute_stop_controls", lambda running: (False, False, False, '', ''))
+
+    gen = one.process(
+        None, "p", "n", 0, 1, 1, 1, 1, False, False, False,
+        None, None, "", False, False, 64, None,
+        False, False, batch_count=2, use_random_seed=False, latent_window_size=9, latent_index=0,
+        use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
+        lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
+        use_rope_batch=False, use_queue=False, prompt_queue_file=None,
+        use_reference_image=True, reference_image=str(img1),
+        target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None,
+        reference_batch_count=1, use_reference_queue=True,
+        save_settings_on_start=False, alarm_on_completion=False,
+        log_enabled=None, log_folder=None,
+    )
+    next(gen)
+    assert one.progress_img_total == 4
