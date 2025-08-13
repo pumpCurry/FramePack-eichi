@@ -398,6 +398,10 @@ def _finalize_batch_job():
         ctx = cur_job
     if not ctx:
         return
+    # idempotent guard
+    if getattr(ctx, "_finalized", False):
+        return
+    setattr(ctx, "_finalized", True)
     try:
         # 1) 終了サマリ（GUIにもCUIにも必ず出す）
         from datetime import datetime as _dt
@@ -3054,8 +3058,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     reference_images_list = expanded_refs if expanded_refs else [None]
 
     # --- progress totals ---
-    globals()['progress_ref_total'] = len(reference_images_list)
-    globals()['progress_img_total'] = batch_count
+    ref_total = len(reference_images_list)
+    total_batches = batch_count * max(1, ref_total)
+    globals()['progress_ref_total'] = ref_total
+    globals()['progress_img_total'] = total_batches
     
     # 出力フォルダの設定
     global outputs_folder
@@ -3265,7 +3271,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     total_batches = batch_count * ref_count
     current_image = None
     progress_ref_total = ref_count
-    progress_img_total = batch_count
+    progress_img_total = total_batches
     progress_ref_idx = 0
     progress_img_idx = 0
     prev_reference_idx = -1

@@ -301,3 +301,38 @@ def test_smoke_stream_interrupted():
     assert mid_msgs, "中断メッセージが流れていません"
     assert any("開始しています" in (d or "") for d in descs), "開始メッセージが流れていません"
     assert timestamp_re.search(mid_msgs[-1]), "中断メッセージに時刻が含まれていません"
+
+
+def test_progress_totals_multiple_refs(tmp_path, monkeypatch):
+    # prepare two dummy reference images
+    img1 = tmp_path / "ref1.png"
+    img2 = tmp_path / "ref2.png"
+    img1.write_bytes(b"\x89PNG\r\n\x1a\n")
+    img2.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    one.progress_img_total = 0
+    one.progress_ref_total = 0
+
+    one.reference_queue_files = [str(img2)]
+    monkeypatch.setattr(one, "get_reference_queue_files", lambda: one.reference_queue_files)
+    monkeypatch.setattr(one, "get_output_folder_path", lambda path=None: str(tmp_path))
+    monkeypatch.setattr(one, "ensure_dir", lambda p, name: p)
+    monkeypatch.setattr(one, "load_settings", lambda: {})
+    monkeypatch.setattr(one, "save_settings", lambda *a, **k: True)
+    monkeypatch.setattr(one, "_compute_stop_controls", lambda running: (False, False, False, '', ''))
+
+    gen = one.process(
+        None, "p", "n", 0, 1, 1, 1, 1, False, False, False,
+        None, None, "", False, False, 64, None,
+        False, False, batch_count=2, use_random_seed=False, latent_window_size=9, latent_index=0,
+        use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
+        lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
+        use_rope_batch=False, use_queue=False, prompt_queue_file=None,
+        use_reference_image=True, reference_image=str(img1),
+        target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None,
+        reference_batch_count=1, use_reference_queue=True,
+        save_settings_on_start=False, alarm_on_completion=False,
+        log_enabled=None, log_folder=None,
+    )
+    next(gen)
+    assert one.progress_img_total == 4
