@@ -89,7 +89,10 @@ def open_output_folder(folder_path):
 
     try:
         if os.name == 'nt':  # Windows
-            subprocess.Popen(['explorer', folder_path])
+            try:
+                os.startfile(folder_path)
+            except Exception:
+                subprocess.Popen(['explorer', folder_path])
             print(translate("フォルダを開きました: {0}").format(folder_path))
         elif os.name == 'posix':
             opener = None

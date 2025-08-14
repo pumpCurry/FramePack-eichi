@@ -382,3 +382,14 @@ class TransformerManager:
             traceback.print_exc()
             self.current_state['is_loaded'] = False
             return False
+
+    def dispose_transformer(self):
+        """Safely move transformer to CPU and reset state."""
+        if self.transformer is not None:
+            try:
+                self.transformer.to('cpu')
+                print(translate("transformerをCPUに移動しました"))
+            except Exception:
+                pass
+            self.transformer = None
+        self.current_state['is_loaded'] = False
