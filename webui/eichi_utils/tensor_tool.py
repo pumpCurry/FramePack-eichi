@@ -68,12 +68,7 @@ from locales.i18n_extended import set_lang, translate
 
 set_lang(args.lang)
 
-try:
-    import winsound
-
-    HAS_WINSOUND = True
-except ImportError:
-    HAS_WINSOUND = False
+from .notification_utils import play_completion_sound
 import traceback
 
 if "HF_HOME" not in os.environ:
@@ -1861,10 +1856,8 @@ def worker(
             )
 
         # 処理終了時に通知
-        if HAS_WINSOUND:
-            winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
-        else:
-            print(translate("\n✓ 処理が完了しました！"))  # Linuxでの代替通知
+        if not play_completion_sound():
+            print(translate("\n✓ 処理が完了しました！"))
 
         # メモリ解放を明示的に実行
         if torch.cuda.is_available():

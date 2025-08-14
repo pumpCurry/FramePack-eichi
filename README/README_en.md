@@ -16,6 +16,29 @@ In other words, it's a ~~local~~ **worldwide** modification specialized in creat
 
 We're extremely grateful to [https://github.com/hinablue](https://github.com/hinablue) **Hina Chen** for multilingual support cooperation.
 
+## 🌟 Feature Enhancements (v1.9.5)
+
+**FramePack-eichi v1.9.5** focuses on smoother startup feedback and richer queue management to improve overall usability.
+
+### 🚀 Key New Features
+
+- **Improved startup messages with spinner**: display a spinner and completion checkmark during module loading so the app never looks frozen
+- **Expanded image queue & batch management**: specify repeat counts per source image
+  - Generated frame count becomes `image count × batch size`, removing the previous limit of 100
+- **Reference image queue and batch control**: enqueue reference images and process them with their own batch count
+  - Each image queue entry can cycle through multiple reference images sequentially
+- **Progress time display**: show elapsed time and estimated completion for ongoing generation
+- **Input image save option**: automatically store input images to a user-defined folder
+  - Clipboard images no longer vanish after use
+- **Log output settings**: enable console log saving, specify the destination folder, and open it directly from the UI
+- **Favorite setting management**: save UI configurations as favorites for quick reuse
+- **Prompt cache with switchable LoRA state cache**: persist prompt analysis results to disk and toggle LoRA state caching
+- **High-resolution support**: generate up to 2K (2160) resolution
+  - Added trimming mode that matches the longer edge with padding when comparing reference images
+- **“Stop After Current” button**: stop processing after the current image finishes (F1/UI integration)
+- **“Stop After Step” button**: stop after the current frame generation step completes (F1/UI integration)
+- **Image preview & original-size modal**: preview generated images in a window and view them in their original resolution
+
 ## 🌟 Feature Expansion (v1.9.4) ※Official Release
 
 **FramePack-eichi v1.9.4** focuses on usability improvements and stability enhancements.
@@ -593,6 +616,8 @@ On Linux, you can run it with the following steps:
 
 ## 🚀 How to Use
 
+※ If you encounter "localhost is not accessible" error during startup, refer to [Troubleshooting](#-troubleshooting)
+
 ### Multi-Language & Multi-Mode Integrated Launcher
 
 **Language_FramePack-eichi.bat** is an integrated launcher that allows you to start all FramePack-eichi variations from a single interface.
@@ -700,6 +725,70 @@ Enter a number as shown above, and FramePack-eichi will start with the correspon
    ```
 
 ## 🔧 Troubleshooting
+
+### Localhost Accessibility Error
+
+When starting FramePack-eichi, you may encounter the following error:
+
+```
+localhost is not accessible
+```
+
+**Cause**: Gradio performs a localhost accessibility check with a 3-second timeout during startup. FramePack-eichi, having more UI components than standard FramePack, may exceed this time limit.
+
+**Solutions**:
+
+#### 1. Extend Timeout Settings (Recommended)
+
+This method solves the problem at its root by changing the localhost check timeout from 3 seconds to 10 seconds.
+
+1. Open the file `[FramePackFolder]\system\python\Lib\site-packages\gradio\networking.py`
+2. Find line around 68 (look for `r = httpx.head(url, timeout=3, verify=False)`)
+3. Change `timeout=3` to `timeout=10`
+
+```python
+# Change line 68
+r = httpx.head(url, timeout=10, verify=False)
+```
+
+#### 2. VSCode Terminal Startup
+
+VSCode may start faster, potentially allowing the check to complete within the 3-second rule.
+
+1. Open VSCode
+2. Open the FramePack folder
+3. Open terminal (Ctrl+`)
+4. Run the startup command
+
+```bash
+run_endframe_ichi.bat
+```
+
+#### 3. Increase Virtual Memory
+
+Increasing virtual memory can improve response times and satisfy the 3-second rule.
+
+1. Control Panel → System → Advanced System Settings
+2. Under the "Advanced" tab, click "Settings" in the Performance section
+3. "Advanced" tab → "Change" in the Virtual Memory section
+4. Increase the paging file size (recommended: 2-3 times the RAM size)
+
+#### 4. Use --share Option (Temporary Solution)
+
+This method bypasses the localhost accessibility check but creates a public URL.
+
+1. Open the corresponding .bat file in a text editor
+2. Add `--share` to the command line
+
+```bash
+python webui/endframe_ichi.py --share
+```
+
+**Important Notes about --share**:
+- Creates a public URL accessible from the Internet (valid for 72 hours)
+- Recommended for use only in secure environments
+- Not recommended for long-term use due to security considerations
+- Use only as a temporary measure
 
 ### About h11 Errors
 
