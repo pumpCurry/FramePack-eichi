@@ -3077,41 +3077,14 @@ with block:
     # eichiと同じ半透明度スタイルを使用
     gr.HTML('<h1>FramePack<span class="title-suffix">-oichi</span></h1>')
 
-    # 原寸大表示用モーダルとボタン追加スクリプト
+    # 原寸大表示用モーダル (外部JS/CSS読み込み)
     gr.HTML("""
+    <link rel='stylesheet' href='file=eichi_utils/modal.css'>
     <div id='orig_size_modal'>
       <button id='orig_size_close'>×</button>
       <img id='orig_size_img'>
     </div>
-    <script>
-    function setupOrigSize(){
-      const modal=document.getElementById('orig_size_modal');
-      const imgElem=document.getElementById('orig_size_img');
-      const closeBtn=document.getElementById('orig_size_close');
-      closeBtn.addEventListener('click',()=>{modal.classList.remove('visible');imgElem.src='';});
-      function addButtons(){
-        document.querySelectorAll('[data-testid="image"]').forEach(div=>{
-          if(div.querySelector('.orig-size-btn')) return;
-          const img=div.querySelector('img');
-          const toolbar=div.querySelector('div.flex');
-          if(!img||!toolbar) return;
-          const btn=document.createElement('button');
-          btn.innerText='原寸';
-          btn.className='orig-size-btn';
-          btn.addEventListener('click',()=>{imgElem.src=img.src;modal.classList.add('visible');});
-          toolbar.insertBefore(btn, toolbar.firstChild);
-        });
-      }
-      addButtons();
-      const obs=new MutationObserver(addButtons);
-      obs.observe(document.body,{childList:true,subtree:true});
-    }
-    if(document.readyState !== 'loading'){
-      setupOrigSize();
-    } else {
-      window.addEventListener('load', setupOrigSize);
-    }
-    </script>
+    <script src='file=eichi_utils/modal.js'></script>
     """)
     
     # 初期化時にtransformerの状態確認は行わない（必要時に遅延ロード）
