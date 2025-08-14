@@ -17,6 +17,8 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 
 [https://github.com/hinablue](https://github.com/hinablue) Hina Chen氏より多言語対応の協力をいただき非常に感謝しております。
 
+## 🌟 新機能拡張 (v1.9.5.2)
+
 ## 🌟 新機能拡張 (v1.9.4) ※正式リリース版
 
 **FramePack-eichi v1.9.4**では、ユーザビリティの向上と安定性の改善を重視した機能を追加しました。
