@@ -221,15 +221,15 @@ def _compute_stop_controls(running: bool):
     End/Stopボタンの有効・ラベル状態を一元計算するヘルパー。
     running=True で生成中の想定。UI全体で共通利用する。
     """
-    mode = stop_state.get()
-    end_enabled = running and mode == StopMode.NONE
-    stop_current_enabled = running and mode not in (StopMode.END_AFTER_STEP, StopMode.END_IMMEDIATE)
-    stop_step_enabled    = running and mode not in (StopMode.END_AFTER_GENERATION, StopMode.END_IMMEDIATE)
+    global stop_mode
+    end_enabled = running and stop_mode is None
+    stop_current_enabled = running and stop_mode != "step"
+    stop_step_enabled    = running and stop_mode != "image"
     base_current = translate("この生成で打ち切り")
     base_step    = translate("このステップで打ち切り")
     suffix       = translate("（待機中：再クリックで取消）")
-    stop_current_label = base_current + (suffix if mode == StopMode.END_AFTER_GENERATION else "")
-    stop_step_label    = base_step    + (suffix if mode == StopMode.END_AFTER_STEP        else "")
+    stop_current_label = base_current + (suffix if stop_mode == "image" else "")
+    stop_step_label    = base_step    + (suffix if stop_mode == "step"  else "")
     return end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label
 
 # バッチ処理とキュー機能用グローバル変数
@@ -237,6 +237,8 @@ batch_stopped = False  # バッチ処理中断フラグ（互換維持）
 # 以下の2つは既存UIとの互換のため残す（TODO: UI整理後に削除）
 stop_after_current = False  # 現在の生成完了後に停止するフラグ（表示用）
 stop_after_step = False     # 現在のステップ完了後に停止するフラグ（表示用）
+stop_mode = None     # 停止モード: None/"image"/"step"
+last_stop_mode = None  # 直前に適用された停止モード
 
 # テキストエンコード結果のキャッシュ用グローバル変数を初期化
 cached_prompt = None
@@ -266,7 +268,6 @@ job_ended_at = None
 
 # 再同期処理に使用される生成状態フラグ
 generation_active = False
-last_stop_mode = StopMode.NONE
 
 # 最終UIスナップショット（タブ再同期時の初回即時描画に使用）
 try:
@@ -354,6 +355,7 @@ def attach_to_running_job():
         gr.update(interactive=stop_step_enabled, value=stop_step_label),
         gr.update(value=current_seed) if current_seed is not None else gr.skip(),
     ))
+    yield first_ui
 
 
 def _start_job_for_single_task(*worker_args, reuse_ctx: bool = True, **worker_kwargs) -> JobContext:
@@ -484,7 +486,7 @@ def _stream_job_to_ui(ctx: JobContext):
     """Stream job progress from the bus to the Gradio UI."""
     global last_progress_desc, last_progress_bar, last_preview_image
     global last_output_filename, current_seed, batch_stopped, last_stop_mode
-    global stop_after_current, stop_after_step, generation_active
+    global stop_after_current, stop_after_step, generation_active, stop_mode
 
     running = is_generation_running()
     end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(running)
@@ -518,9 +520,9 @@ def _stream_job_to_ui(ctx: JobContext):
                 ctx._sent_end = True
                 stop_after_current = False
                 stop_after_step = False
-                # 即時停止が掛かっていた場合は完了表示を中断扱いに寄せる
-                last_stop_mode = stop_state.get()
-                if last_stop_mode == StopMode.END_IMMEDIATE:
+                last_stop_mode = stop_mode
+                stop_mode = None
+                if stop_state.get() == StopMode.END_IMMEDIATE:
                     batch_stopped = True
                 stop_state.clear()
                 # 最終メッセージは finalize が流すが、未流通のときはここで時刻＋件数入りを合成
@@ -530,7 +532,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 if last_progress_desc:
                     completion_message = last_progress_desc
                 else:
-                    if batch_stopped or last_stop_mode in (StopMode.END_IMMEDIATE, StopMode.END_AFTER_GENERATION, StopMode.END_AFTER_STEP):
+                    if batch_stopped or last_stop_mode is not None:
                         completion_message = translate("バッチ処理が中断されました") + " - " + _summary + " - " + _ts
                     else:
                         completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") + _ts + " - " + _summary
@@ -603,7 +605,8 @@ def _stream_job_to_ui(ctx: JobContext):
                 ctx._sent_end = True
                 stop_after_current = False
                 stop_after_step = False
-                last_stop_mode = stop_state.get()
+                last_stop_mode = stop_mode
+                stop_mode = None
                 stop_state.clear()
                 # progress未送出でも、時刻＋件数でフォールバック合成
                 if last_progress_desc:
@@ -612,7 +615,7 @@ def _stream_job_to_ui(ctx: JobContext):
                     from datetime import datetime as _dt
                     _ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
                     _summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                    if last_stop_mode in (StopMode.END_IMMEDIATE, StopMode.END_AFTER_GENERATION, StopMode.END_AFTER_STEP):
+                    if batch_stopped or last_stop_mode is not None:
                         completion_message = translate("バッチ処理が中断されました") + " - " + _summary + " - " + _ts
                     else:
                         completion_message = translate("【全バッチ処理完了】プロセスが完了しました - ") + _ts + " - " + _summary
@@ -638,11 +641,14 @@ def _stream_job_to_ui(ctx: JobContext):
 
             # 即時終了 or 中断指示時は完了メッセージで締める
             if stop_state.get() == StopMode.END_IMMEDIATE or (
-                batch_stopped and stop_state.get() != StopMode.END_AFTER_GENERATION
+                batch_stopped and stop_mode is None
             ):
                 batch_stopped = True
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                last_stop_mode = stop_state.get()
+                last_stop_mode = stop_mode
+                stop_mode = None
+                stop_after_current = False
+                stop_after_step = False
                 stop_state.clear()
                 end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
                 generation_active = False
@@ -1999,8 +2005,10 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             latent_padding_size = latent_padding * latent_window_size  # 常に0
             
             if ctx.stream.input_queue.top() == 'end':
-                global batch_stopped
+                global batch_stopped, last_stop_mode, stop_mode
                 batch_stopped = True
+                last_stop_mode = stop_mode
+                stop_mode = None
                 return {'user_interrupt': True}
             
             # 1フレームモード用のindices設定
@@ -2228,11 +2236,11 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                             ctx._sent_end = True
                         raise KeyboardInterrupt("END_IMMEDIATE")
 
-                    if mode == StopMode.END_AFTER_STEP and not getattr(ctx, "_sent_end", False):
-                        # 現在ステップ完了で停止（1回だけ）
+                    global stop_mode
+                    if stop_mode == "step" and not getattr(ctx, "_sent_end", False):
                         ctx.stream.input_queue.push('end')
                         ctx._sent_end = True
-                        raise KeyboardInterrupt("END_AFTER_STEP")
+                        return {'user_interrupt': True}
 
                     current_step = d['i'] + 1
                     percentage = int(100.0 * current_step / steps)
@@ -2800,9 +2808,13 @@ def worker(ctx: JobContext, *args, **kwargs):
 def press_end_generation():
     """{生成終了}: 即時停止（保存しない・キャンセル不可）。"""
     stop_state.request(StopMode.END_IMMEDIATE)
-    global batch_stopped
+    global batch_stopped, stop_mode, stop_after_current, stop_after_step, last_stop_mode
     # 保険として中断フラグも立てる（最終文言の取りこぼし防止）
     batch_stopped = True
+    stop_mode = None
+    stop_after_current = False
+    stop_after_step = False
+    last_stop_mode = None
     with ctx_lock:
         ctx = cur_job
     if ctx and not getattr(ctx, "_sent_end", False):
@@ -2816,45 +2828,37 @@ def press_end_generation():
 
 def toggle_stop_after_current():
     """{この生成で打ち切り}: 現在の生成完了後に停止（キャンセル可）。"""
-    global stop_after_current, stop_after_step
-    mode = stop_state.get()
-    if mode == StopMode.END_AFTER_GENERATION:
-        stop_state.cancel()
+    global stop_after_current, stop_after_step, stop_mode
+    if stop_mode == "image":
+        stop_mode = None
         stop_after_current = False
     else:
-        stop_state.request(StopMode.END_AFTER_GENERATION)
+        stop_mode = "image"
         stop_after_current = True
         stop_after_step = False
-    # ラベル／ボタン状態を即時反映（Endはトグル待機中は無効化）
-    label_current = translate("この生成で打ち切り") + (translate("（待機中：再クリックで取消）") if stop_state.get()==StopMode.END_AFTER_GENERATION else "")
-    label_step    = translate("このステップで打ち切り")
     running = is_generation_running()
-    end_enabled, _, _, _, _ = _compute_stop_controls(running)
+    end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(running)
     return (
-        gr.update(interactive=True, value=label_current),
-        gr.update(interactive=(stop_state.get()!=StopMode.END_AFTER_GENERATION), value=label_step),
+        gr.update(interactive=stop_current_enabled, value=stop_current_label),
+        gr.update(interactive=stop_step_enabled, value=stop_step_label),
         gr.update(interactive=end_enabled, value=translate("End Generation")),
     )
 
 def toggle_stop_after_step():
     """{このステップで打ち切り}: 現在ステップ完了後に停止（キャンセル可）。"""
-    global stop_after_current, stop_after_step
-    mode = stop_state.get()
-    if mode == StopMode.END_AFTER_STEP:
-        stop_state.cancel()
+    global stop_after_current, stop_after_step, stop_mode
+    if stop_mode == "step":
+        stop_mode = None
         stop_after_step = False
     else:
-        stop_state.request(StopMode.END_AFTER_STEP)
+        stop_mode = "step"
         stop_after_step = True
         stop_after_current = False
-    # ラベル／ボタン状態を即時反映（Endはトグル待機中は無効化）
-    label_current = translate("この生成で打ち切り")
-    label_step    = translate("このステップで打ち切り") + (translate("（待機中：再クリックで取消）") if stop_state.get()==StopMode.END_AFTER_STEP else "")
     running = is_generation_running()
-    end_enabled, _, _, _, _ = _compute_stop_controls(running)
+    end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(running)
     return (
-        gr.update(interactive=(stop_state.get()!=StopMode.END_AFTER_STEP), value=label_current),
-        gr.update(interactive=True, value=label_step),
+        gr.update(interactive=stop_current_enabled, value=stop_current_label),
+        gr.update(interactive=stop_step_enabled, value=stop_step_label),
         gr.update(interactive=end_enabled, value=translate("End Generation")),
     )
 
@@ -2947,7 +2951,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             save_settings_on_start=False, alarm_on_completion=True,
             log_enabled=None, log_folder=None):
     global stream
-    global batch_stopped, stop_after_current, stop_after_step, last_stop_mode
+    global batch_stopped, stop_after_current, stop_after_step, stop_mode, last_stop_mode
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
     global progress_ref_idx, progress_ref_total, progress_ref_name
     global progress_img_idx, progress_img_total, progress_img_name
@@ -2967,7 +2971,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     batch_stopped = False
     stop_after_current = False
     stop_after_step = False
-    last_stop_mode = StopMode.NONE
+    stop_mode = None
+    last_stop_mode = None
 
     # 進捗とプレビューの状態をリセット
     progress_ref_idx = 0
@@ -3185,6 +3190,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     batch_stopped = False
     stop_after_current = False
     stop_after_step = False
+    stop_mode = None
+    last_stop_mode = None
     
     # 元のシード値を保存（バッチ処理用）
     original_seed = seed
@@ -3538,6 +3545,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             
             # UIをリセット
             stop_state.clear()
+            stop_mode = None
+            stop_after_current = False
+            stop_after_step = False
+            last_stop_mode = None
             end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
             generation_active = False
             yield _remember_ui(_ui_tuple(
@@ -3557,6 +3568,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             traceback.print_exc()
             # UIをリセット
             stop_state.clear()
+            stop_mode = None
+            stop_after_current = False
+            stop_after_step = False
+            last_stop_mode = None
             end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(False)
             generation_active = False
             yield _remember_ui(_ui_tuple(
@@ -3575,12 +3590,17 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             pass
 
         # 各ジョブ終了直後の共通ガード（次ジョブに進む前）
-        if stop_state.get() in (StopMode.END_AFTER_GENERATION, StopMode.END_IMMEDIATE) or batch_stopped:
-            batch_stopped = True
-            last_stop_mode = stop_state.get()
-            stop_state.clear()
+        if batch_stopped:
             break
-        last_stop_mode = StopMode.NONE
+        if last_stop_mode:
+            if last_stop_mode == "step":
+                print(translate("このステップで打ち切りが指定されたため、後続のバッチを停止します"))
+            else:
+                print(translate("この生成で打ち切りが指定されたため、後続のバッチを停止します"))
+            batch_stopped = True
+            last_stop_mode = None
+            break
+        last_stop_mode = None
 
     try:
         # すべてのバッチ処理が正常に完了した場合と中断された場合で表示メッセージを分ける
@@ -3593,7 +3613,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         batch_stopped = False
         stop_after_current = False
         stop_after_step = False
-        last_stop_mode = StopMode.NONE
+        stop_mode = None
+        last_stop_mode = None
 
         # 処理完了時の効果音（アラーム設定が有効な場合のみ）
         if alarm_on_completion:
