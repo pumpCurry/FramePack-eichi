@@ -1,13 +1,28 @@
 
-
-from eichi_utils.spinner import spinner_while_running
 import os
-print(f"{os.path.basename(__file__)} : 起動開始....")
+# 即座に起動しているファイル名をまずは出力して、画面に応答を表示する
+print(f"\n------------------------------------------------------------")
+print(f"{os.path.basename(__file__)} : Starting....")
+print(f"------------------------------------------------------------\n")
 
-import importlib
-import sys
-import argparse
+# 進捗バーやスピナーと協調するスレッドセーフなprint文を有効化
+from eichi_utils.tqdm_print import enable_tqdm_print
+enable_tqdm_print()
 
+# スピナー を読み込む
+from eichi_utils.spinner import spinner_while_running
+
+# スピナーで進捗を示しながら基本モジュールをインポート
+importlib, sys, argparse = spinner_while_running(
+    "Load: Initalize",
+    lambda: (
+        __import__("importlib"),
+        __import__("sys"),
+        __import__("argparse"),
+    ),
+)
+
+# スピナーで進捗を表示しつつ FramePack サブモジュールのパスを追加
 spinner_while_running(
     "Path: FramePack",
     sys.path.append,
@@ -18,6 +33,7 @@ spinner_while_running(
     ),
 )
 
+# サーバーアドレスやUI言語などの共通CLIオプションを解析
 parser = argparse.ArgumentParser()
 parser.add_argument('--share', action='store_true')
 parser.add_argument("--server", type=str, default='127.0.0.1')
@@ -45,7 +61,9 @@ set_lang(args.lang)
     json,
     glob,
     subprocess,
+    snapshot_download,
 ) = spinner_while_running(
+    # 進捗を表示しつつPython標準ライブラリと補助ライブラリをインポート
     translate("Load_System Libraries"),
     lambda: (
         importlib.import_module("asyncio"),
@@ -57,9 +75,106 @@ set_lang(args.lang)
         importlib.import_module("json"),
         importlib.import_module("glob"),
         importlib.import_module("subprocess"),
+        importlib.import_module("huggingface_hub").snapshot_download,
     ),
 )
 import shutil
+
+from eichi_utils.notification_utils import play_completion_sound
+
+import queue
+import threading
+from collections import deque
+import weakref
+
+
+class FanoutQueue:
+    """Thread-safe fan-out queue with replayable history."""
+
+    def __init__(self, maxlen: int = 200, maxsize: int = 64):
+        self._history = deque(maxlen=maxlen)
+        self._subs = weakref.WeakSet()
+        self._lock = threading.Lock()
+        self._maxsize = maxsize
+        self._closed = False
+
+    def publish(self, item) -> None:
+        """Publish an item to all subscribers and store in history."""
+        with self._lock:
+            if self._closed:
+                return
+            self._history.append(item)
+            for q in list(self._subs):
+                try:
+                    q.put_nowait(item)
+                except queue.Full:
+                    # 満杯なら古い1件を捨てて最新を入れる（前進優先）
+                    try:
+                        _ = q.get_nowait()
+                        q.put_nowait(item)
+                    except Exception:
+                        pass
+
+    def subscribe(self) -> queue.Queue:
+        """Subscribe to the queue and receive the backlog immediately."""
+        q: queue.Queue = queue.Queue(maxsize=self._maxsize)
+        with self._lock:
+            for item in list(self._history):
+                try:
+                    q.put_nowait(item)
+                except queue.Full:
+                    break
+            self._subs.add(q)
+        return q
+
+    def unsubscribe(self, q: queue.Queue) -> None:
+        with self._lock:
+            try:
+                self._subs.discard(q)
+            except Exception:
+                pass
+
+    def clear(self) -> None:
+        """Clear history and all subscriber queues."""
+        with self._lock:
+            self._history.clear()
+            for q in list(self._subs):
+                while not q.empty():
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        break
+
+    def close(self) -> None:
+        """Close all subscriber queues and remove them. Sentinel is guaranteed."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            for q in list(self._subs):
+                # キューをドレインせずに必ずセンチネルを入れる
+                try:
+                    q.put_nowait((None, None))
+                except queue.Full:
+                    try:
+                        _ = q.get_nowait()
+                        q.put_nowait((None, None))
+                    except Exception:
+                        pass
+            self._subs.clear()
+
+
+class JobContext:
+    """Holds job-specific state such as the fan-out queue."""
+
+    def __init__(self):
+        self.bus = FanoutQueue()
+        self.done = threading.Event()
+
+
+# ----------------- globals -----------------
+ctx_lock = threading.Lock()
+cur_job = None  # type: JobContext | None
 
 # Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
 if sys.platform in ('win32', 'cygwin'):
@@ -87,13 +202,207 @@ queue_enabled = False  # キュー機能の有効/無効フラグ
 queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
 image_queue_files = []  # イメージキューのファイルリスト
+input_folder_name_value = "inputs"
+reference_input_folder_name_value = "references"
+reference_queue_files = []
 
-# Resync support - store last progress state
+# 再同期対応 - 最終進捗状態を保存
 last_progress_desc = ""
 last_progress_bar = ""
 last_preview_image = None
 last_output_filename = None
 current_seed = None
+
+# 再同期処理に使用される生成状態フラグ
+generation_active = False
+
+def _cleanup_models(force: bool = False):
+    global transformer, vae, text_encoder, text_encoder_2, image_encoder
+    if not force and high_vram:
+        return
+    try:
+        transformer_manager.dispose_transformer()
+    except Exception:
+        pass
+    try:
+        unload_complete_models(text_encoder, text_encoder_2, image_encoder, vae, None)
+    except Exception:
+        pass
+    transformer = None
+    vae = None
+    text_encoder = None
+    text_encoder_2 = None
+    image_encoder = None
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+
+def is_generation_running():
+    """生成ジョブが実行中なら True を返す。"""
+    return generation_active
+
+
+def progress_resync():
+    """再接続時に進捗を再送する購読専用ジェネレータ。"""
+    with ctx_lock:
+        ctx = cur_job
+    if not ctx:
+        return
+    q = ctx.bus.subscribe()
+    try:
+        while True:
+            item = q.get()
+            if item is None or item == (None, None):
+                break
+            kind, payload = item
+            if kind == 'progress':
+                preview, desc, bar_html = payload
+                yield preview, desc, bar_html
+            elif kind == 'file':
+                path = payload
+                yield None, f"Saved: {path}", None
+            elif kind == 'end':
+                break
+    finally:
+        ctx.bus.unsubscribe(q)
+
+
+def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
+    """Create and start a new job with its own context."""
+    global generation_active, cur_job
+    ctx = JobContext()
+    # ジョブ専用のstreamとフラグを持たせる
+    ctx.stream = AsyncStream()
+    ctx.stop_after_step_event = threading.Event()
+    ctx._sent_end = False
+    # 既存コードの互換性のため、グローバルにも参照を残す（参照先はこのctx）
+    globals()['stream'] = ctx.stream
+    with ctx_lock:
+        cur_job = ctx
+    generation_active = True
+    async_run(worker, ctx, *worker_args, **worker_kwargs)
+    return ctx
+
+
+def _stream_job_to_ui(ctx: JobContext):
+    """Stream job progress from the bus to the Gradio UI."""
+    global last_progress_desc, last_progress_bar, last_preview_image
+    global last_output_filename, current_seed, batch_stopped
+    global stop_after_current, stop_after_step
+
+    running = is_generation_running()
+    # Disable End button while a stop toggle is active to prevent accidental stops
+    end_enabled = running and not (stop_after_current or stop_after_step)
+    yield (
+        last_output_filename if last_output_filename is not None else gr.skip(),
+        gr.update(visible=last_preview_image is not None, value=last_preview_image),
+        last_progress_desc,
+        last_progress_bar,
+        gr.update(interactive=not running, value=translate("Start Generation")),
+        gr.update(interactive=end_enabled, value=translate("End Generation")),
+        gr.update(interactive=running),
+        gr.update(interactive=running),
+        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+    )
+
+    output_filename = None
+    q = ctx.bus.subscribe()
+    try:
+        while True:
+            item = q.get()
+            if item == (None, None):
+                stop_after_current = False
+                stop_after_step = False
+                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
+                if batch_stopped:
+                    completion_message = translate("バッチ処理が中止されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
+                else:
+                    completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(progress_img_total, progress_img_total)
+                completion_message = f"{completion_message} - {progress_summary}"
+                final_output = output_filename or last_output_filename
+                globals()['last_output_filename'] = final_output
+                globals()['last_progress_desc'] = completion_message
+                globals()['last_progress_bar'] = ''
+                globals()['last_preview_image'] = None
+                yield (
+                    final_output if final_output is not None else gr.skip(),
+                    gr.update(visible=False),
+                    completion_message,
+                    '',
+                    gr.update(interactive=True, value=translate("Start Generation")),
+                    gr.update(interactive=False, value=translate("End Generation")),
+                    gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                    gr.update(interactive=False, value=translate("このステップで打ち切り")),
+                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                )
+                break
+            flag, data = item
+            if flag == 'file':
+                output_filename = data
+                last_output_filename = data
+                end_enabled = is_generation_running() and not (stop_after_current or stop_after_step)
+                yield (
+                    output_filename if output_filename is not None else gr.skip(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(interactive=False),
+                    gr.update(interactive=end_enabled),
+                    gr.update(interactive=True),
+                    gr.update(interactive=True),
+                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                )
+            elif flag == 'progress':
+                preview, desc, html = data
+                last_preview_image = preview
+                last_progress_desc = desc
+                last_progress_bar = html
+                end_enabled = is_generation_running() and not (stop_after_current or stop_after_step)
+                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=end_enabled), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+            elif flag == 'end':
+                stop_after_current = False
+                stop_after_step = False
+                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
+                if batch_stopped:
+                    completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
+                else:
+                    completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(progress_img_total, progress_img_total)
+                completion_message = f"{completion_message} - {progress_summary}"
+                last_output_filename = output_filename or last_output_filename
+                last_progress_desc = completion_message
+                last_progress_bar = ''
+                last_preview_image = None
+                yield (
+                    last_output_filename if last_output_filename is not None else gr.skip(),
+                    gr.update(visible=False),
+                    completion_message,
+                    '',
+                    gr.update(interactive=True, value=translate("Start Generation")),
+                    gr.update(interactive=False, value=translate("End Generation")),
+                    gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                    gr.update(interactive=False, value=translate("このステップで打ち切り")),
+                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                )
+                break
+
+            if ctx.stream.input_queue.top() == 'end' or (batch_stopped and not stop_after_current):
+                batch_stopped = True
+                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
+                yield (
+                    output_filename if output_filename is not None else gr.skip(),
+                    gr.update(visible=False),
+                    translate("バッチ処理が中断されました") + f" - {progress_summary}",
+                    '',
+                    gr.update(interactive=True),
+                    gr.update(interactive=False, value=translate("End Generation")),
+                    gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                    gr.update(interactive=False, value=translate("このステップで打ち切り")),
+                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                )
+                generation_active = False
+                return
+    finally:
+        ctx.bus.unsubscribe(q)
 
 # 進捗表示用グローバル変数
 progress_ref_idx = 0
@@ -137,15 +446,6 @@ if is_port_in_use(args.port):
     first_run = False  # 初回実行ではない
     time.sleep(10) # 10秒待機して続行
 
-try:
-    winsound = spinner_while_running(
-        translate("Load_winsound"),
-        importlib.import_module,
-        "winsound",
-    )
-    HAS_WINSOUND = True
-except ImportError:
-    HAS_WINSOUND = False
 
 if 'HF_HOME' not in os.environ:
     os.environ['HF_HOME'] = os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './hf_download')))
@@ -249,6 +549,22 @@ except ImportError:
         importlib.import_module("eichi_utils.lora_preset_manager").save_lora_preset,
         importlib.import_module("eichi_utils.lora_preset_manager").load_lora_preset,
         importlib.import_module("eichi_utils.lora_preset_manager").get_preset_names,
+    ),
+)
+
+# デフォルトプロンプトおよびプリセット操作の管理
+(
+    get_default_startup_prompt,
+    load_presets,
+    save_preset,
+    delete_preset,
+) = spinner_while_running(
+    translate("Load_eichi_utils.preset_manager"),
+    lambda: (
+        importlib.import_module("eichi_utils.preset_manager").get_default_startup_prompt,
+        importlib.import_module("eichi_utils.preset_manager").load_presets,
+        importlib.import_module("eichi_utils.preset_manager").save_preset,
+        importlib.import_module("eichi_utils.preset_manager").delete_preset,
     ),
 )
 from eichi_utils import prompt_cache, lora_state_cache
@@ -356,27 +672,8 @@ HunyuanVideoTransformer3DModelPacked = spinner_while_running(
 # フォルダを開く関数
 def open_folder(folder_path):
     """指定されたフォルダをOSに依存せず開く"""
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path, exist_ok=True)
-        print(translate("フォルダを作成しました: {0}").format(folder_path))
-
     try:
-        if os.name == 'nt':  # Windows
-            subprocess.Popen(['explorer', folder_path])
-            print(translate("フォルダを開きました: {0}").format(folder_path))
-        elif os.name == 'posix':
-            opener = None
-            if sys.platform == 'darwin' and shutil.which('open'):
-                opener = 'open'
-            else:
-                opener = shutil.which('xdg-open') or shutil.which('open')
-            if opener:
-                subprocess.Popen([opener, folder_path])
-                print(translate("フォルダを開きました: {0}").format(folder_path))
-            else:
-                print(translate("xdg-open/open が見つからないため自動でフォルダを開けません: {0}").format(folder_path))
-        else:
-            print(translate("このOSではフォルダを自動で開く機能はサポートされていません: {0}").format(folder_path))
+        open_output_folder(folder_path)
         return True
     except Exception as e:
         print(translate("フォルダを開く際にエラーが発生しました: {0}").format(e))
@@ -430,7 +727,7 @@ make_progress_bar_css, make_progress_bar_html = spinner_while_running(
     ),
 )
 
-# get_app_css was imported earlier from eichi_utils.ui_styles
+# get_app_css は eichi_utils.ui_styles から先にインポート済み
 
 
 SiglipImageProcessor, SiglipVisionModel = spinner_while_running(
@@ -471,21 +768,41 @@ print(translate('Free VRAM {0} GB').format(free_mem_gb))
 print(translate('High-VRAM Mode: {0}').format(high_vram))
 
 # モデルを並列ダウンロードしておく
-ModelDownloader = spinner_while_running(
-    translate("Load_eichi_utils.model_downloader"),
-    lambda: importlib.import_module("eichi_utils.model_downloader").ModelDownloader,
-)
+model_downloads = [
+    {
+        "repo_id": "hunyuanvideo-community/HunyuanVideo",
+        "allow_patterns": [
+            "tokenizer/*",
+            "tokenizer_2/*",
+            "vae/*",
+            "text_encoder/*",
+            "text_encoder_2/*",
+        ],
+    },
+    {
+        "repo_id": "lllyasviel/flux_redux_bfl",
+        "allow_patterns": ["feature_extractor/*", "image_encoder/*"],
+    },
+    {"repo_id": "lllyasviel/FramePackI2V_HY"},
+]
 
-ModelDownloader().download_original()
+for idx, model in enumerate(model_downloads, 1):
+    spinner_while_running(
+        translate("Download_progress").format(idx, len(model_downloads), model["repo_id"]),
+        snapshot_download,
+        repo_id=model["repo_id"],
+        allow_patterns=model.get("allow_patterns", "*"),
+        max_workers=4,
+    )
 
 def _norm_dropdown(val):
-    """Return a clean str or None from a Gr.Dropdown value."""
+    """Gr.Dropdownの値から適切な文字列またはNoneを返す。"""
     if val in (None, False, True, 0, "0", 0.0) or val == translate("なし"):
         return None
     return str(val)
 
 def _to_bool(val):
-    """Convert various truthy inputs to a strict boolean."""
+    """様々な真偽値表現を厳密なboolに変換する。"""
     if isinstance(val, bool):
         return val
     if isinstance(val, str):
@@ -497,7 +814,7 @@ def _to_bool(val):
     return bool(val)
 
 def resize_and_pad_with_edge_color(image_np, target_width, target_height):
-    """Resize image to fit within target size and pad using edge color."""
+    """画像を目標サイズに合わせてリサイズし、縁の色で余白を埋める。"""
     pil_image = Image.fromarray(image_np)
     ow, oh = pil_image.size
     scale = min(target_width / ow, target_height / oh)
@@ -512,7 +829,13 @@ def resize_and_pad_with_edge_color(image_np, target_width, target_height):
     return np.array(padded)
 
 # グローバルなモデル状態管理インスタンスを作成（モデルは実際に使用するまでロードしない）
-transformer_manager = TransformerManager(device=gpu, high_vram_mode=high_vram, use_f1_model=False)
+transformer_manager = spinner_while_running(
+    translate("Load_transformer_virtual_device"),
+    TransformerManager,
+    gpu,
+    high_vram_mode=high_vram,
+    use_f1_model=False,
+)
 text_encoder_manager = TextEncoderManager(device=gpu, high_vram_mode=high_vram)
 
 # LoRAの状態を確認
@@ -536,30 +859,38 @@ def reload_transformer_if_needed():
 # 遅延ロード方式に変更 - 起動時にはtokenizerのみロードする
 try:
     # tokenizerのロードは起動時から行う
-    try:
-        print(translate("tokenizer, tokenizer_2のロードを開始します..."))
-        tokenizer = LlamaTokenizerFast.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer')
-        tokenizer_2 = CLIPTokenizer.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2')
-        print(translate("tokenizer, tokenizer_2のロードが完了しました"))
-    except Exception as e:
-        print(translate("tokenizer, tokenizer_2のロードに失敗しました: {0}").format(e))
-        traceback.print_exc()
-        print(translate("5秒間待機後に再試行します..."))
-        time.sleep(5)
-        tokenizer = LlamaTokenizerFast.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer')
-        tokenizer_2 = CLIPTokenizer.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2')
-    
+    def load_tokenizers():
+        try:
+            return (
+                LlamaTokenizerFast.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer'),
+                CLIPTokenizer.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2'),
+            )
+        except Exception:
+            traceback.print_exc()
+            time.sleep(5)
+            return (
+                LlamaTokenizerFast.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer'),
+                CLIPTokenizer.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2'),
+            )
+
+    tokenizer, tokenizer_2 = spinner_while_running(
+        translate("Load_tokenizer_tokenizer_2"),
+        load_tokenizers,
+    )
+
     # feature_extractorは軽量なのでここでロード
-    try:
-        print(translate("feature_extractorのロードを開始します..."))
-        feature_extractor = SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
-        print(translate("feature_extractorのロードが完了しました"))
-    except Exception as e:
-        print(translate("feature_extractorのロードに失敗しました: {0}").format(e))
-        print(translate("再試行します..."))
-        time.sleep(2)
-        feature_extractor = SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
-    
+    def load_feature_extractor():
+        try:
+            return SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
+        except Exception:
+            time.sleep(2)
+            return SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
+
+    feature_extractor = spinner_while_running(
+        translate("Load_feature_extractor"),
+        load_feature_extractor,
+    )
+
     # 他の重いモデルは遅延ロード方式に変更
     # 変数の初期化だけ行い、実際のロードはworker関数内で行う
     vae = None
@@ -567,21 +898,16 @@ try:
     text_encoder_2 = None
     transformer = None
     image_encoder = None
-    
+
     # transformerダウンロードの確保だけは起動時に
-    try:
-        # モデルのダウンロードを確保（実際のロードはまだ行わない）
-        print(translate("モデルのダウンロードを確保します..."))
-        transformer_manager.ensure_download_models()
-        print(translate("モデルのダウンロードを確保しました"))
-    except Exception as e:
-        print(translate("モデルダウンロード確保エラー: {0}").format(e))
-        traceback.print_exc()
-    
+    spinner_while_running(
+        translate("Download_ensure_models"),
+        transformer_manager.ensure_download_models,
+    )
+
 except Exception as e:
     print(translate("初期化エラー: {0}").format(e))
     print(translate("プログラムを終了します..."))
-    import sys
     sys.exit(1)
 
 # モデル設定のデフォルト値を定義（実際のモデルロードはworker関数内で行う）
@@ -617,39 +943,32 @@ settings_folder = os.path.join(webui_folder, 'settings')
 os.makedirs(settings_folder, exist_ok=True)
 
 # LoRAプリセットの初期化
-from eichi_utils.lora_preset_manager import initialize_lora_presets
 initialize_lora_presets()
 
 # 設定から出力フォルダを取得
 app_settings = load_settings()
 output_folder_name = app_settings.get('output_folder', 'outputs')
-print(translate("設定から出力フォルダを読み込み: {0}").format(output_folder_name))
+spinner_while_running(
+    translate("Setting_output_folder").format(output_folder_name),
+    lambda: None,
+)
 
 # ログ設定を読み込み適用
 log_settings = app_settings.get('log_settings', get_default_log_settings())
-print(translate("ログ設定を読み込み: 有効={0}, フォルダ={1}").format(
-    log_settings.get('log_enabled', False), 
-    log_settings.get('log_folder', 'logs')
-))
-if log_settings.get('log_enabled', False):
-    # 現在のファイル名を渡す
-    enable_logging(log_settings.get('log_folder', 'logs'), source_name="oneframe_ichi")
+def apply_logs():
+    if log_settings.get('log_enabled', False):
+        enable_logging(log_settings.get('log_folder', 'logs'), source_name="oneframe_ichi")
+spinner_while_running(
+    translate("Setting_log").format(
+        log_settings.get('log_enabled', False),
+        log_settings.get('log_folder', 'logs')
+    ),
+    apply_logs,
+)
 
 # 出力フォルダのフルパスを生成
 outputs_folder = get_output_folder_path(output_folder_name)
 os.makedirs(outputs_folder, exist_ok=True)
-
-# グローバル変数
-g_frame_size_setting = "1フレーム"
-batch_stopped = False  # バッチ処理中断フラグ
-stop_after_current = False  # 現在の生成完了後に停止するフラグ
-queue_enabled = False  # キュー機能の有効/無効フラグ
-queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
-prompt_queue_file_path = None  # プロンプトキューのファイルパス
-image_queue_files = []  # イメージキューのファイルリスト
-input_folder_name_value = "inputs"  # 入力フォルダの名前（デフォルト値）
-reference_queue_files = []  # 参照画像キューのファイルリスト
-reference_input_folder_name_value = "references"  # 参照画像入力フォルダ名
 
 # イメージキューのための画像ファイルリストを取得する関数（グローバル関数）
 def get_image_queue_files():
@@ -721,9 +1040,7 @@ def get_reference_queue_files():
     return image_files
 
 # ワーカー関数
-@torch.no_grad()
-@log_and_continue("worker error")
-def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
+def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
            gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files=None, lora_files2=None, lora_scales_text="0.8,0.8,0.8",
            output_dir=None, save_input_images=False, save_before_input_images=False, use_lora=False, fp8_optimization=False, resolution=640,
            latent_window_size=9, latent_index=0, use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
@@ -739,6 +1056,8 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     # テキストエンコード結果をキャッシュするグローバル変数
     global cached_prompt, cached_n_prompt, cached_llama_vec, cached_llama_vec_n, cached_clip_l_pooler, cached_clip_l_pooler_n
     global cached_llama_attention_mask, cached_llama_attention_mask_n
+
+    bus = ctx.bus
 
     # フラグ類は確実にbool化しておく
     reference_long_edge = _to_bool(reference_long_edge)
@@ -809,8 +1128,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
         last_progress_desc = desc
         last_progress_bar = bar_html
         last_preview_image = preview
-
-        stream.output_queue.push(('progress', (preview, desc, bar_html)))
+        bus.publish(('progress', (preview, desc, bar_html)))
 
     if save_before_input_images:
         for p, suffix in [
@@ -917,7 +1235,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
         
         # -------- LoRA 設定 START ---------
 
-        # sanitise raw UI values (can be bool when allow_custom_value=True)
+        # UIの生値を正規化（allow_custom_value=True の場合はboolの可能性あり）
         lora_dropdown1 = _norm_dropdown(lora_dropdown1)
         lora_dropdown2 = _norm_dropdown(lora_dropdown2)
         lora_dropdown3 = _norm_dropdown(lora_dropdown3)
@@ -1379,9 +1697,10 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             is_last_section = latent_padding == 0  # 常にTrue
             latent_padding_size = latent_padding * latent_window_size  # 常に0
             
-            if stream.input_queue.top() == 'end':
-                stream.output_queue.push(('end', None))
-                return
+            if ctx.stream.input_queue.top() == 'end':
+                global batch_stopped
+                batch_stopped = True
+                return {'user_interrupt': True}
             
             # 1フレームモード用のindices設定
             # PR実装に合わせて、インデックスの範囲を明示的に設定
@@ -1518,15 +1837,15 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     print(translate("clean_latentsの結合中にエラーが発生しました: {0}").format(e))
                     print(translate("前処理のみを使用します"))
                     clean_latents = clean_latents_pre
-                    if len(clean_latents.shape) == 4:  # [B, C, H, W]
-                        clean_latents = clean_latents.unsqueeze(2)  # [B, C, 1, H, W]
+                    if len(clean_latents.shape) == 4:  # 形状[B, C, H, W]
+                        clean_latents = clean_latents.unsqueeze(2)  # 形状[B, C, 1, H, W]
             else:
                 print(translate("clean_latents_postは無効化されています。生成が高速化されますが、ノイズが増える可能性があります"))
                 # clean_latents_postを使用しない場合、前処理+空白レイテント（ゼロテンソル）を結合
                 # これはオリジナルの実装をできるだけ維持しつつ、エラーを回避するためのアプローチ
                 clean_latents_pre_shaped = clean_latents_pre
-                if len(clean_latents_pre.shape) == 4:  # [B, C, H, W]
-                    clean_latents_pre_shaped = clean_latents_pre.unsqueeze(2)  # [B, C, 1, H, W]
+                if len(clean_latents_pre.shape) == 4:  # 形状[B, C, H, W]
+                    clean_latents_pre_shaped = clean_latents_pre.unsqueeze(2)  # 形状[B, C, 1, H, W]
                 
                 # 空のレイテントを作成（形状を合わせる）
                 shape = list(clean_latents_pre_shaped.shape)
@@ -1597,18 +1916,18 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     preview = (preview * 255.0).detach().cpu().numpy().clip(0, 255).astype(np.uint8)
                     preview = einops.rearrange(preview, 'b c t h w -> (b h) (t w) c')
 
-                    if stream.input_queue.top() == 'end':
+                    if ctx.stream.input_queue.top() == 'end':
                         global batch_stopped, user_abort, user_abort_notified
                         batch_stopped = True
                         user_abort = True
                         if not user_abort_notified:
                             print(translate("\n[INFO] 開始前または現在の処理完了後に停止します..."))
                             user_abort_notified = True
-                        stream.output_queue.push(('end', None))
                         return {'user_interrupt': True}
 
-                    if stop_after_step and stream.input_queue.top() != 'end':
-                        stream.input_queue.push('end')
+                    if stop_after_step and not getattr(ctx, "_sent_end", False):
+                        ctx.stream.input_queue.push('end')
+                        ctx._sent_end = True
 
                     current_step = d['i'] + 1
                     percentage = int(100.0 * current_step / steps)
@@ -1627,7 +1946,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     # 必要なのは5次元テンソル[B, C, T, H, W]です
                     if clean_latents_2x.shape[2] == 1 and clean_latents_2x.shape[3] == 1:
                         # 余分な次元を削除
-                        clean_latents_2x = clean_latents_2x.squeeze(2)  # [1, 16, 1, 96, 64]
+                        clean_latents_2x = clean_latents_2x.squeeze(2)  # 形状[1, 16, 1, 96, 64]
             except Exception as e:
                 print(translate("clean_latents_2xの形状調整中にエラー: {0}").format(e))
             
@@ -1635,7 +1954,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 if len(clean_latents_4x.shape) > 5:
                     if clean_latents_4x.shape[2] == 1 and clean_latents_4x.shape[3] == 1:
                         # 余分な次元を削除
-                        clean_latents_4x = clean_latents_4x.squeeze(2)  # [1, 16, 1, 96, 64]
+                        clean_latents_4x = clean_latents_4x.squeeze(2)  # 形状[1, 16, 1, 96, 64]
             except Exception as e:
                 print(translate("clean_latents_4xの形状調整中にエラー: {0}").format(e))
             
@@ -1783,7 +2102,7 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
             try:
                 # transformerモデルの内部パラメータを調整
                 # HunyuanVideoTransformerモデル内部のmax_positionに相当する値を変更する
-                if hasattr(transformer, 'max_pos_embed_window_size'):
+                if use_rope_batch and hasattr(transformer, 'max_pos_embed_window_size'):
                     original_value = transformer.max_pos_embed_window_size
                     print(translate("元のmax_pos_embed_window_size: {0}").format(original_value))
                     transformer.max_pos_embed_window_size = latent_window_size
@@ -1875,15 +2194,10 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                 
                 # find_nearest_bucketの結果が間違っている可能性
                 # 入力画像のサイズから正しい値を計算
-                if input_image_np.shape[0] == 832 and input_image_np.shape[1] == 480:
-                    # 実際の画像サイズを使用
-                    actual_width = 480
-                    actual_height = 832
-                    print(translate("実際の画像サイズを使用: width={0}, height={1}").format(actual_width, actual_height))
-                else:
-                    # find_nearest_bucketの結果を使用
-                    actual_width = width
-                    actual_height = height
+                actual_width = width
+                actual_height = height
+                if not (actual_width % 8 == 0 and actual_height % 8 == 0):
+                    raise ValueError(translate("幅/高さは8の倍数である必要があります: {0}x{1}").format(actual_width, actual_height))
                 
                 # 初回実行時の品質について説明
                 if not use_cache:
@@ -2079,9 +2393,10 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
                     print(translate("メタデータ埋め込みエラー: {0}").format(e))
                 
                 print(translate("1フレーム画像を保存しました: {0}").format(output_filename))
-                
+
                 # MP4保存はスキップして、画像ファイルパスを返す
-                stream.output_queue.push(('file', output_filename))
+                bus.publish(('file', output_filename))
+                _cleanup_models()
                 
             except Exception as e:
                 print(translate("1フレームの画像保存中にエラーが発生しました: {0}").format(e))
@@ -2101,91 +2416,36 @@ def worker(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
     except Exception as e:
         print(translate("処理中にエラーが発生しました: {0}").format(e))
         traceback.print_exc()
-        
-        # エラー時の詳細なメモリクリーンアップ
-        try:
-            if not high_vram:
-                print(translate("エラー発生時のメモリクリーンアップを実行..."))
-                
-                # 効率的なクリーンアップのために、重いモデルから順にアンロード
-                models_to_unload = [
-                    ('transformer', transformer), 
-                    ('vae', vae), 
-                    ('image_encoder', image_encoder), 
-                    ('text_encoder', text_encoder), 
-                    ('text_encoder_2', text_encoder_2)
-                ]
-                
-                # 各モデルを個別にアンロードして解放
-                for model_name, model in models_to_unload:
-                    if model is not None:
-                        try:
-                            print(translate("{0}をアンロード中...").format(model_name))
-                            # モデルをCPUに移動
-                            if hasattr(model, 'to'):
-                                model.to('cpu')
-                            # 参照を明示的に削除
-                            if model_name == 'transformer':
-                                transformer = None
-                            elif model_name == 'vae':
-                                vae = None
-                            elif model_name == 'image_encoder':
-                                image_encoder = None
-                            elif model_name == 'text_encoder':
-                                text_encoder = None
-                            elif model_name == 'text_encoder_2':
-                                text_encoder_2 = None
-                            # 各モデル解放後にすぐメモリ解放
-                            torch.cuda.empty_cache()
-                        except Exception as unload_error:
-                            print(translate("{0}のアンロード中にエラー: {1}").format(model_name, unload_error))
-                
-                # 一括アンロード - endframe_ichiと同じアプローチでモデルを明示的に解放
-                if transformer is not None:
-                    # まずtransformer_managerの状態をリセット - これが重要
-                    transformer_manager.current_state['is_loaded'] = False
-                    # FP8最適化モードの有無に関わらず常にCPUに移動
-                    transformer.to('cpu')
-                    print(translate("transformerをCPUに移動しました"))
-
-                # endframe_ichi.pyと同様に明示的にすべてのモデルを一括アンロード
-                # モデルを直接リストで渡す（引数展開ではなく）
-                unload_complete_models(
-                    text_encoder, text_encoder_2, image_encoder, vae, transformer
-                )
-                print(translate("すべてのモデルをアンロードしました"))
-                
-                # 明示的なガベージコレクション（複数回）
-                import gc
-                print(translate("ガベージコレクション実行中..."))
-                gc.collect()
-                torch.cuda.empty_cache()
-                gc.collect()
-                torch.cuda.empty_cache()
-                
-                # メモリ状態を報告
-                free_mem_gb = get_cuda_free_memory_gb(gpu)
-                print(translate("クリーンアップ後の空きVRAM {0} GB").format(free_mem_gb))
-                
-                # 追加の変数クリーンアップ
-                for var_name in ['start_latent', 'decoded_image', 'history_latents', 'real_history_latents', 
-                              'real_history_latents_gpu', 'generated_latents', 'input_image_pt', 'input_image_gpu']:
-                    if var_name in locals():
-                        try:
-                            exec(f"del {var_name}")
-                            print(translate("変数 {0} を解放しました").format(var_name))
-                        except:
-                            pass
-        except Exception as cleanup_error:
-            print(translate("メモリクリーンアップ中にエラー: {0}").format(cleanup_error))
+        _cleanup_models(force=True)
     
     # 処理完了を通知（個別バッチの完了）
     print(translate("処理が完了しました"))
     
     # worker関数内では効果音を鳴らさない（バッチ処理全体の完了時のみ鳴らす）
-    
-    stream.output_queue.push(('end', None))
     return
+
+
+@torch.no_grad()
+@log_and_continue("worker error")
+def worker(ctx: JobContext, *args, **kwargs):
+    global generation_active, cur_job
+    try:
+        return _worker_impl(ctx, *args, **kwargs)
+    finally:
+        try:
+            ctx.bus.publish(('end', None))
+        except Exception:
+            pass
+        ctx.done.set()
+        try:
+            ctx.bus.close()
+        except Exception:
+            pass
+        _cleanup_models(force=True)
+        generation_active = False
+        with ctx_lock:
+            if cur_job is ctx:
+                cur_job = None
 
 def handle_open_folder_btn(folder_name):
     """フォルダ名を保存し、そのフォルダを開く - endframe_ichiと同じ実装"""
@@ -2281,7 +2541,16 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     global progress_ref_idx, progress_ref_total, progress_ref_name
     global progress_img_idx, progress_img_total, progress_img_name
     global last_output_filename
+    global generation_active
+    global last_progress_desc, last_progress_bar, last_preview_image
+    global cur_job, current_seed
 
+
+    with ctx_lock:
+        running_ctx = cur_job
+    if running_ctx and not running_ctx.done.is_set():
+        yield from _stream_job_to_ui(running_ctx)
+        return
 
     # 新たな処理開始時にグローバルフラグをリセット
     user_abort = False
@@ -2292,7 +2561,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     stop_after_current = False
     stop_after_step = False
 
-    # progress and preview states reset
+    # 進捗とプレビューの状態をリセット
     progress_ref_idx = 0
     progress_ref_total = 0
     progress_ref_name = ""
@@ -2305,8 +2574,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     last_output_filename = None
     current_seed = None
 
-    # ストリームを新規作成してキューをクリア
-    stream = AsyncStream()
+    ctx = None  # 進捗配信用のキューはジョブごとに作成される
 
     # bool値の正規化
     reference_long_edge = _to_bool(reference_long_edge)
@@ -2529,9 +2797,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("=== 現在の設定を自動保存します ==="))
         # 現在のUIの値を収集してアプリケーション設定として保存
         # Gradioオブジェクトから値を取得（直接値が渡る場合も考慮）
-        lora_cache_val = lora_cache_checkbox
-        if hasattr(lora_cache_checkbox, 'value'):
-            lora_cache_val = bool(lora_cache_checkbox.value)
+        lora_cache_val = False
 
         # Gradioオブジェクトの値を正規化
         log_enabled_val = log_enabled
@@ -2621,6 +2887,12 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
     ref_count = len(reference_images_list)
     total_batches = batch_count * ref_count
+    current_image = None
+    progress_ref_total = ref_count
+    progress_img_total = batch_count
+    progress_ref_idx = 0
+    progress_img_idx = 0
+    prev_reference_idx = -1
 
     for batch_index_total in range(total_batches):
         batch_index = batch_index_total % batch_count
@@ -2682,7 +2954,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
                     if image_index < len(image_queue_files):
                         current_image = image_queue_files[image_index]
-                        image_filename = os.path.basename(current_image)
+                        if isinstance(current_image, str) and current_image:
+                            image_filename = os.path.basename(current_image)
+                        else:
+                            image_filename = translate("入力画像")
                         print(translate("イメージキュー実行中: バッチ {0}/{1} の画像「{2}」").format(batch_index+1, batch_count, image_filename))
                         print(translate("  └ 画像ファイルパス: {0}").format(current_image))
                         
@@ -2705,15 +2980,31 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                         print(translate("イメージキュー実行中: バッチ {0}/{1} は画像数を超えているため入力画像を使用").format(batch_index+1, batch_count))
 
         # 進捗用グローバル変数を更新
-        progress_ref_idx = reference_idx + 1
-        progress_ref_total = ref_count
-        progress_ref_name = os.path.basename(reference_image_current) if isinstance(reference_image_current, str) else translate("入力画像")
-        progress_img_idx = batch_index + 1
-        progress_img_total = batch_count
-        if isinstance(current_image, str):
-            progress_img_name = os.path.basename(current_image)
-        else:
-            progress_img_name = translate("入力画像")
+        if reference_idx != prev_reference_idx:
+            progress_ref_idx += 1
+            progress_img_idx = 0
+            prev_reference_idx = reference_idx
+        progress_img_idx += 1
+        progress_ref_name = os.path.basename(reference_image_current) if isinstance(reference_image_current, str) and reference_image_current else translate("入力画像")
+        progress_img_name = os.path.basename(current_image) if isinstance(current_image, str) and current_image else translate("入力画像")
+        last_progress_desc = (
+            f"<br/><strong>進捗:</strong> 《参考画像 {progress_ref_idx}/{progress_ref_total}》"
+            f"{(progress_ref_name or translate('入力画像'))} / 《イメージ {progress_img_idx}/{progress_img_total}》"
+            f"{(progress_img_name or translate('入力画像'))} <br/>"
+        )
+        last_progress_bar = make_progress_bar_html(0, '')
+        last_preview_image = None
+        yield (
+            gr.skip(),
+            gr.update(visible=False),
+            last_progress_desc,
+            last_progress_bar,
+            gr.update(interactive=False),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
+            gr.update()
+        )
 
         # RoPE値バッチ処理の場合はRoPE値をインクリメント、それ以外は通常のシードインクリメント
         current_seed = original_seed
@@ -2738,111 +3029,24 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         
         if batch_stopped:
             break
-            
-        try:
-            # 新しいストリームを作成
-            stream = AsyncStream()
-            
-            # バッチインデックスをジョブIDに含める
-            batch_suffix = f"{batch_index_total}" if batch_index_total > 0 else ""
-            
-            # 中断フラグの再確認
-            if batch_stopped:
-                break
-                
-            # ワーカー実行 - 詳細設定パラメータを含む（キュー機能対応）
-            async_run(worker, current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
-                     gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
-                     output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, resolution,
-                     current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
-                     lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
-                     batch_index, use_queue, prompt_queue_file,
-                     # Kisekaeichi関連パラメータを追加
-                     use_reference_image, reference_image_current,
-                     target_index, history_index, reference_long_edge, input_mask, reference_mask)
-        except Exception as e:
-            import traceback
-        
-        output_filename = None
-        
-        # ジョブ完了まで監視
-        try:
-            # ストリーム待機開始
-            while True:
-                try:
-                    flag, data = stream.output_queue.next()
-                    
-                    if flag == 'file':
-                        output_filename = data
-                        last_output_filename = data
-                        yield (
-                            output_filename if output_filename is not None else gr.skip(),
-                            gr.update(),
-                            gr.update(),
-                            gr.update(),
-                            gr.update(interactive=False),
-                            gr.update(interactive=True),
-                            gr.update(interactive=True),
-                            gr.update(interactive=True),
-                            gr.update(value=current_seed),
-                        )
-                    
-                    if flag == 'progress':
-                        preview, desc, html = data
-                        yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
-                    
-                    if flag == 'end':
-                        # endフラグを受信
-                        # バッチ処理中は最後の画像のみを表示
-                        if batch_index_total == total_batches - 1 or batch_stopped:  # 最後のバッチまたは中断された場合
-                            completion_message = ""
-                            progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                            if batch_stopped:
-                                completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches)
-                            else:
-                                completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(total_batches, total_batches)
-                            completion_message = f"{completion_message} - {progress_summary}"
 
-                            # 完了メッセージでUIを更新
-                            last_output_filename = output_filename
-                            yield (
-                                output_filename if output_filename is not None else gr.skip(),
-                                gr.update(visible=False),
-                                completion_message,
-                                '',
-                                gr.update(interactive=True, value=translate("Start Generation")),
-                                gr.update(interactive=False, value=translate("End Generation")),
-                                gr.update(interactive=False, value=translate("この生成で打ち切り")),
-                                gr.update(interactive=False, value=translate("このステップで打ち切り")),
-                                gr.update(value=original_seed),
-                            )
-                        break
-                        
-                    # ユーザーが中断した場合
-                    if stream.input_queue.top() == 'end' or (batch_stopped and not stop_after_current):
-                        batch_stopped = True
-                        # 処理ループ内での中断検出
-                        print(translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index_total + 1, total_batches))
-                        # endframe_ichiと同様のシンプルな実装に戻す
-                        progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                        yield (
-                            output_filename if output_filename is not None else gr.skip(),
-                            gr.update(visible=False),
-                            translate("バッチ処理が中断されました") + f" - {progress_summary}",
-                            '',
-                            gr.update(interactive=True),
-                            gr.update(interactive=False, value=translate("End Generation")),
-                            gr.update(interactive=False, value=translate("この生成で打ち切り")),
-                            gr.update(interactive=False, value=translate("このステップで打ち切り")),
-                            gr.update(value=original_seed),
-                        )
-                        return
-                        
-                except Exception as e:
-                    import traceback
-                    # エラー後はループを抜ける
-                    break
-                    
+        ctx = _start_job_for_single_task(
+            current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
+            gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
+            output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, resolution,
+            current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
+            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
+            batch_index, use_queue, prompt_queue_file,
+            # Kisekaeichi関連パラメータを追加
+            use_reference_image, reference_image_current,
+            target_index, history_index, reference_long_edge, input_mask, reference_mask
+        )
+
+        try:
+            yield from _stream_job_to_ui(ctx)
+
+            if batch_stopped and not stop_after_current:
+                return
         except KeyboardInterrupt:
             # 明示的なリソースクリーンアップ
             try:
@@ -2878,13 +3082,23 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             
             # UIをリセット
             yield None, gr.update(visible=False), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            generation_active = False
             return
         except Exception as e:
             import traceback
             # UIをリセット
             yield None, gr.update(visible=False), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            generation_active = False
             return
-    
+        finally:
+            pass
+
+        # 1ジョブ完了後、"この生成で打ち切り" が立っていたら後続を止める
+        if stop_after_current:
+            print(translate("この生成で打ち切りが指定されたため、後続のバッチを停止します"))
+            batch_stopped = True
+            break
+
     # すべてのバッチ処理が正常に完了した場合と中断された場合で表示メッセージを分ける
     if batch_stopped:
         if user_abort:
@@ -2902,13 +3116,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     user_abort_notified = False
     
     # 処理完了時の効果音（アラーム設定が有効な場合のみ）
-    if HAS_WINSOUND and alarm_on_completion:
-        try:
-            # Windows環境では完了音を鳴らす
-            winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS)
-            print(translate("Windows完了通知音を再生しました"))
-        except Exception as e:
-            print(translate("完了通知音の再生に失敗しました: {0}").format(e))
+    if alarm_on_completion:
+        play_completion_sound()
     
     # 処理状態に応じてメッセージを表示
     if batch_stopped or user_abort:
@@ -2919,12 +3128,14 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print("*" * 50)
         print(translate("【全バッチ処理完了】プロセスが完了しました - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
         print("*" * 50)
-            
+
+    generation_active = False
+    with ctx_lock:
+        cur_job = None
     return
 
 def end_process():
     """生成終了ボタンが押された時の処理"""
-    global stream
     global batch_stopped, user_abort, user_abort_notified
 
     # 重複停止通知を防止するためのチェック
@@ -2938,8 +3149,14 @@ def end_process():
         user_abort_notified = True  # 通知フラグを設定
         
         # 現在実行中のバッチを停止
-        if stream is not None and stream.input_queue.top() != 'end':
-            stream.input_queue.push('end')
+        with ctx_lock:
+            ctx = cur_job
+        if ctx and ctx.stream.input_queue.top() != 'end':
+            ctx.stream.input_queue.push('end')
+        # バックグラウンドジョブに停止を通知
+        if ctx is not None:
+            ctx.done.set()
+    generation_active = False
 
     # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
     return (
@@ -2948,123 +3165,137 @@ def end_process():
         gr.update(interactive=False),
     )
 
-def end_after_current_process():
-    """現在の生成完了後に停止する処理"""
-    global batch_stopped, stop_after_current, stream
 
-    if stop_after_current:
-        # キャンセル処理
-        stop_after_current = False
-        batch_stopped = False
-        print(translate("打ち切りをキャンセルしました。"))
-        return (
-            gr.update(value=translate("この生成で打ち切り"), interactive=True),
-            gr.update(interactive=True),
-        )
-    else:
-        batch_stopped = True
+# --- トグル式：この生成で打ち切り（押下で即“処理中”、未確定なら再クリックでキャンセル） ---
+def toggle_stop_after_current():
+    global stop_after_current, batch_stopped
+    with ctx_lock:
+        ctx = cur_job
+
+    # まだリクエストされていない → リクエスト開始（UIは即“処理中”）
+    if not stop_after_current:
         stop_after_current = True
-        if stream is not None and stream.input_queue.top() != 'end':
-            stream.input_queue.push('end')
-        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+        print(translate("この生成で打ち切りをリクエストしました（再クリックでキャンセル）"))
         return (
-            gr.update(value=translate("打ち切り処理中..."), interactive=True),
+            gr.update(value=translate("打ち切り処理中…（再クリックでキャンセル）"), interactive=True),
+            gr.update(interactive=False),  # Endボタンは誤操作防止で無効化
+        )
+
+    # すでにリクエスト中 → キャンセル判定
+    # “この生成で打ち切り”は通常 'end' を即送らないので、送られていなければキャンセル可
+    sent_end = False
+    if ctx is not None:
+        try:
+            sent_end = bool(getattr(ctx, "_sent_end", False)) or (ctx.stream.input_queue.top() == 'end')
+        except Exception:
+            sent_end = bool(getattr(ctx, "_sent_end", False))
+
+    if sent_end:
+        # もう止まる方向に確定しているのでキャンセル不可
+        print(translate("キャンセル不可：既に停止指示が送信されました"))
+        return (
+            gr.update(value=translate("打ち切り処理中…"), interactive=False),
             gr.update(interactive=False),
         )
 
-def end_after_step_process():
-    """現在のステップ完了後に停止する処理"""
-    global batch_stopped, stop_after_current, stop_after_step, stream
-
-    if stop_after_step:
-        # キャンセル処理
-        stop_after_step = False
-        stop_after_current = False
-        batch_stopped = False
-        print(translate("ステップでの打ち切りをキャンセルしました。"))
-        return (
-            gr.update(value=translate("このステップで打ち切り"), interactive=True),
-            gr.update(interactive=True),
-        )
-    else:
-        batch_stopped = True
-        stop_after_current = True
-        stop_after_step = True
-        if stream is not None and stream.input_queue.top() != 'end':
-            stream.input_queue.push('end')
-        print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
-        return (
-            gr.update(value=translate("停止処理中..."), interactive=True),
-            gr.update(interactive=False),
-        )
-
-def resync_status_handler():
-    """Resume streaming progress after page reload."""
-    global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
-    global current_seed
-
-    yield (
-        last_output_filename if last_output_filename is not None else gr.skip(),
-        gr.update(visible=last_preview_image is not None, value=last_preview_image),
-        last_progress_desc,
-        last_progress_bar,
-        gr.update(interactive=False),
-        gr.update(interactive=True),
-        gr.update(interactive=True),
-        gr.update(interactive=True),
-        gr.update(value=current_seed),
+    # キャンセルできる
+    stop_after_current = False
+    batch_stopped = False
+    print(translate("この生成で打ち切りをキャンセルしました"))
+    return (
+        gr.update(value=translate("この生成で打ち切り"), interactive=True),
+        gr.update(interactive=True),  # Endボタンを復帰
     )
 
-    while True:
+# --- トグル式：このステップで打ち切り（押下で即“処理中”、未送信なら再クリックでキャンセル） ---
+def toggle_stop_after_step():
+    global stop_after_step, stop_after_current, batch_stopped
+    with ctx_lock:
+        ctx = cur_job
+
+    # まだリクエストされていない → リクエスト開始（UIは即“処理中”）
+    if not stop_after_step:
+        stop_after_step = True
+        stop_after_current = True  # 後続バッチも止める
+        # ★重要：ここでは 'end' を送らない。送信は sampling の callback 側に任せる
+        print(translate("このステップで打ち切りをリクエストしました（再クリックでキャンセル）"))
+        return (
+            gr.update(value=translate("停止処理中…（再クリックでキャンセル）"), interactive=True),
+            gr.update(interactive=False),  # Endボタンは誤操作防止で無効化
+        )
+
+    # すでにリクエスト中 → キャンセル判定（callbackが 'end' を送っていなければ取り消し可能）
+    sent_end = False
+    if ctx is not None:
         try:
-            flag, data = stream.output_queue.next()
+            sent_end = bool(getattr(ctx, "_sent_end", False)) or (ctx.stream.input_queue.top() == 'end')
         except Exception:
-            break
+            sent_end = bool(getattr(ctx, "_sent_end", False))
 
-        if flag == 'file':
-            last_output_filename = data
-            yield (
-                last_output_filename if last_output_filename is not None else gr.skip(),
-                gr.update(),
-                gr.update(),
-                gr.update(),
-                gr.update(interactive=False),
-                gr.update(interactive=True),
-                gr.update(interactive=True),
-                gr.update(interactive=True),
-                gr.update(value=current_seed),
-            )
+    if sent_end:
+        print(translate("キャンセル不可：既に停止指示が送信されました（ステップ境界）"))
+        return (
+            gr.update(value=translate("停止処理中…"), interactive=False),
+            gr.update(interactive=False),
+        )
 
-        if flag == 'progress':
-            preview, desc, html = data
-            last_preview_image = preview
-            last_progress_desc = desc
-            last_progress_bar = html
-            yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+    # キャンセルできる
+    stop_after_step = False
+    stop_after_current = False
+    batch_stopped = False
+    print(translate("このステップで打ち切りをキャンセルしました"))
+    return (
+        gr.update(value=translate("このステップで打ち切り"), interactive=True),
+        gr.update(interactive=True),
+    )
 
-        if flag == 'end':
-            last_output_filename = last_output_filename or data
-            yield (
-                last_output_filename if last_output_filename is not None else gr.skip(),
-                gr.update(visible=False),
-                last_progress_desc,
-                last_progress_bar,
-                gr.update(interactive=True, value=translate("Start Generation")),
-                gr.update(interactive=False, value=translate("End Generation")),
-                gr.update(interactive=False),
-                gr.update(interactive=False),
-                gr.update(value=current_seed),
-            )
-            break
+def on_resync_button_clicked():
+    """Handle manual resync requests from UI."""
+    global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed
+
+    with ctx_lock:
+        ctx = cur_job
+
+    if ctx and is_generation_running():
+        yield from _stream_job_to_ui(ctx)
+    else:
+        running = is_generation_running()
+        end_enabled = running and not (stop_after_current or stop_after_step)
+        yield (
+            last_output_filename if last_output_filename is not None else gr.skip(),
+            gr.update(visible=last_preview_image is not None, value=last_preview_image),
+            last_progress_desc,
+            last_progress_bar,
+            gr.update(interactive=not running, value=translate("Start Generation")),
+            gr.update(interactive=end_enabled, value=translate("End Generation")),
+            gr.update(interactive=running),
+            gr.update(interactive=running),
+            gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+        )
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
-
+with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
+    css += f.read()
+modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
+# JSを直接読み込み、グラディオにコードとして渡す
+with open(modal_js_path, encoding="utf8") as f:
+    modal_js = f.read()
 # アプリケーション起動時に保存された設定を読み込む
 saved_app_settings = load_app_settings_oichi()
 
-# Apply LoRA cache setting at startup
+# 起動時にLoRAキャッシュ設定を適用
 if saved_app_settings:
-    lora_state_cache.set_cache_enabled(saved_app_settings.get("lora_cache", False))
+    spinner_while_running(
+        translate("Setting_lora_state_cache").format(saved_app_settings.get("lora_cache", False)),
+        lora_state_cache.set_cache_enabled,
+        saved_app_settings.get("lora_cache", False),
+    )
+
+# 起動時デフォルトプロンプトをロード
+startup_prompt = spinner_while_running(
+    translate("Load_startup_default_prompt"),
+    get_default_startup_prompt,
+)
 
 # 読み込んだ設定をログに出力
 if saved_app_settings:
@@ -3072,20 +3303,17 @@ if saved_app_settings:
 else:
     print(translate("保存された設定が見つかりません。デフォルト値を使用します"))
 
-block = gr.Blocks(css=css).queue()
+# 起動シーケンス完了
+print("\n------------------------------------------------------------")
+print(f"🆗 {translate('Startup_sequence_complete')}\n")
+# △ 起動シーケンスここまで △
+
+block = gr.Blocks(css=css, js=modal_js).queue()
+
 with block:
     # eichiと同じ半透明度スタイルを使用
     gr.HTML('<h1>FramePack<span class="title-suffix">-oichi</span></h1>')
-
-    # 原寸大表示用モーダル (外部JS/CSS読み込み)
-    gr.HTML("""
-    <link rel='stylesheet' href='file=eichi_utils/modal.css'>
-    <div id='orig_size_modal'>
-      <button id='orig_size_close'>×</button>
-      <img id='orig_size_img'>
-    </div>
-    <script src='file=eichi_utils/modal.js'></script>
-    """)
+    gr.HTML('<dialog id="modal_dlg"><img /></dialog>')
     
     # 初期化時にtransformerの状態確認は行わない（必要時に遅延ロード）
     # ここではロードをスキップして、ワーカー関数内で必要になったときにだけロードする
@@ -3095,7 +3323,6 @@ with block:
     seed_default = saved_app_settings.get("seed", random.randint(0, 2**32 - 1)) if saved_app_settings else random.randint(0, 2**32 - 1)
     
     # eichiのプリセット管理関連のインポート
-    from eichi_utils.preset_manager import get_default_startup_prompt, load_presets, save_preset, delete_preset
     
     with gr.Row():
         with gr.Column(scale=1):
@@ -3103,7 +3330,14 @@ with block:
             # モードについての説明を画像枠の上に表示
             gr.Markdown(translate("**「1フレーム推論」モードでは、1枚の新しい未来の画像を生成します。**"))
             
-            input_image = gr.Image(sources=['upload', 'clipboard'], type="filepath", label=translate("Image"), height=320)
+            input_image = gr.Image(
+                sources=['upload', 'clipboard'],
+                type="filepath",
+                label=translate("Image"),
+                height=320,
+                elem_id="input_image",
+                elem_classes="modal-image",
+            )
             
             # 解像度設定（画像の直下に）
             resolution = gr.Dropdown(
@@ -3372,7 +3606,9 @@ with block:
                 type="filepath",
                 interactive=True,
                 visible=use_reference_image_default,  # 保存設定に基づき初期表示
-                height=320
+                height=320,
+                elem_id="reference_image",
+                elem_classes="modal-image",
             )
 
             # 参照画像キュー設定
@@ -3473,7 +3709,8 @@ with block:
                             label=translate("入力画像マスク（オプション）"),
                             type="filepath",
                             interactive=True,
-                            height=320
+                            height=320,
+                            elem_classes="modal-image",
                         )
                         input_mask_info = gr.Markdown(
                             translate("白い部分を保持、黒い部分を変更（グレースケール画像）")
@@ -3486,7 +3723,8 @@ with block:
                             label=translate("参照画像マスク（オプション）"),
                             type="filepath",
                             interactive=True,
-                            height=320
+                            height=320,
+                            elem_classes="modal-image",
                         )
                         reference_mask_info = gr.Markdown(
                             translate("白い部分を適用、黒い部分を無視（グレースケール画像）")
@@ -4037,7 +4275,7 @@ with block:
             # プロンプト入力
             prompt = gr.Textbox(
                 label=translate("プロンプト"),
-                value=saved_app_settings.get("prompt", get_default_startup_prompt()) if saved_app_settings else get_default_startup_prompt(),
+                value=saved_app_settings.get("prompt", startup_prompt) if saved_app_settings else startup_prompt,
                 lines=6
             )
             n_prompt = gr.Textbox(label=translate("ネガティブプロンプト"), value='', visible=False)
@@ -4085,8 +4323,19 @@ with block:
                 
         with gr.Column(scale=1):
             # 右カラム - 生成結果と設定
-            result_image = gr.Image(label=translate("生成結果"), height=512)
-            preview_image = gr.Image(label=translate("処理中のプレビュー"), height=200, visible=False)
+            result_image = gr.Image(
+                label=translate("生成結果"),
+                height=512,
+                elem_id="result_image",
+                elem_classes="modal-image",
+            )
+            preview_image = gr.Image(
+                label=translate("処理中のプレビュー"),
+                height=200,
+                visible=False,
+                elem_id="preview_image",
+                elem_classes="modal-image",
+            )
             progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
             progress_bar = gr.HTML('', elem_classes='no-generating-animation')
             
@@ -4184,9 +4433,9 @@ with block:
                 
                 # 完了時のアラーム設定
                 alarm_on_completion = gr.Checkbox(
-                    label=translate("完了時にアラームを鳴らす(Windows)"),
+                    label=translate("完了時にアラームを鳴らす"),
                     value=saved_app_settings.get("alarm_on_completion", True) if saved_app_settings else True,
-                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします（Windows）"),
+                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします。"),
                     elem_classes="saveable-setting",
                     interactive=True
                 )
@@ -4847,14 +5096,50 @@ with block:
         ]
     )
     
-    start_button.click(fn=process, inputs=ips, outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, stop_step_button, seed])
-    end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button])
-    stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button, end_button])
-    stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button, end_button])
-    resync_status_btn.click(
-        fn=resync_status_handler,
+    start_button.click(
+        fn=process,
+        inputs=ips,
+        outputs=[
+            result_image,
+            preview_image,
+            progress_desc,
+            progress_bar,
+            start_button,
+            end_button,
+            stop_after_button,
+            stop_step_button,
+            seed,
+        ],
+    )
+    end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button], queue=False)
+    # 押下直後にラベルを“処理中”へ。再クリックでキャンセル可（未確定時）
+    stop_after_button.click(
+        fn=toggle_stop_after_current,
         inputs=[],
-        outputs=[result_image, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, stop_step_button, seed]
+        outputs=[stop_after_button, end_button],
+        queue=False
+    )
+    stop_step_button.click(
+        fn=toggle_stop_after_step,
+        inputs=[],
+        outputs=[stop_step_button, end_button],
+        queue=False
+    )
+    resync_status_btn.click(
+        fn=on_resync_button_clicked,
+        inputs=[],
+        outputs=[
+            result_image,
+            preview_image,
+            progress_desc,
+            progress_bar,
+            start_button,
+            end_button,
+            stop_after_button,
+            stop_step_button,
+            seed,
+        ],
+        queue=False,
     )
     
     gr.HTML(f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")}</div>')

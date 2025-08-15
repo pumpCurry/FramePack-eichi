@@ -17,10 +17,6 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 
 [https://github.com/hinablue](https://github.com/hinablue) Hina Chen氏より多言語対応の協力をいただき非常に感謝しております。
 
-## 🌟 新機能拡張 (v1.9.5.2)
-- 2025年7月30日時点の安定コードを基点に再同期
-- 進捗再同期機能は不具合のため取り込み見送り
-
 ## 🌟 機能強化 (v1.9.5)
 
 **FramePack-eichi v1.9.5**では、起動時の表示やキュー管理などUI/UX面を中心に使い勝手をさらに高めるため以下の機能を追加しました。
