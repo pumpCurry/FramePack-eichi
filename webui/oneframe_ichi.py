@@ -342,7 +342,7 @@ def attach_to_running_job():
     # 実行中ジョブが無い場合でも、直近状態を1度だけUIに反映
     running = is_generation_running()
     end_enabled, stop_current_enabled, stop_step_enabled, stop_current_label, stop_step_label = _compute_stop_controls(running)
-    yield _remember_ui(_ui_tuple(
+    first_ui = _remember_ui(_ui_tuple(
         last_output_filename if last_output_filename is not None else gr.skip(),
         _preview_update(last_preview_image),
         last_progress_desc,
