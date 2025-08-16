@@ -170,6 +170,9 @@ class JobContext:
     def __init__(self):
         self.bus = FanoutQueue()
         self.done = threading.Event()
+        # 停止リクエストはジョブ単位で保持して、UI側がグローバルを
+        # クリアしてもバックグラウンドスレッドから参照できるようにする
+        self.stop_mode = None  # "image" or "step"
 
 
 # ----------------- globals -----------------
@@ -217,6 +220,13 @@ current_seed = None
 
 # 再同期処理に使用される生成状態フラグ
 generation_active = False
+
+
+def _preview_update(image):
+    """Update helper that preserves visibility when image is None."""
+    if image is None:
+        return gr.update()
+    return gr.update(value=image)
 
 def _cleanup_models(force: bool = False):
     global transformer, vae, text_encoder, text_encoder_2, image_encoder
@@ -277,6 +287,7 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
     ctx.stream = AsyncStream()
     ctx.stop_after_step_event = threading.Event()
     ctx._sent_end = False
+    ctx.stop_mode = stop_mode
     # 既存コードの互換性のため、グローバルにも参照を残す（参照先はこのctx）
     globals()['stream'] = ctx.stream
     with ctx_lock:
@@ -290,11 +301,11 @@ def _stream_job_to_ui(ctx: JobContext):
     """Stream job progress from the bus to the Gradio UI."""
     global last_progress_desc, last_progress_bar, last_preview_image
     global last_output_filename, current_seed, batch_stopped
-    global stop_after_current, stop_after_step, stop_mode, last_stop_mode
+    global stop_after_current, stop_after_step, last_stop_mode, stop_mode
 
     running = is_generation_running()
     # Disable End button while a stop toggle is active to prevent accidental stops
-    end_enabled = running and (stop_mode is None)
+    end_enabled = running and (ctx.stop_mode is None)
     yield (
         last_output_filename if last_output_filename is not None else gr.skip(),
         gr.update(visible=last_preview_image is not None, value=last_preview_image),
@@ -313,10 +324,9 @@ def _stream_job_to_ui(ctx: JobContext):
         while True:
             item = q.get()
             if item == (None, None):
-                last_stop_mode = stop_mode
+                last_stop_mode = ctx.stop_mode
                 stop_after_current = False
                 stop_after_step = False
-                stop_mode = None
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                 if batch_stopped:
                     completion_message = translate("バッチ処理が中止されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
@@ -327,10 +337,9 @@ def _stream_job_to_ui(ctx: JobContext):
                 globals()['last_output_filename'] = final_output
                 globals()['last_progress_desc'] = completion_message
                 globals()['last_progress_bar'] = ''
-                globals()['last_preview_image'] = None
                 yield (
                     final_output if final_output is not None else gr.skip(),
-                    gr.update(visible=False),
+                    _preview_update(last_preview_image),
                     completion_message,
                     '',
                     gr.update(interactive=True, value=translate("Start Generation")),
@@ -344,7 +353,7 @@ def _stream_job_to_ui(ctx: JobContext):
             if flag == 'file':
                 output_filename = data
                 last_output_filename = data
-                end_enabled = is_generation_running() and (stop_mode is None)
+                end_enabled = is_generation_running() and (ctx.stop_mode is None)
                 yield (
                     output_filename if output_filename is not None else gr.skip(),
                     gr.update(),
@@ -361,13 +370,12 @@ def _stream_job_to_ui(ctx: JobContext):
                 last_preview_image = preview
                 last_progress_desc = desc
                 last_progress_bar = html
-                end_enabled = is_generation_running() and (stop_mode is None)
+                end_enabled = is_generation_running() and (ctx.stop_mode is None)
                 yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=end_enabled), gr.update(interactive=True), gr.update(interactive=True), gr.update()
             elif flag == 'end':
-                last_stop_mode = stop_mode
+                last_stop_mode = ctx.stop_mode
                 stop_after_current = False
                 stop_after_step = False
-                stop_mode = None
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                 if batch_stopped:
                     completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
@@ -377,10 +385,9 @@ def _stream_job_to_ui(ctx: JobContext):
                 last_output_filename = output_filename or last_output_filename
                 last_progress_desc = completion_message
                 last_progress_bar = ''
-                last_preview_image = None
                 yield (
                     last_output_filename if last_output_filename is not None else gr.skip(),
-                    gr.update(visible=False),
+                    _preview_update(last_preview_image),
                     completion_message,
                     '',
                     gr.update(interactive=True, value=translate("Start Generation")),
@@ -391,16 +398,15 @@ def _stream_job_to_ui(ctx: JobContext):
                 )
                 break
 
-            if ctx.stream.input_queue.top() == 'end' or (batch_stopped and stop_mode is None):
+            if ctx.stream.input_queue.top() == 'end' or (batch_stopped and ctx.stop_mode is None):
                 batch_stopped = True
-                last_stop_mode = stop_mode
+                last_stop_mode = ctx.stop_mode
                 stop_after_current = False
                 stop_after_step = False
-                stop_mode = None
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                 yield (
                     output_filename if output_filename is not None else gr.skip(),
-                    gr.update(visible=False),
+                    _preview_update(last_preview_image),
                     translate("バッチ処理が中断されました") + f" - {progress_summary}",
                     '',
                     gr.update(interactive=True),
@@ -1935,14 +1941,15 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                             user_abort_notified = True
                         return {'user_interrupt': True}
 
-                    if stop_mode == "step" and not getattr(ctx, "_sent_end", False):
-                        ctx.stream.input_queue.push('end')
-                        ctx._sent_end = True
-
                     current_step = d['i'] + 1
                     percentage = int(100.0 * current_step / steps)
                     hint = f'Sampling {current_step}/{steps}'
                     desc = translate('1フレームモード: サンプリング中...')
+                    if ctx.stop_mode == "step" and not getattr(ctx, "_sent_end", False):
+                        ctx.stream.input_queue.push('end')
+                        ctx._sent_end = True
+                        push_progress(preview, desc, percentage, hint)
+                        return {'user_interrupt': True}
                     push_progress(preview, desc, percentage, hint)
                 except KeyboardInterrupt:
                     return {'user_interrupt': True}
@@ -2582,8 +2589,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     progress_img_name = ""
     last_progress_desc = ""
     last_progress_bar = ""
-    last_preview_image = None
-    last_output_filename = None
     current_seed = None
 
     ctx = None  # 進捗配信用のキューはジョブごとに作成される
@@ -2915,7 +2920,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             print(translate("バッチ処理がユーザーによって中止されました"))
             yield (
                 gr.skip(),
-                gr.update(visible=False),
+                _preview_update(last_preview_image),
                 translate("バッチ処理が中止されました。"),
                 '',
                 gr.update(interactive=True),
@@ -2931,7 +2936,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+            yield gr.skip(), _preview_update(last_preview_image), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
         current_prompt = prompt
@@ -3005,10 +3010,9 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             f"{(progress_img_name or translate('入力画像'))} <br/>"
         )
         last_progress_bar = make_progress_bar_html(0, '')
-        last_preview_image = None
         yield (
             gr.skip(),
-            gr.update(visible=False),
+            _preview_update(last_preview_image),
             last_progress_desc,
             last_progress_bar,
             gr.update(interactive=False),
@@ -3093,13 +3097,13 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 pass
             
             # UIをリセット
-            yield None, gr.update(visible=False), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            yield None, _preview_update(last_preview_image), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
             generation_active = False
             return
         except Exception as e:
             import traceback
             # UIをリセット
-            yield None, gr.update(visible=False), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            yield None, _preview_update(last_preview_image), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
             generation_active = False
             return
         finally:
@@ -3129,6 +3133,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     stop_after_step = False
     stop_mode = None
     last_stop_mode = None
+    if ctx is not None:
+        ctx.stop_mode = None
     user_abort = False
     user_abort_notified = False
     
@@ -3162,18 +3168,19 @@ def end_process():
         user_abort = True
         stop_mode = None
         last_stop_mode = None
-        
+
         # 通知は一度だけ表示（ここで表示してフラグを設定）
         print(translate("停止ボタンが押されました。処理を即座に中断します..."))
         user_abort_notified = True  # 通知フラグを設定
-        
+
         # 現在実行中のバッチを停止
         with ctx_lock:
             ctx = cur_job
-        if ctx and ctx.stream.input_queue.top() != 'end':
-            ctx.stream.input_queue.push('end')
-        # バックグラウンドジョブに停止を通知
         if ctx is not None:
+            ctx.stop_mode = None
+            if ctx.stream.input_queue.top() != 'end':
+                ctx.stream.input_queue.push('end')
+            # バックグラウンドジョブに停止を通知
             ctx.done.set()
     generation_active = False
 
@@ -3195,6 +3202,8 @@ def toggle_stop_after_current():
     if not stop_after_current:
         stop_after_current = True
         stop_mode = "image"
+        if ctx is not None:
+            ctx.stop_mode = "image"
         print(translate("この生成で打ち切りをリクエストしました（再クリックでキャンセル）"))
         return (
             gr.update(value=translate("打ち切り処理中…（再クリックでキャンセル）"), interactive=True),
@@ -3222,6 +3231,8 @@ def toggle_stop_after_current():
     stop_after_current = False
     batch_stopped = False
     stop_mode = None
+    if ctx is not None:
+        ctx.stop_mode = None
     print(translate("この生成で打ち切りをキャンセルしました"))
     return (
         gr.update(value=translate("この生成で打ち切り"), interactive=True),
@@ -3239,6 +3250,8 @@ def toggle_stop_after_step():
         stop_after_step = True
         stop_after_current = True  # 後続バッチも止める
         stop_mode = "step"
+        if ctx is not None:
+            ctx.stop_mode = "step"
         # ★重要：ここでは 'end' を送らない。送信は sampling の callback 側に任せる
         print(translate("このステップで打ち切りをリクエストしました（再クリックでキャンセル）"))
         return (
@@ -3266,6 +3279,8 @@ def toggle_stop_after_step():
     stop_after_current = False
     batch_stopped = False
     stop_mode = None
+    if ctx is not None:
+        ctx.stop_mode = None
     print(translate("このステップで打ち切りをキャンセルしました"))
     return (
         gr.update(value=translate("このステップで打ち切り"), interactive=True),
@@ -3283,10 +3298,10 @@ def on_resync_button_clicked():
         yield from _stream_job_to_ui(ctx)
     else:
         running = is_generation_running()
-        end_enabled = running and (stop_mode is None)
+        end_enabled = running and ((ctx.stop_mode is None) if ctx else (stop_mode is None))
         yield (
             last_output_filename if last_output_filename is not None else gr.skip(),
-            gr.update(visible=last_preview_image is not None, value=last_preview_image),
+            _preview_update(last_preview_image),
             last_progress_desc,
             last_progress_bar,
             gr.update(interactive=not running, value=translate("Start Generation")),
