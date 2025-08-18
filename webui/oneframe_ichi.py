@@ -84,13 +84,13 @@ from eichi_utils.notification_utils import play_completion_sound
 
 import queue
 import threading
-from typing import Any  # for type annotations (Any used in _start_job_for_single_task)
+from typing import Any  # 型注釈用（_start_job_for_single_taskでAnyを使用）
 from collections import deque
 import weakref
 
 
 class FanoutQueue:
-    """Thread-safe fan-out queue with replayable history."""
+    """履歴を再生できるスレッドセーフなファンアウトキュー"""
 
     def __init__(self, maxlen: int = 200, maxsize: int = 64):
         self._history = deque(maxlen=maxlen)
@@ -100,7 +100,7 @@ class FanoutQueue:
         self._closed = False
 
     def publish(self, item) -> None:
-        """Publish an item to all subscribers and store in history."""
+        """要素を全ての購読者に配信し履歴に保存する"""
         with self._lock:
             if self._closed:
                 return
@@ -117,7 +117,7 @@ class FanoutQueue:
                         pass
 
     def subscribe(self) -> queue.Queue:
-        """Subscribe to the queue and receive the backlog immediately."""
+        """キューに購読し既存の履歴を即座に受け取る"""
         q: queue.Queue = queue.Queue(maxsize=self._maxsize)
         with self._lock:
             for item in list(self._history):
@@ -136,7 +136,7 @@ class FanoutQueue:
                 pass
 
     def clear(self) -> None:
-        """Clear history and all subscriber queues."""
+        """履歴と全ての購読キューをクリアする"""
         with self._lock:
             self._history.clear()
             for q in list(self._subs):
@@ -147,7 +147,7 @@ class FanoutQueue:
                         break
 
     def close(self) -> None:
-        """Close all subscriber queues and remove them. Sentinel is guaranteed."""
+        """全ての購読キューを閉じて削除する。センチネルを必ず送信する。"""
         with self._lock:
             if self._closed:
                 return
@@ -166,7 +166,7 @@ class FanoutQueue:
 
 
 class JobContext:
-    """Holds job-specific state such as the fan-out queue."""
+    """ファンアウトキューなどジョブ固有の状態を保持するクラス"""
 
     def __init__(self):
         self.bus = FanoutQueue()
@@ -174,32 +174,29 @@ class JobContext:
         # 停止リクエストはジョブ単位で保持して、UI側がグローバルを
         # クリアしてもバックグラウンドスレッドから参照できるようにする
         self.stop_mode = None  # "image" or "step" - 現在リクエスト中の停止モード
-        # Lock to protect stop_mode and _sent_end from concurrent access.
-        # Without this, UI toggles and sampler callbacks could race.
+        # stop_mode と _sent_end への同時アクセスを防ぐロック
+        # UI のトグルとサンプラのコールバックの競合を避ける
         self._stop_lock = threading.Lock()
 
     def should_stop_step(self) -> bool:
         """
-        Determine whether a step-level stop has been requested and the
-        sampler has not yet sent an 'end' marker.  Encapsulating this logic
-        in a helper avoids duplicating the check throughout the codebase.
+        中断モードが「step」で、かつサンプラがまだ'end'を送っていない場合にTrueを返す。
+        判定ロジックをヘルパー化して重複を避ける。
 
-        This method acquires a lock to guard against concurrent updates
-        from UI callbacks; without locking, stop_mode and _sent_end could
-        change while the sampler thread is evaluating them.
+        UIからの同時更新を防ぐためロックを取得する。
+        ロックしないとstop_modeや_sent_endが判定中に変化する恐れがある。
         """
         with self._stop_lock:
             return self.stop_mode == "step" and not getattr(self, "_sent_end", False)
 
     def reset_stop_mode(self) -> None:
         """
-        Reset the job-specific stop mode and internal end-sent flag.  This
-        method should be called when starting a new job to ensure stale
-        state does not affect subsequent runs.
+        ジョブ開始時に呼び出し、stop_modeと内部のend送信フラグをリセットする。
+        これにより古い状態が次回の実行に影響しない。
         """
         with self._stop_lock:
             self.stop_mode = None
-            # Ensure the end marker can be sent exactly once for the new job
+            # 新しいジョブではendマーカーを一度だけ送れるようにする
             self._sent_end = False
 
 
@@ -215,8 +212,8 @@ if sys.platform in ('win32', 'cygwin'):
 user_abort = False
 user_abort_notified = False
 
-# Sentinel constants for stream and bus termination.  Using named constants
-# improves readability and allows future unification of end-of-stream markers.
+# ストリームとバスの終了を表すセンチネルを定義
+# 名前付き定数を使うことで可読性が向上し、終端マーカーの統一が容易になる
 STREAM_END_SENTINEL = 'end'
 BUS_END_SENTINEL = (None, None)
 
@@ -297,7 +294,7 @@ def progress_resync():
     try:
         while True:
             item = q.get()
-            # Use named constant for bus termination sentinel
+            # バス終了用センチネルとして名前付き定数を使用
             if item is None or item == BUS_END_SENTINEL:
                 break
             kind, payload = item
@@ -306,7 +303,7 @@ def progress_resync():
                 yield preview, desc, bar_html
             elif kind == 'file':
                 path = payload
-                yield None, f"Saved: {path}", None
+                yield None, f"保存済み: {path}", None
             elif kind == 'end':
                 break
     finally:
@@ -314,7 +311,7 @@ def progress_resync():
 
 
 def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
-    """Create and start a new job with its own context."""
+    """独立したコンテキストを持つ新しいジョブを生成・開始する"""
     global generation_active, cur_job
     ctx = JobContext()
     # ジョブ専用のstreamとフラグを持たせる
@@ -333,13 +330,13 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
 
 
 def _stream_job_to_ui(ctx: JobContext):
-    """Stream job progress from the bus to the Gradio UI."""
+    """バスからGradio UIへ進捗を送信する"""
     global last_progress_desc, last_progress_bar, last_preview_image
     global last_output_filename, current_seed, batch_stopped
     global stop_after_current, stop_after_step, last_stop_mode
 
     running = is_generation_running()
-    # Disable End button while a stop toggle is active to prevent accidental stops
+    # 停止トグルが有効な間は誤操作防止のためEndボタンを無効化
     end_enabled = running and (ctx.stop_mode is None)
     yield (
         last_output_filename if last_output_filename is not None else gr.skip(),
@@ -1972,10 +1969,10 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     hint = f'Sampling {current_step}/{steps}'
                     desc = translate('1フレームモード: サンプリング中...')
 
-                    # 中断モードが"step"の場合はここで 'end' を送信し、進捗を一度更新してから停止
+                    # 中断モードが"step"の場合はここで'end'を送信し、進捗を一度更新してから停止
                     if ctx.should_stop_step():
                         ctx.stream.input_queue.push(STREAM_END_SENTINEL)
-                        # Mark the end as sent under lock to avoid race conditions
+                        # 競合を避けるためロック下で_sent_endを設定
                         with ctx._stop_lock:
                             ctx._sent_end = True
                         push_progress(preview, desc, percentage, hint)
@@ -3245,7 +3242,7 @@ def toggle_stop_after_current():
         stop_after_current = True
         stop_mode = "image"
         if ctx is not None:
-            # Protect stop_mode update with the JobContext lock
+            # JobContextのロックでstop_modeの更新を保護
             with ctx._stop_lock:
                 ctx.stop_mode = "image"
         print(translate("この生成で打ち切りをリクエストしました（再クリックでキャンセル）"))
@@ -3335,7 +3332,7 @@ def toggle_stop_after_step():
     )
 
 def on_resync_button_clicked():
-    """Handle manual resync requests from UI."""
+    """UIからの手動再同期要求を処理する"""
     global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed, stop_mode
 
     with ctx_lock:
@@ -3345,7 +3342,7 @@ def on_resync_button_clicked():
         yield from _stream_job_to_ui(ctx)
     else:
         running = is_generation_running()
-        end_enabled = running and ((ctx.stop_mode is None) if ctx else (stop_mode is None))
+        end_enabled = running and ((ctx.stop_mode is None) if ctx else True)
         yield (
             last_output_filename if last_output_filename is not None else gr.skip(),
             _preview_update(last_preview_image),
