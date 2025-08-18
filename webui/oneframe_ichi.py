@@ -3609,13 +3609,13 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
         # 処理状態に応じてメッセージを表示
         if batch_stopped:
-            print("-" * 50)
+            print("-" * 60)
             print(translate("【停止】処理は中断されました - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
-            print("-" * 50)
+            print("-" * 60)
         else:
-            print("*" * 50)
+            print("*" * 60)
             print(translate("【全バッチ処理完了】プロセスが完了しました - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
-            print("*" * 50)
+            print("*" * 60)
     finally:
         # バッチ終了処理（内部状態のリセットはここで実施）
         _finalize_batch_job()
