@@ -1,8 +1,12 @@
 
 import os
+import traceback
+
+__version__ = "1.9.5.2"
+
 # 即座に起動しているファイル名をまずは出力して、画面に応答を表示する
 print(f"\n------------------------------------------------------------")
-print(f"{os.path.basename(__file__)} : Starting....")
+print(f"{os.path.basename(__file__)} : version {__version__} Starting....")
 print(f"------------------------------------------------------------\n")
 
 # 進捗バーやスピナーと協調するスレッドセーフなprint文を有効化
@@ -5224,7 +5228,9 @@ with block:
         queue=False,
     )
     
-    gr.HTML(f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")}</div>')
+    gr.HTML(
+        f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")} version {__version__}</div>'
+    )
 
 block.launch(
     server_name=args.server,
