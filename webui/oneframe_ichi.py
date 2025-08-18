@@ -3731,27 +3731,35 @@ with block:
 
             # 参照画像キュー設定
             with gr.Group(visible=use_reference_image_default) as reference_queue_group:
-                use_reference_queue = gr.Checkbox(label=translate("参照画像キューを使用"), value=False)
-                with gr.Row(visible=False) as reference_queue_row:
-                    reference_input_folder_name = gr.Textbox(
-                        label=translate("参照入力フォルダ名"),
-                        value=reference_input_folder_name_value,
-                        info=translate("参照画像ファイルを格納するフォルダ名")
+                with gr.Row(equal_height=True):
+                    use_reference_queue = gr.Checkbox(
+                        label=translate("参照画像キューを使用"), value=False, scale=0
                     )
-                    open_reference_folder_btn = gr.Button(value="📂 " + translate("保存及び入力フォルダを開く"), size="md")
+                    reference_batch_count = gr.Slider(
+                        label=translate("参照画像用バッチ処理回数"),
+                        minimum=1,
+                        maximum=100,
+                        value=1,
+                        step=1,
+                        info=translate("参照画像1枚につき連続生成する回数"),
+                        scale=0,
+                        min_width=160,
+                    )
 
-                reference_batch_count = gr.Slider(
-                    label=translate("参照画像用バッチ処理回数"),
-                    minimum=1,
-                    maximum=100,
-                    value=1,
-                    step=1,
-                    info=translate("参照画像1枚につき連続生成する回数")
-                )
+                with gr.Column(visible=False) as reference_queue_only:
+                    with gr.Row():
+                        reference_input_folder_name = gr.Textbox(
+                            label=translate("参照入力フォルダ名"),
+                            value=reference_input_folder_name_value,
+                            info=translate("参照画像ファイルを格納するフォルダ名"),
+                        )
+                        open_reference_folder_btn = gr.Button(
+                            value="📂 " + translate("保存及び入力フォルダを開く"), size="md"
+                        )
 
                 def toggle_reference_queue(val):
                     val = bool(val.value) if hasattr(val, 'value') else bool(val)
-                    return [gr.update(visible=val), gr.update(visible=val)]
+                    return {reference_queue_only: gr.Column(visible=val)}
 
                 def update_reference_folder(folder_name):
                     global reference_input_folder_name_value
@@ -3774,9 +3782,19 @@ with block:
                     open_folder(input_dir)
                     return None
 
-                use_reference_queue.change(fn=toggle_reference_queue, inputs=[use_reference_queue], outputs=[reference_queue_row, reference_batch_count])
-                reference_input_folder_name.change(fn=update_reference_folder, inputs=[reference_input_folder_name], outputs=[reference_input_folder_name])
-                open_reference_folder_btn.click(fn=open_reference_folder, inputs=[], outputs=[gr.Textbox(visible=False)])
+                use_reference_queue.change(
+                    fn=toggle_reference_queue,
+                    inputs=[use_reference_queue],
+                    outputs=[reference_queue_only],
+                )
+                reference_input_folder_name.change(
+                    fn=update_reference_folder,
+                    inputs=[reference_input_folder_name],
+                    outputs=[reference_input_folder_name],
+                )
+                open_reference_folder_btn.click(
+                    fn=open_reference_folder, inputs=[], outputs=[gr.Textbox(visible=False)]
+                )
             # 参照画像の説明
             reference_image_info = gr.Markdown(
                 translate("特徴を抽出する画像（スタイル、服装、背景など）"),
@@ -3865,15 +3883,14 @@ with block:
                     gr.update(value=target_index_value),  # target_index
                     gr.update(value=history_index_value),  # history_index
                     gr.update(visible=use_reference),  # reference_queue_group
-                    gr.update(visible=False),  # reference_queue_row
-                    gr.update(visible=False)  # reference_batch_count
+                    gr.update(visible=False),  # reference_queue_only
                 ]
             
             # イベントハンドラーの設定
             use_reference_image.change(
                 toggle_kisekae_settings,
                 inputs=[use_reference_image],
-                outputs=[reference_image, advanced_kisekae_group, reference_image_info, reference_long_edge, target_index, history_index, reference_queue_group, reference_queue_row, reference_batch_count]
+                outputs=[reference_image, advanced_kisekae_group, reference_image_info, reference_long_edge, target_index, history_index, reference_queue_group, reference_queue_only]
             )
             
             # 詳細設定アコーディオン - 埋め込みプロンプト機能の直後に配置
