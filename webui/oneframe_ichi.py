@@ -1317,13 +1317,20 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             # UI が存在しない場合や属性が無い場合は保存済み設定から取得
             lora_cache_enabled = saved_app_settings.get("lora_cache", False) if saved_app_settings else False
 
+        # LoRA キャッシュを利用する場合は、FP8 最適化を再度実行せず、辞書の分割も行わない。
+        if lora_cache_enabled:
+            fp8_enabled_flag = False
+            force_dict_split_flag = False
+        else:
+            fp8_enabled_flag = fp8_optimization
+            force_dict_split_flag = True
+
         transformer_manager.set_next_settings(
             lora_paths=current_lora_paths,
             lora_scales=current_lora_scales,
             high_vram_mode=high_vram,
-            fp8_enabled=fp8_optimization,
-            # キャッシュ有効時は辞書分割を行わない
-            force_dict_split=not lora_cache_enabled
+            fp8_enabled=fp8_enabled_flag,
+            force_dict_split=force_dict_split_flag
         )
         # -------- LoRA 設定 END ---------
         
