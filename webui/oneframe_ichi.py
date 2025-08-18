@@ -2639,6 +2639,11 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     last_progress_bar = ""
     current_seed = None
 
+    # バッチ処理開始メッセージを表示
+    print("*" * 50)
+    print(translate("【バッチ処理開始】プロセスを始めます - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
+    print("*" * 50)
+
     ctx = None  # 進捗配信用のキューはジョブごとに作成される
 
     # bool値の正規化

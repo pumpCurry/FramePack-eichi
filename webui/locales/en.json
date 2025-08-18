@@ -676,6 +676,7 @@
   "【ファイル診断】prompt_queue_file.name: {0}": "【File diagnosis】prompt_queue_file.name: {0}",
   "【ファイル診断】グローバル変数からファイルパス取得: {0}": "【File diagnosis】Retrieved file path from global variable: {0}",
   "【ファイル診断】グローバル変数を更新: {0}": "【File diagnosis】Updating global variable: {0}",
+  "【バッチ処理開始】プロセスを始めます - ": "[BATCH PROCESS START] Process starting - ",
   "【ユーザー中断】処理は正常に中断されました - ": "[USER INTERRUPTION] Processing was properly interrupted - ",
   "【全バッチ処理完了】プロセスが完了しました - ": "[ALL BATCH PROCESSING COMPLETED] Process finished - ",
   "このステップで打ち切り": "Stop After This Step",
