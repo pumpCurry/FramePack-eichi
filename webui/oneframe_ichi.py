@@ -84,12 +84,13 @@ from eichi_utils.notification_utils import play_completion_sound
 
 import queue
 import threading
+from typing import Any  # 型注釈用（_start_job_for_single_taskでAnyを使用）
 from collections import deque
 import weakref
 
 
 class FanoutQueue:
-    """Thread-safe fan-out queue with replayable history."""
+    """履歴を再生できるスレッドセーフなファンアウトキュー"""
 
     def __init__(self, maxlen: int = 200, maxsize: int = 64):
         self._history = deque(maxlen=maxlen)
@@ -99,7 +100,7 @@ class FanoutQueue:
         self._closed = False
 
     def publish(self, item) -> None:
-        """Publish an item to all subscribers and store in history."""
+        """要素を全ての購読者に配信し履歴に保存する"""
         with self._lock:
             if self._closed:
                 return
@@ -116,7 +117,7 @@ class FanoutQueue:
                         pass
 
     def subscribe(self) -> queue.Queue:
-        """Subscribe to the queue and receive the backlog immediately."""
+        """キューに購読し既存の履歴を即座に受け取る"""
         q: queue.Queue = queue.Queue(maxsize=self._maxsize)
         with self._lock:
             for item in list(self._history):
@@ -135,7 +136,7 @@ class FanoutQueue:
                 pass
 
     def clear(self) -> None:
-        """Clear history and all subscriber queues."""
+        """履歴と全ての購読キューをクリアする"""
         with self._lock:
             self._history.clear()
             for q in list(self._subs):
@@ -146,7 +147,7 @@ class FanoutQueue:
                         break
 
     def close(self) -> None:
-        """Close all subscriber queues and remove them. Sentinel is guaranteed."""
+        """全ての購読キューを閉じて削除する。センチネルを必ず送信する。"""
         with self._lock:
             if self._closed:
                 return
@@ -154,25 +155,49 @@ class FanoutQueue:
             for q in list(self._subs):
                 # キューをドレインせずに必ずセンチネルを入れる
                 try:
-                    q.put_nowait((None, None))
+                    q.put_nowait(BUS_END_SENTINEL)
                 except queue.Full:
                     try:
                         _ = q.get_nowait()
-                        q.put_nowait((None, None))
+                        q.put_nowait(BUS_END_SENTINEL)
                     except Exception:
                         pass
             self._subs.clear()
 
 
 class JobContext:
-    """Holds job-specific state such as the fan-out queue."""
+    """ファンアウトキューなどジョブ固有の状態を保持するクラス"""
 
     def __init__(self):
         self.bus = FanoutQueue()
         self.done = threading.Event()
         # 停止リクエストはジョブ単位で保持して、UI側がグローバルを
         # クリアしてもバックグラウンドスレッドから参照できるようにする
-        self.stop_mode = None  # "image" or "step"
+        self.stop_mode = None  # "image" or "step" - 現在リクエスト中の停止モード
+        # stop_mode と _sent_end への同時アクセスを防ぐロック
+        # UI のトグルとサンプラのコールバックの競合を避ける
+        self._stop_lock = threading.Lock()
+
+    def should_stop_step(self) -> bool:
+        """
+        中断モードが「step」で、かつサンプラがまだ'end'を送っていない場合にTrueを返す。
+        判定ロジックをヘルパー化して重複を避ける。
+
+        UIからの同時更新を防ぐためロックを取得する。
+        ロックしないとstop_modeや_sent_endが判定中に変化する恐れがある。
+        """
+        with self._stop_lock:
+            return self.stop_mode == "step" and not getattr(self, "_sent_end", False)
+
+    def reset_stop_mode(self) -> None:
+        """
+        ジョブ開始時に呼び出し、stop_modeと内部のend送信フラグをリセットする。
+        これにより古い状態が次回の実行に影響しない。
+        """
+        with self._stop_lock:
+            self.stop_mode = None
+            # 新しいジョブではendマーカーを一度だけ送れるようにする
+            self._sent_end = False
 
 
 # ----------------- globals -----------------
@@ -186,6 +211,11 @@ if sys.platform in ('win32', 'cygwin'):
 # グローバル変数 - 停止フラグと通知状態管理
 user_abort = False
 user_abort_notified = False
+
+# ストリームとバスの終了を表すセンチネルを定義
+# 名前付き定数を使うことで可読性が向上し、終端マーカーの統一が容易になる
+STREAM_END_SENTINEL = 'end'
+BUS_END_SENTINEL = (None, None)
 
 # バッチ処理とキュー機能用グローバル変数
 batch_stopped = False  # バッチ処理中断フラグ
@@ -264,7 +294,8 @@ def progress_resync():
     try:
         while True:
             item = q.get()
-            if item is None or item == (None, None):
+            # バス終了用センチネルとして名前付き定数を使用
+            if item is None or item == BUS_END_SENTINEL:
                 break
             kind, payload = item
             if kind == 'progress':
@@ -272,7 +303,7 @@ def progress_resync():
                 yield preview, desc, bar_html
             elif kind == 'file':
                 path = payload
-                yield None, f"Saved: {path}", None
+                yield None, f"保存済み: {path}", None
             elif kind == 'end':
                 break
     finally:
@@ -280,14 +311,15 @@ def progress_resync():
 
 
 def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
-    """Create and start a new job with its own context."""
+    """独立したコンテキストを持つ新しいジョブを生成・開始する"""
     global generation_active, cur_job
     ctx = JobContext()
     # ジョブ専用のstreamとフラグを持たせる
     ctx.stream = AsyncStream()
     ctx.stop_after_step_event = threading.Event()
-    ctx._sent_end = False
-    ctx.stop_mode = stop_mode
+    ctx.reset_stop_mode()
+    with ctx._stop_lock:
+        ctx.stop_mode = stop_mode
     # 既存コードの互換性のため、グローバルにも参照を残す（参照先はこのctx）
     globals()['stream'] = ctx.stream
     with ctx_lock:
@@ -298,13 +330,13 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
 
 
 def _stream_job_to_ui(ctx: JobContext):
-    """Stream job progress from the bus to the Gradio UI."""
+    """バスからGradio UIへ進捗を送信する"""
     global last_progress_desc, last_progress_bar, last_preview_image
     global last_output_filename, current_seed, batch_stopped
-    global stop_after_current, stop_after_step, last_stop_mode, stop_mode
+    global stop_after_current, stop_after_step, last_stop_mode
 
     running = is_generation_running()
-    # Disable End button while a stop toggle is active to prevent accidental stops
+    # 停止トグルが有効な間は誤操作防止のためEndボタンを無効化
     end_enabled = running and (ctx.stop_mode is None)
     yield (
         last_output_filename if last_output_filename is not None else gr.skip(),
@@ -323,7 +355,7 @@ def _stream_job_to_ui(ctx: JobContext):
     try:
         while True:
             item = q.get()
-            if item == (None, None):
+            if item == BUS_END_SENTINEL:
                 last_stop_mode = ctx.stop_mode
                 stop_after_current = False
                 stop_after_step = False
@@ -398,7 +430,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 )
                 break
 
-            if ctx.stream.input_queue.top() == 'end' or (batch_stopped and ctx.stop_mode is None):
+            if ctx.stream.input_queue.top() == STREAM_END_SENTINEL or (batch_stopped and ctx.stop_mode is None):
                 batch_stopped = True
                 last_stop_mode = ctx.stop_mode
                 stop_after_current = False
@@ -1713,7 +1745,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             is_last_section = latent_padding == 0  # 常にTrue
             latent_padding_size = latent_padding * latent_window_size  # 常に0
             
-            if ctx.stream.input_queue.top() == 'end':
+            if ctx.stream.input_queue.top() == STREAM_END_SENTINEL:
                 global batch_stopped
                 batch_stopped = True
                 return {'user_interrupt': True}
@@ -1932,7 +1964,21 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     preview = (preview * 255.0).detach().cpu().numpy().clip(0, 255).astype(np.uint8)
                     preview = einops.rearrange(preview, 'b c t h w -> (b h) (t w) c')
 
-                    if ctx.stream.input_queue.top() == 'end':
+                    current_step = d['i'] + 1
+                    percentage = int(100.0 * current_step / steps)
+                    hint = f'Sampling {current_step}/{steps}'
+                    desc = translate('1フレームモード: サンプリング中...')
+
+                    # 中断モードが"step"の場合はここで'end'を送信し、進捗を一度更新してから停止
+                    if ctx.should_stop_step():
+                        ctx.stream.input_queue.push(STREAM_END_SENTINEL)
+                        # 競合を避けるためロック下で_sent_endを設定
+                        with ctx._stop_lock:
+                            ctx._sent_end = True
+                        push_progress(preview, desc, percentage, hint)
+                        return {'user_interrupt': True}
+
+                    if ctx.stream.input_queue.top() == STREAM_END_SENTINEL:
                         global batch_stopped, user_abort, user_abort_notified
                         batch_stopped = True
                         user_abort = True
@@ -1941,15 +1987,6 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                             user_abort_notified = True
                         return {'user_interrupt': True}
 
-                    current_step = d['i'] + 1
-                    percentage = int(100.0 * current_step / steps)
-                    hint = f'Sampling {current_step}/{steps}'
-                    desc = translate('1フレームモード: サンプリング中...')
-                    if ctx.stop_mode == "step" and not getattr(ctx, "_sent_end", False):
-                        ctx.stream.input_queue.push('end')
-                        ctx._sent_end = True
-                        push_progress(preview, desc, percentage, hint)
-                        return {'user_interrupt': True}
                     push_progress(preview, desc, percentage, hint)
                 except KeyboardInterrupt:
                     return {'user_interrupt': True}
@@ -3134,7 +3171,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     stop_mode = None
     last_stop_mode = None
     if ctx is not None:
-        ctx.stop_mode = None
+        with ctx._stop_lock:
+            ctx.stop_mode = None
     user_abort = False
     user_abort_notified = False
     
@@ -3177,9 +3215,10 @@ def end_process():
         with ctx_lock:
             ctx = cur_job
         if ctx is not None:
-            ctx.stop_mode = None
-            if ctx.stream.input_queue.top() != 'end':
-                ctx.stream.input_queue.push('end')
+            with ctx._stop_lock:
+                ctx.stop_mode = None
+            if ctx.stream.input_queue.top() != STREAM_END_SENTINEL:
+                ctx.stream.input_queue.push(STREAM_END_SENTINEL)
             # バックグラウンドジョブに停止を通知
             ctx.done.set()
     generation_active = False
@@ -3203,7 +3242,9 @@ def toggle_stop_after_current():
         stop_after_current = True
         stop_mode = "image"
         if ctx is not None:
-            ctx.stop_mode = "image"
+            # JobContextのロックでstop_modeの更新を保護
+            with ctx._stop_lock:
+                ctx.stop_mode = "image"
         print(translate("この生成で打ち切りをリクエストしました（再クリックでキャンセル）"))
         return (
             gr.update(value=translate("打ち切り処理中…（再クリックでキャンセル）"), interactive=True),
@@ -3215,7 +3256,7 @@ def toggle_stop_after_current():
     sent_end = False
     if ctx is not None:
         try:
-            sent_end = bool(getattr(ctx, "_sent_end", False)) or (ctx.stream.input_queue.top() == 'end')
+            sent_end = bool(getattr(ctx, "_sent_end", False)) or (ctx.stream.input_queue.top() == STREAM_END_SENTINEL)
         except Exception:
             sent_end = bool(getattr(ctx, "_sent_end", False))
 
@@ -3232,7 +3273,8 @@ def toggle_stop_after_current():
     batch_stopped = False
     stop_mode = None
     if ctx is not None:
-        ctx.stop_mode = None
+        with ctx._stop_lock:
+            ctx.stop_mode = None
     print(translate("この生成で打ち切りをキャンセルしました"))
     return (
         gr.update(value=translate("この生成で打ち切り"), interactive=True),
@@ -3251,7 +3293,8 @@ def toggle_stop_after_step():
         stop_after_current = True  # 後続バッチも止める
         stop_mode = "step"
         if ctx is not None:
-            ctx.stop_mode = "step"
+            with ctx._stop_lock:
+                ctx.stop_mode = "step"
         # ★重要：ここでは 'end' を送らない。送信は sampling の callback 側に任せる
         print(translate("このステップで打ち切りをリクエストしました（再クリックでキャンセル）"))
         return (
@@ -3263,7 +3306,7 @@ def toggle_stop_after_step():
     sent_end = False
     if ctx is not None:
         try:
-            sent_end = bool(getattr(ctx, "_sent_end", False)) or (ctx.stream.input_queue.top() == 'end')
+            sent_end = bool(getattr(ctx, "_sent_end", False)) or (ctx.stream.input_queue.top() == STREAM_END_SENTINEL)
         except Exception:
             sent_end = bool(getattr(ctx, "_sent_end", False))
 
@@ -3280,7 +3323,8 @@ def toggle_stop_after_step():
     batch_stopped = False
     stop_mode = None
     if ctx is not None:
-        ctx.stop_mode = None
+        with ctx._stop_lock:
+            ctx.stop_mode = None
     print(translate("このステップで打ち切りをキャンセルしました"))
     return (
         gr.update(value=translate("このステップで打ち切り"), interactive=True),
@@ -3288,7 +3332,7 @@ def toggle_stop_after_step():
     )
 
 def on_resync_button_clicked():
-    """Handle manual resync requests from UI."""
+    """UIからの手動再同期要求を処理する"""
     global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed, stop_mode
 
     with ctx_lock:
@@ -3298,7 +3342,7 @@ def on_resync_button_clicked():
         yield from _stream_job_to_ui(ctx)
     else:
         running = is_generation_running()
-        end_enabled = running and ((ctx.stop_mode is None) if ctx else (stop_mode is None))
+        end_enabled = running and ((ctx.stop_mode is None) if ctx else True)
         yield (
             last_output_filename if last_output_filename is not None else gr.skip(),
             _preview_update(last_preview_image),
