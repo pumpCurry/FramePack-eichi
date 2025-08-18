@@ -1305,8 +1305,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             use_lora = True
 
         # LoRA設定のみを更新
-        #
-        # v1.9.5.2_forPR ブランチでは、常に辞書分割 (force_dict_split=True) を行っていましたが、
+        # v1.9.4 までは、常に辞書分割 (force_dict_split=True) を行っていましたが、
         # LoRA の設定を再起動時に再利用する (lora_cache_checkbox) が有効な場合は
         # FP8 最適化済みの状態辞書をディスクから読み込み直すため、辞書の再分割をスキップします。
         # ここでは lora_cache_checkbox の value を参照してキャッシュ状態を判断し、
