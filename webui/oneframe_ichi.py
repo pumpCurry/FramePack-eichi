@@ -1305,12 +1305,26 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             use_lora = True
 
         # LoRA設定のみを更新
+        #
+        # v1.9.5.2_forPR ブランチでは、常に辞書分割 (force_dict_split=True) を行っていましたが、
+        # LoRA の設定を再起動時に再利用する (lora_cache_checkbox) が有効な場合は
+        # FP8 最適化済みの状態辞書をディスクから読み込み直すため、辞書の再分割をスキップします。
+        # ここでは lora_cache_checkbox の value を参照してキャッシュ状態を判断し、
+        # force_dict_split を動的に切り替えます。
+        try:
+            # Gradio のチェックボックスは .value に現在の状態が入っています。
+            lora_cache_enabled = bool(lora_cache_checkbox.value)
+        except Exception:
+            # UI が存在しない場合や属性が無い場合は保存済み設定から取得
+            lora_cache_enabled = saved_app_settings.get("lora_cache", False) if saved_app_settings else False
+
         transformer_manager.set_next_settings(
             lora_paths=current_lora_paths,
             lora_scales=current_lora_scales,
             high_vram_mode=high_vram,
-            fp8_enabled=fp8_optimization,  # fp8_enabledパラメータを追加
-            force_dict_split=True  # 常に辞書分割処理を行う
+            fp8_enabled=fp8_optimization,
+            # キャッシュ有効時は辞書分割を行わない
+            force_dict_split=not lora_cache_enabled
         )
         # -------- LoRA 設定 END ---------
         
