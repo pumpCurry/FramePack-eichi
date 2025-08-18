@@ -93,6 +93,12 @@ from collections import deque
 import weakref
 
 
+# サンプリングをステップ境界で安全に中断するための内部例外
+class _UserStop(Exception):
+    """Raise from sampling callback to abort the current generation cleanly."""
+    pass
+
+
 class FanoutQueue:
     """履歴を再生できるスレッドセーフなファンアウトキュー"""
 
@@ -1961,41 +1967,37 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 transformer.initialize_teacache(enable_teacache=False)
             
             def callback(d):
-                try:
-                    preview = d['denoised']
-                    preview = vae_decode_fake(preview)
+                # プレビュー生成
+                preview = d['denoised']
+                preview = vae_decode_fake(preview)
+                preview = (preview * 255.0).detach().cpu().numpy().clip(0, 255).astype(np.uint8)
+                preview = einops.rearrange(preview, 'b c t h w -> (b h) (t w) c')
 
-                    preview = (preview * 255.0).detach().cpu().numpy().clip(0, 255).astype(np.uint8)
-                    preview = einops.rearrange(preview, 'b c t h w -> (b h) (t w) c')
+                current_step = d['i'] + 1
+                percentage = int(100.0 * current_step / steps)
+                hint = f'Sampling {current_step}/{steps}'
+                desc = translate('1フレームモード: サンプリング中...')
 
-                    current_step = d['i'] + 1
-                    percentage = int(100.0 * current_step / steps)
-                    hint = f'Sampling {current_step}/{steps}'
-                    desc = translate('1フレームモード: サンプリング中...')
-
-                    # 中断モードが"step"の場合はここで'end'を送信し、進捗を一度更新してから停止
-                    if ctx.should_stop_step():
-                        ctx.stream.input_queue.push(STREAM_END_SENTINEL)
-                        # 競合を避けるためロック下で_sent_endを設定
-                        with ctx._stop_lock:
-                            ctx._sent_end = True
-                        push_progress(preview, desc, percentage, hint)
-                        return {'user_interrupt': True}
-
-                    if ctx.stream.input_queue.top() == STREAM_END_SENTINEL:
-                        global batch_stopped, user_abort, user_abort_notified
-                        batch_stopped = True
-                        user_abort = True
-                        if not user_abort_notified:
-                            print(translate("\n[INFO] 開始前または現在の処理完了後に停止します..."))
-                            user_abort_notified = True
-                        return {'user_interrupt': True}
-
+                # 1) 「このステップで打ち切り」→ end を流してから例外で中断
+                if ctx.should_stop_step():
+                    ctx.stream.input_queue.push(STREAM_END_SENTINEL)
+                    with ctx._stop_lock:
+                        ctx._sent_end = True
                     push_progress(preview, desc, percentage, hint)
-                except KeyboardInterrupt:
-                    return {'user_interrupt': True}
-                except Exception as e:
-                    import traceback
+                    raise _UserStop()
+
+                # 2) グローバル停止（End ボタンなど）→ 例外で中断
+                if ctx.stream.input_queue.top() == STREAM_END_SENTINEL:
+                    global batch_stopped, user_abort, user_abort_notified
+                    batch_stopped = True
+                    user_abort = True
+                    if not user_abort_notified:
+                        print(translate("\n[INFO] 開始前または現在の処理完了後に停止します..."))
+                        user_abort_notified = True
+                    raise _UserStop()
+
+                # 継続
+                push_progress(preview, desc, percentage, hint)
             
             # 異常な次元数を持つテンソルを処理
             try:
@@ -2261,36 +2263,41 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 if not use_cache:
                     print(translate("【初回実行について】初回は Anti-drifting Sampling の履歴データがないため、ノイズが入る場合があります"))
                 
-                generated_latents = sample_hunyuan(
-                    transformer=transformer,
-                    sampler='unipc',
-                    width=actual_width,
-                    height=actual_height,
-                    frames=sample_num_frames,
-                    real_guidance_scale=cfg,
-                    distilled_guidance_scale=gs,
-                    guidance_rescale=rs,
-                    num_inference_steps=steps,
-                    generator=rnd,
-                    prompt_embeds=llama_vec,
-                    prompt_embeds_mask=llama_attention_mask,
-                    prompt_poolers=clip_l_pooler,
-                    negative_prompt_embeds=llama_vec_n,
-                    negative_prompt_embeds_mask=llama_attention_mask_n,
-                    negative_prompt_poolers=clip_l_pooler_n,
-                    device=gpu,
-                    dtype=torch.bfloat16,
-                    image_embeddings=image_encoder_last_hidden_state,
-                    latent_indices=latent_indices,
-                    clean_latents=clean_latents,
-                    clean_latent_indices=clean_latent_indices,
-                    clean_latents_2x=clean_latents_2x,
-                    clean_latent_2x_indices=clean_latent_2x_indices,
-                    clean_latents_4x=clean_latents_4x,
-                    clean_latent_4x_indices=clean_latent_4x_indices,
-                    callback=callback,
-                )
-                
+                try:
+                    generated_latents = sample_hunyuan(
+                        transformer=transformer,
+                        sampler='unipc',
+                        width=actual_width,
+                        height=actual_height,
+                        frames=sample_num_frames,
+                        real_guidance_scale=cfg,
+                        distilled_guidance_scale=gs,
+                        guidance_rescale=rs,
+                        num_inference_steps=steps,
+                        generator=rnd,
+                        prompt_embeds=llama_vec,
+                        prompt_embeds_mask=llama_attention_mask,
+                        prompt_poolers=clip_l_pooler,
+                        negative_prompt_embeds=llama_vec_n,
+                        negative_prompt_embeds_mask=llama_attention_mask_n,
+                        negative_prompt_poolers=clip_l_pooler_n,
+                        device=gpu,
+                        dtype=torch.bfloat16,
+                        image_embeddings=image_encoder_last_hidden_state,
+                        latent_indices=latent_indices,
+                        clean_latents=clean_latents,
+                        clean_latent_indices=clean_latent_indices,
+                        clean_latents_2x=clean_latents_2x,
+                        clean_latent_2x_indices=clean_latent_2x_indices,
+                        clean_latents_4x=clean_latents_4x,
+                        clean_latent_4x_indices=clean_latent_4x_indices,
+                        callback=callback,
+                    )
+                except _UserStop:
+                    if ctx.stream.input_queue.top() != STREAM_END_SENTINEL:
+                        ctx.stream.input_queue.push(STREAM_END_SENTINEL)
+                    return {'user_interrupt': True}
+
                 # コールバックからの戻り値をチェック（コールバック関数が特殊な値を返した場合）
                 if isinstance(generated_latents, dict) and generated_latents.get('user_interrupt'):
                     # ユーザーが中断したことを検出したが、メッセージは出さない（既に表示済み）
