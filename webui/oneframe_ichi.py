@@ -301,7 +301,7 @@ def _stream_job_to_ui(ctx: JobContext):
     """Stream job progress from the bus to the Gradio UI."""
     global last_progress_desc, last_progress_bar, last_preview_image
     global last_output_filename, current_seed, batch_stopped
-    global stop_after_current, stop_after_step, last_stop_mode, stop_mode
+    global stop_after_current, stop_after_step, last_stop_mode
 
     running = is_generation_running()
     # Disable End button while a stop toggle is active to prevent accidental stops
@@ -1932,6 +1932,18 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     preview = (preview * 255.0).detach().cpu().numpy().clip(0, 255).astype(np.uint8)
                     preview = einops.rearrange(preview, 'b c t h w -> (b h) (t w) c')
 
+                    current_step = d['i'] + 1
+                    percentage = int(100.0 * current_step / steps)
+                    hint = f'Sampling {current_step}/{steps}'
+                    desc = translate('1フレームモード: サンプリング中...')
+
+                    # 中断モードが"step"の場合はここで 'end' を送信し、進捗を一度更新してから停止
+                    if ctx.stop_mode == "step" and not getattr(ctx, "_sent_end", False):
+                        ctx.stream.input_queue.push('end')
+                        ctx._sent_end = True
+                        push_progress(preview, desc, percentage, hint)
+                        return {'user_interrupt': True}
+
                     if ctx.stream.input_queue.top() == 'end':
                         global batch_stopped, user_abort, user_abort_notified
                         batch_stopped = True
@@ -1941,15 +1953,6 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                             user_abort_notified = True
                         return {'user_interrupt': True}
 
-                    current_step = d['i'] + 1
-                    percentage = int(100.0 * current_step / steps)
-                    hint = f'Sampling {current_step}/{steps}'
-                    desc = translate('1フレームモード: サンプリング中...')
-                    if ctx.stop_mode == "step" and not getattr(ctx, "_sent_end", False):
-                        ctx.stream.input_queue.push('end')
-                        ctx._sent_end = True
-                        push_progress(preview, desc, percentage, hint)
-                        return {'user_interrupt': True}
                     push_progress(preview, desc, percentage, hint)
                 except KeyboardInterrupt:
                     return {'user_interrupt': True}
