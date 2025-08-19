@@ -3759,7 +3759,7 @@ with block:
 
                 def toggle_reference_queue(val):
                     val = bool(val.value) if hasattr(val, 'value') else bool(val)
-                    return {reference_queue_only: gr.Column(visible=val)}
+                    return {reference_queue_only: gr.update(visible=val)}
 
                 def update_reference_folder(folder_name):
                     global reference_input_folder_name_value
