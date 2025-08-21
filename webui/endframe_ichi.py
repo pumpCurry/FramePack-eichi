@@ -2542,6 +2542,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     global vae_cache_enabled
     global image_queue_files
     global stop_after_current, stop_after_step
+    global last_output_filename
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
@@ -2797,12 +2798,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(value=seed)
+        yield last_output_filename if last_output_filename is not None else gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(value=seed)
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+        yield last_output_filename if last_output_filename is not None else gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
     stream = AsyncStream()
 
@@ -2810,7 +2811,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     if batch_stopped:
         print(translate("バッチ処理が中断されました（バッチ開始前）"))
         yield (
-            gr.skip(),
+            last_output_filename if last_output_filename is not None else gr.skip(),
             gr.update(visible=False),
             translate("バッチ処理が中断されました"),
             '',
@@ -2827,7 +2828,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         if batch_stopped:
             print(translate("バッチ処理がユーザーによって中止されました"))
             yield (
-                gr.skip(),
+                last_output_filename if last_output_filename is not None else gr.skip(),
                 gr.update(visible=False),
                 translate("バッチ処理が中止されました。"),
                 '',
@@ -2886,7 +2887,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+            yield last_output_filename if last_output_filename is not None else gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
         # バッチインデックスに応じてSEED値を設定
         # ランダムシード使用判定を再度実施
@@ -3094,7 +3095,6 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
             if flag == 'file':
                 batch_output_filename = data
-                global last_output_filename
                 last_output_filename = data
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (

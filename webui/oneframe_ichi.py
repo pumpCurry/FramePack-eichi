@@ -2843,7 +2843,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # 空の入力画像を生成
         # ここではNoneのままとし、実際のworker関数内でNoneの場合に対応する
     
-    yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+    yield last_output_filename if last_output_filename is not None else gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
     
     # バッチ処理用の変数 - 各フラグをリセット
     batch_stopped = False
@@ -2870,7 +2870,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update(value=seed)
+        yield last_output_filename if last_output_filename is not None else gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update(value=seed)
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
@@ -2879,7 +2879,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             seed = 31337
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
         # UI更新（値は変更しない）
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+        yield last_output_filename if last_output_filename is not None else gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
         original_seed = seed
     
     # 設定の自動保存処理（最初のバッチ開始時のみ）
