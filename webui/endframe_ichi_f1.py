@@ -300,6 +300,9 @@ prompt_queue_file_path = None  # プロンプトキューのファイルパス
 image_queue_files = []  # イメージキューのファイルリスト
 input_folder_name_value = app_settings.get('input_folder', 'inputs')  # 入力フォルダ名の設定値
 
+# 前回の出力ファイル名を保持
+last_output_filename = None
+
 # 入力フォルダも存在確認（作成はボタン押下時のみ）
 input_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), input_folder_name_value)
 print(translate("設定から入力フォルダを読み込み: {0}").format(input_folder_name_value))
@@ -1060,17 +1063,17 @@ def validate_and_process_with_queue_check(*args):
         if len(result) >= 7:
             video, preview, desc, progress, start_btn, end_btn, stop_after_btn = result[:7]
             seed_update = result[7] if len(result) > 7 else gr.update()
-        
-        # During manual generation, manage queue start button state
-        if isinstance(start_btn, dict) and not start_btn.get('interactive', True):
-            # Manual generation is running, disable queue start
-            queue_start_state = gr.update(interactive=False, value=translate("手动生成中..."))
-        else:
-            # Manual generation finished, re-enable queue start
-            queue_start_state = gr.update(interactive=True, value=translate("▶️ Start Queue"))
 
-        # Return 9 outputs to match the expected outputs
-        yield (video, preview, desc, progress, start_btn, end_btn, stop_after_btn, queue_start_state, seed_update)
+            # During manual generation, manage queue start button state
+            if isinstance(start_btn, dict) and not start_btn.get('interactive', True):
+                # Manual generation is running, disable queue start
+                queue_start_state = gr.update(interactive=False, value=translate("手动生成中..."))
+            else:
+                # Manual generation finished, re-enable queue start
+                queue_start_state = gr.update(interactive=True, value=translate("▶️ Start Queue"))
+
+            # Return 9 outputs to match the expected outputs
+            yield (video, preview, desc, progress, start_btn, end_btn, stop_after_btn, queue_start_state, seed_update)
         else:
             # Fallback for unexpected result format
             yield result + (gr.update(),) * (9 - len(result))
@@ -3932,6 +3935,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     global stream
     global batch_stopped
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files
+    global last_output_filename
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
@@ -4158,12 +4162,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update(value=seed)
+        yield last_output_filename if last_output_filename is not None else gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update(value=seed)
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
+        yield last_output_filename if last_output_filename is not None else gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
 
     stream = AsyncStream()
 
@@ -4171,7 +4175,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     if batch_stopped:
         print(translate("バッチ処理が中断されました（バッチ開始前）"))
         yield (
-            gr.skip(),
+            last_output_filename if last_output_filename is not None else gr.skip(),
             gr.update(visible=False),
             translate("バッチ処理が中断されました"),
             '',
@@ -4222,7 +4226,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         if batch_stopped:
             print(translate("バッチ処理がユーザーによって中止されました"))
             yield (
-                gr.skip(),
+                last_output_filename if last_output_filename is not None else gr.skip(),
                 gr.update(visible=False),
                 translate("バッチ処理が中止されました。"),
                 '',
@@ -4243,7 +4247,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
+            yield last_output_filename if last_output_filename is not None else gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
 
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
@@ -4402,6 +4406,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
             if flag == 'file':
                 batch_output_filename = data
+                last_output_filename = data
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (
                     batch_output_filename if batch_output_filename is not None else gr.skip(),
@@ -4445,8 +4450,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         print(translate("📊 All batches completed - resetting batch progress"))
                         # Don't reset here, let the queue manager handle it when config is fully done
 
+                    last_output_filename = batch_output_filename or last_output_filename
                     yield (
-                        batch_output_filename if batch_output_filename is not None else gr.skip(),
+                        last_output_filename if last_output_filename is not None else gr.skip(),
                         gr.update(value=None, visible=False),
                         completion_message,
                         '',
