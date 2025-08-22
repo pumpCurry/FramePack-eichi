@@ -1,4 +1,8 @@
+
 import os
+# Show which script is launching for easier debugging
+print(f"{os.path.basename(__file__)} : Starting....")
+
 import sys
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
 
@@ -13,6 +17,7 @@ import os
 import random
 import time
 import subprocess
+import shutil
 import traceback  # ログ出力用
 # クロスプラットフォーム対応のための条件付きインポート
 import yaml
@@ -40,11 +45,7 @@ args = parser.parse_args()
 from locales.i18n_extended import (set_lang, translate)
 set_lang(args.lang)
 
-try:
-    import winsound
-    HAS_WINSOUND = True
-except ImportError:
-    HAS_WINSOUND = False
+from eichi_utils.notification_utils import play_completion_sound
 import json
 import traceback
 from datetime import datetime, timedelta
@@ -67,6 +68,8 @@ except ImportError:
 # 設定管理のインポートと読み込み
 from eichi_utils.settings_manager import load_app_settings_f1
 saved_app_settings = load_app_settings_f1()
+if saved_app_settings:
+    lora_state_cache.set_cache_enabled(saved_app_settings.get("lora_cache", False))
 
 # 読み込んだ設定をログに出力
 if saved_app_settings:
@@ -131,6 +134,8 @@ import math
 from PIL import Image
 from diffusers import AutoencoderKLHunyuanVideo
 from transformers import LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer
+from eichi_utils.path_utils import safe_path_join, ensure_dir
+from eichi_utils.error_utils import log_and_continue
 from diffusers_helper.hunyuan import encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake
 from diffusers_helper.utils import save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw, resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge, generate_timestamp
 from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
@@ -140,7 +145,7 @@ from diffusers_helper.thread_utils import AsyncStream, async_run
 from diffusers_helper.gradio.progress_bar import make_progress_bar_css, make_progress_bar_html
 from transformers import SiglipImageProcessor, SiglipVisionModel
 from diffusers_helper.clip_vision import hf_clip_vision_encode
-from diffusers_helper.bucket_tools import find_nearest_bucket
+from diffusers_helper.bucket_tools import find_nearest_bucket, SAFE_RESOLUTIONS
 
 from eichi_utils.transformer_manager import TransformerManager
 from eichi_utils.text_encoder_manager import TextEncoderManager
@@ -163,6 +168,12 @@ print(translate('High-VRAM Mode: {0}').format(high_vram))
 from eichi_utils.model_downloader import ModelDownloader
 ModelDownloader().download_f1()
 
+def _norm_dropdown(val):
+    """Return a clean str or None from a Gr.Dropdown value."""
+    if val in (None, False, True, 0, "0", 0.0) or val == translate("なし"):
+        return None
+    return str(val)
+
 # グローバルなモデル状態管理インスタンスを作成
 # F1モードではuse_f1_model=Trueを指定
 transformer_manager = TransformerManager(device=gpu, high_vram_mode=high_vram, use_f1_model=True)
@@ -181,6 +192,7 @@ current_processing_config_name = None  # For video file naming
 current_batch_progress = {"current": 0, "total": 0}  # Batch progress tracking
 queue_ui_settings = None  # Captured UI settings for queue processing
 pending_lora_config_data = None  # For delayed LoRA configuration loading
+stop_after_current = False  # Flag to stop after current generation
 
 # Configuration constants for queue display
 CONST_queued_shown_count = 5  # Number of queued items shown in status
@@ -259,6 +271,7 @@ initialize_settings()
 # LoRAプリセットの初期化
 from eichi_utils.lora_preset_manager import initialize_lora_presets
 initialize_lora_presets()
+from eichi_utils import lora_state_cache
 
 # ベースパスを定義
 base_path = os.path.dirname(os.path.abspath(__file__))
@@ -528,6 +541,41 @@ def merged_refresh_handler_standardized():
         
     except Exception as e:
         return translate("❌ Error during refresh: {0}").format(str(e)), gr.update(), gr.update()
+
+def resync_status_handler():
+    try:
+        if config_queue_manager is None:
+            return (
+                translate("❌ Config queue manager not initialized"),
+                gr.update(),
+                gr.update(),
+                gr.update()
+            )
+
+        queue_status = config_queue_manager.get_queue_status()
+        status_text = format_queue_status_with_batch_progress(queue_status)
+
+        if queue_status.get('is_processing'):
+            desc = translate("Queue processing active - Progress UI disabled. Check console for details.")
+            bar = f'<div style="color: blue; font-weight: bold;">{desc}</div>'
+        else:
+            desc = translate("Status: Ready")
+            bar = ''
+
+        return (
+            translate("✅ Status resynchronized"),
+            gr.update(value=status_text),
+            desc,
+            bar
+        )
+
+    except Exception as e:
+        return (
+            translate("❌ Error during resync: {0}").format(str(e)),
+            gr.update(),
+            gr.update(),
+            gr.update()
+        )
 
 # ==============================================================================
 # QUEUE CONTROL HANDLERS
@@ -999,6 +1047,7 @@ def validate_and_process_with_queue_check(*args):
             '<div style="color: red;">Queue processing is running. Please wait for completion or stop the queue.</div>',  # progress_bar
             gr.update(interactive=False, value=translate("队列处理中，手动生成已禁用")),  # start_button
             gr.update(interactive=False),  # end_button
+            gr.update(interactive=False),  # stop_after_button
             gr.update(interactive=False, value=translate("队列处理中...")),  # queue_start_button
             gr.update()  # seed
         )
@@ -1006,24 +1055,25 @@ def validate_and_process_with_queue_check(*args):
         
     # If no queue processing, proceed with normal validation
     for result in validate_and_process(*args):
-        # result is a tuple: (video, preview, desc, progress, start_btn, end_btn, seed)
-        if len(result) >= 6:
-            video, preview, desc, progress, start_btn, end_btn = result[:6]
-            seed_update = result[6] if len(result) > 6 else gr.update()
-            
-            # During manual generation, manage queue start button state
-            if isinstance(start_btn, dict) and not start_btn.get('interactive', True):
-                # Manual generation is running, disable queue start
-                queue_start_state = gr.update(interactive=False, value=translate("手动生成中..."))
-            else:
-                # Manual generation finished, re-enable queue start
-                queue_start_state = gr.update(interactive=True, value=translate("▶️ Start Queue"))
-            
-            # Return 8 outputs to match the expected outputs
-            yield (video, preview, desc, progress, start_btn, end_btn, queue_start_state, seed_update)
+        # result is a tuple: (video, preview, desc, progress, start_btn, end_btn, stop_after_btn, seed)
+        if len(result) >= 7:
+            video, preview, desc, progress, start_btn, end_btn, stop_after_btn = result[:7]
+            seed_update = result[7] if len(result) > 7 else gr.update()
         else:
             # Fallback for unexpected result format
-            yield result + (gr.update(),) * (8 - len(result))
+            yield result + (gr.update(),) * (9 - len(result))
+            continue
+
+        # During manual generation, manage queue start button state
+        if isinstance(start_btn, dict) and not start_btn.get('interactive', True):
+            # Manual generation is running, disable queue start
+            queue_start_state = gr.update(interactive=False, value=translate("手动生成中..."))
+        else:
+            # Manual generation finished, re-enable queue start
+            queue_start_state = gr.update(interactive=True, value=translate("▶️ Start Queue"))
+
+        # Return 9 outputs to match the expected outputs
+        yield (video, preview, desc, progress, start_btn, end_btn, stop_after_btn, queue_start_state, seed_update)
 
 def end_process_enhanced():
 
@@ -1038,6 +1088,22 @@ def end_process_enhanced():
     return (
         gr.update(value=translate("停止処理中...")),  # End button (temporary message)
         gr.update(interactive=True, value=translate("▶️ Start Queue"))  # Re-enable queue start
+    )
+
+def end_after_current_process_enhanced():
+    """Stop after the current generation completes"""
+    global batch_stopped, stop_after_current, stream
+
+    if not stop_after_current:
+        batch_stopped = True
+        stop_after_current = True
+        if stream is not None and stream.input_queue.top() != 'end':
+            stream.input_queue.push('end')
+        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+
+    return (
+        gr.update(value=translate("打ち切り処理中...")),
+        gr.update(interactive=True, value=translate("▶️ Start Queue"))
     )
   
 # ==============================================================================
@@ -1084,7 +1150,7 @@ def create_enhanced_config_queue_ui():
                     label=translate("Select Config"),
                     choices=available_configs,
                     value=None,
-                    allow_custom_value=False,
+                    allow_custom_value=True,
                     info=translate("Select a config file to load, queue, or delete")
                 )
             with gr.Column(scale=1):
@@ -1104,6 +1170,8 @@ def create_enhanced_config_queue_ui():
                 enhanced_start_queue_btn = gr.Button(value=translate("▶️ Start Queue"), variant="primary")
             with gr.Column(scale=1):
                 stop_queue_btn = gr.Button(value=translate("⏹️ Stop Queue"), variant="secondary")
+            with gr.Column(scale=1):
+                resync_status_btn = gr.Button(value=translate("🔃 Resync Status"), variant="secondary")
 
 
         # Messages
@@ -1151,6 +1219,7 @@ def create_enhanced_config_queue_ui():
         'enhanced_start_queue_btn': enhanced_start_queue_btn,  # Enhanced start button
         'stop_queue_btn': stop_queue_btn,
         'clear_queue_btn': clear_queue_btn,
+        'resync_status_btn': resync_status_btn,
         'queue_status_display': queue_status_display,
         'config_message': config_message
     }
@@ -1316,6 +1385,18 @@ def setup_enhanced_config_queue_events(components, ui_components):
         ]
     )
 
+    components['resync_status_btn'].click(
+        fn=resync_status_handler,
+        inputs=[],
+        outputs=[
+            components['config_message'],
+            components['queue_status_display'],
+            ui_components['progress_desc'],
+            ui_components['progress_bar']
+        ],
+        queue=False
+    )
+
 def setup_periodic_queue_status_check():
 
     import threading
@@ -1389,7 +1470,7 @@ def get_current_lora_settings(use_lora, lora_mode, lora_dropdown1, lora_dropdown
         for dropdown in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
             if dropdown and dropdown != translate("なし"):
                 lora_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lora')
-                lora_path = os.path.join(lora_dir, dropdown)
+                lora_path = safe_path_join(lora_dir, dropdown)
                 if os.path.exists(lora_path):
                     lora_paths.append(lora_path)
                     lora_dropdown_files.append(dropdown)
@@ -1417,7 +1498,7 @@ def get_current_lora_settings(use_lora, lora_mode, lora_dropdown1, lora_dropdown
                 try:
                     src_path = lora_file.name
                     original_filename = os.path.basename(src_path)
-                    dest_path = os.path.join(lora_dir, original_filename)
+                    dest_path = safe_path_join(lora_dir, original_filename)
                     
                     # Handle filename conflicts
                     if os.path.exists(dest_path):
@@ -1428,7 +1509,7 @@ def get_current_lora_settings(use_lora, lora_mode, lora_dropdown1, lora_dropdown
                             counter = 1
                             while os.path.exists(dest_path):
                                 new_filename = f"{name}_copy{counter}{ext}"
-                                dest_path = os.path.join(lora_dir, new_filename)
+                                dest_path = safe_path_join(lora_dir, new_filename)
                                 counter += 1
                             original_filename = os.path.basename(dest_path)
                             print(translate("   📄 Renamed to avoid conflict: {0}").format(original_filename))
@@ -1515,7 +1596,7 @@ def scan_lora_directory():
         for filename in os.listdir(lora_dir):
             if filename.endswith(('.safetensors', '.pt', '.bin')):
                 # Validate file is readable
-                file_path = os.path.join(lora_dir, filename)
+                file_path = safe_path_join(lora_dir, filename)
                 if os.path.isfile(file_path) and os.access(file_path, os.R_OK):
                     choices.append(filename)
     except Exception as e:
@@ -2472,6 +2553,7 @@ def get_image_queue_files():
     return image_files
 
 @torch.no_grad()
+@log_and_continue("worker error")
 def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, image_strength=1.0, keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, frame_save_mode=None):
 
     # frame_save_modeに基づいてフラグを設定
@@ -2557,6 +2639,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         print(translate("デフォルト出力フォルダを使用: {0}").format(outputs_folder))
 
     # フォルダが存在しない場合は作成
+    outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
 
     # 処理時間計測の開始
@@ -2857,6 +2940,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         # -------- LoRA 設定 START ---------
 
+        # sanitise raw UI values (can be bool when allow_custom_value=True)
+        lora_dropdown1 = _norm_dropdown(lora_dropdown1)
+        lora_dropdown2 = _norm_dropdown(lora_dropdown2)
+        lora_dropdown3 = _norm_dropdown(lora_dropdown3)
+
         # UI設定のuse_loraフラグ値を保存
         original_use_lora = use_lora
 
@@ -2877,9 +2965,8 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 # ドロップダウンの値を取得
                 for dropdown in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
                     if dropdown is not None and dropdown != translate("なし") and dropdown != 0:
-                        # なし以外が選択されている場合、パスを生成
                         lora_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lora')
-                        lora_path = os.path.join(lora_dir, dropdown)
+                        lora_path = safe_path_join(lora_dir, dropdown)
                         if os.path.exists(lora_path):
                             current_lora_paths.append(lora_path)
                             print(translate("LoRAファイルを追加: {0}").format(lora_path))
@@ -3585,10 +3672,8 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         should_play_alarm = False
                 
                 if should_play_alarm:
-                    if HAS_WINSOUND:
-                        winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
-                    else:
-                        print(translate("処理が完了しました"))  # Linuxでの代替通知
+                    if not play_completion_sound():
+                        print(translate("処理が完了しました"))
 
                 # メモリ解放を明示的に実行
                 if torch.cuda.is_available():
@@ -3849,6 +3934,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
+    stop_after_current = False
 
 
     # フレームサイズ設定に応じてlatent_window_sizeを先に調整
@@ -3967,8 +4053,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             # 各ドロップダウンの値を処理
             for dropdown, label in zip([lora_dropdown1, lora_dropdown2, lora_dropdown3], ["LoRA1", "LoRA2", "LoRA3"]):
                 if dropdown is not None and dropdown != translate("なし") and dropdown != 0:
-                    # 選択あり
-                    file_path = os.path.join(lora_dir, dropdown)
+                    file_path = safe_path_join(lora_dir, dropdown)
                     if os.path.exists(file_path):
                         lora_paths.append(file_path)
                         print(translate("{0}選択: {1}").format(label, dropdown))
@@ -4052,6 +4137,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
     # バッチ処理の全体停止用フラグ
     batch_stopped = False
+    stop_after_current = False
 
     # 元のシード値を保存（バッチ処理用）
     original_seed = seed
@@ -4071,12 +4157,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(value=seed)
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update(value=seed)
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update()
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
 
     stream = AsyncStream()
 
@@ -4090,6 +4176,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             '',
             gr.update(interactive=True),
             gr.update(interactive=False, value=translate("End Generation")),
+            gr.update(interactive=False),
             gr.update()
         )
         return
@@ -4155,7 +4242,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update()
+            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
 
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
@@ -4309,19 +4396,21 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         batch_output_filename = None
 
         # 現在のバッチの処理結果を取得
+        listener_queue = stream.output_queue.subscribe()
         while True:
-            flag, data = stream.output_queue.next()
+            flag, data = listener_queue.next()
 
             if flag == 'file':
                 batch_output_filename = data
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (
-                    batch_output_filename if batch_output_filename is not None else gr.skip(), 
-                    gr.update(value=None, visible=False), 
-                    gr.update(), 
-                    gr.update(), 
-                    gr.update(interactive=False), 
-                    gr.update(interactive=True), 
+                    batch_output_filename if batch_output_filename is not None else gr.skip(),
+                    gr.update(value=None, visible=False),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(interactive=False),
+                    gr.update(interactive=True),
+                    gr.update(interactive=False),
                     gr.update(),
                 )
 
@@ -4332,7 +4421,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     batch_info = translate("バッチ処理: {0}/{1} - ").format(batch_index + 1, batch_count)
                     desc = batch_info + desc
                 # preview_imageを明示的に設定
-                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update()
+                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
 
             if flag == 'end':
 
@@ -4363,6 +4452,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         '',
                         gr.update(interactive=True),
                         gr.update(interactive=False, value=translate("End Generation")),
+                        gr.update(interactive=False),
                         gr.update()
                     )
                     # 最後のバッチが終わったので終了
@@ -4378,6 +4468,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         '',
                         gr.update(interactive=False),
                         gr.update(interactive=True),
+                        gr.update(interactive=False),
                         gr.update()
                     )
                     # バッチループの内側で使用される変数を次のバッチ用に更新する
@@ -4404,9 +4495,16 @@ quick_prompts = [
 quick_prompts = [[x] for x in quick_prompts]
 
 css = get_app_css()
-block = gr.Blocks(css=css).queue()
+with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
+    css += f.read()
+modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
+with open(modal_js_path, encoding="utf8") as f:
+    modal_js = f.read()
+block = gr.Blocks(css=css, js=modal_js).queue()
+
 with block:
     gr.HTML('<h1>FramePack<span class="title-suffix">-<s>eichi</s> F1</span></h1>')
+    gr.HTML('<dialog id="modal_dlg"><img /></dialog>')
 
     # 一番上の行に「生成モード、セクションフレームサイズ、オールパディング、動画長」を配置
     with gr.Row():
@@ -4456,7 +4554,14 @@ with block:
 
     with gr.Row():
         with gr.Column():
-            input_image = gr.Image(sources=['upload', 'clipboard'], type="filepath", label="Image", height=320)
+            input_image = gr.Image(
+                sources=['upload', 'clipboard'],
+                type="filepath",
+                label="Image",
+                height=320,
+                elem_id="input_image",
+                elem_classes="modal-image",
+            )
 
             # テンソルデータ設定をグループ化して灰色のタイトルバーに変更
             with gr.Group():
@@ -4546,13 +4651,17 @@ with block:
 
                     if file_obj is not None:
                         print(translate("ファイルアップロード検出: 型={0}").format(type(file_obj).__name__))
-
+                        # 正規のファイルオブジェクトか文字列パスかを確認
                         if hasattr(file_obj, 'name'):
                             prompt_queue_file_path = file_obj.name
                             print(translate("アップロードファイルパス保存: {0}").format(prompt_queue_file_path))
-                        else:
+                        elif isinstance(file_obj, (str, bytes, os.PathLike)):
                             prompt_queue_file_path = file_obj
                             print(translate("アップロードファイルデータ保存: {0}").format(file_obj))
+                        else:
+                            # bool など予期せぬ型は無効として扱う
+                            prompt_queue_file_path = None
+                            print(translate("無効なアップロードオブジェクトを受信: 型={0}").format(type(file_obj).__name__))
                     else:
                         prompt_queue_file_path = None
                         print(translate("ファイルアップロード解除"))
@@ -4603,16 +4712,8 @@ with block:
                     # 画像ファイルリストを更新
                     get_image_queue_files()
 
-                    # プラットフォームに応じてフォルダを開く
                     try:
-                        if os.name == 'nt':  # Windows
-                            os.startfile(input_dir)
-                        elif os.name == 'posix':  # macOS, Linux
-                            if sys.platform == 'darwin':  # macOS
-                                subprocess.Popen(['open', input_dir])
-                            else:  # Linux
-                                subprocess.Popen(['xdg-open', input_dir])
-                        print(translate("入力フォルダを開きました: {0}").format(input_dir))
+                        open_output_folder(input_dir)
                         return translate("設定を保存し、入力フォルダを開きました")
                     except Exception as e:
                         error_msg = translate("フォルダを開けませんでした: {0}").format(str(e))
@@ -4625,9 +4726,9 @@ with block:
                     with gr.Column(scale=2):
                         resolution = gr.Dropdown(
                             label=translate("解像度"),
-                            choices=[512, 640, 768, 960, 1080],
+                            choices=SAFE_RESOLUTIONS,
                             value=saved_app_settings.get("resolution", 640) if saved_app_settings else 640,
-                            info=translate("出力動画の基準解像度。640推奨。960/1080は高負荷・高メモリ消費"),
+                            info=translate("出力動画の基準解像度。640推奨。高解像度は高負荷・高メモリ消費"),
                             elem_classes="saveable-setting"
                         )
                     with gr.Column(scale=1):
@@ -4678,7 +4779,7 @@ with block:
 
                 # イメージキュー用グループ
                 with gr.Group(visible=False) as image_queue_group:
-                    gr.Markdown(translate("※ 1回目はImage画像を使用し、2回目以降は入力フォルダの画像ファイルを名前順に使用します。\n※ 画像と同名のテキストファイル（例：image1.jpg → image1.txt）があれば、その内容を自動的にプロンプトとして使用します。\n※ バッチ回数が全画像数を超える場合、残りはImage画像で処理されます。\n※ バッチ処理回数が1でもキュー回数が優先されます。"))
+                    gr.Markdown(translate("※ 1回目はImage画像を使用し、2回目以降は入力フォルダの画像ファイルを修正日時の昇順で使用します。\n※ 画像と同名のテキストファイル（例：image1.jpg → image1.txt）があれば、その内容を自動的にプロンプトとして使用します。\n※ バッチ回数が全画像数を超える場合、残りはImage画像で処理されます。\n※ バッチ処理回数が1でもキュー回数が優先されます。"))
 
                     # 入力フォルダ設定
                     with gr.Row():
@@ -4737,6 +4838,7 @@ with block:
             with gr.Row():
                 start_button = gr.Button(value=translate("Start Generation"))
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
+                stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
 
             # FP8最適化設定
             with gr.Row():
@@ -4745,6 +4847,22 @@ with block:
                     value=True,
                     info=translate("メモリ使用量を削減し速度を改善（PyTorch 2.1以上が必要）")
                 )
+
+            # LoRA設定キャッシュ
+            with gr.Row():
+                lora_cache_checkbox = gr.Checkbox(
+                    label=translate("LoRAの設定を再起動時再利用する"),
+                    value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
+                    info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
+                )
+
+            def update_lora_cache(value):
+                lora_state_cache.set_cache_enabled(value)
+                return None
+
+            lora_cache_checkbox.change(
+                fn=update_lora_cache, inputs=[lora_cache_checkbox], outputs=[]
+            )
 
             # セクション入力用のリストを初期化
             section_number_inputs = []
@@ -4910,19 +5028,19 @@ with block:
                         label=translate("LoRAモデル選択 1"),
                         choices=[],
                         value=None,
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     lora_dropdown2 = gr.Dropdown(
                         label=translate("LoRAモデル選択 2"),
                         choices=[],
                         value=None,
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     lora_dropdown3 = gr.Dropdown(
                         label=translate("LoRAモデル選択 3"),
                         choices=[],
                         value=None,
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     # スキャンボタン
                     lora_scan_button = gr.Button(translate("LoRAディレクトリを再スキャン"), variant="secondary")
@@ -5436,7 +5554,13 @@ with block:
             )
             progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
             progress_bar = gr.HTML('', elem_classes='no-generating-animation')
-            preview_image = gr.Image(label="Next Latents", height=200, visible=False)
+            preview_image = gr.Image(
+                label="Next Latents",
+                height=200,
+                visible=False,
+                elem_id="preview_image",
+                elem_classes="modal-image",
+            )
 
             # フレームサイズ切替用のUIコントロールは上部に移動したため削除
 
@@ -5681,9 +5805,9 @@ with block:
                 # 完了時のアラーム設定
                 alarm_default_value = saved_app_settings.get("alarm_on_completion", True) if saved_app_settings else True
                 alarm_on_completion = gr.Checkbox(
-                    label=translate("完了時にアラームを鳴らす(Windows)"),
+                    label=translate("完了時にアラームを鳴らす"),
                     value=alarm_default_value,
-                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします（Windows）"),
+                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします。"),
                     elem_classes="saveable-setting",
                     interactive=True
                 )
@@ -6031,7 +6155,7 @@ with block:
 
         if not is_valid:
             # 画像が無い場合はエラーメッセージを表示して終了
-            yield None, gr.update(visible=False), translate("エラー: 画像が選択されていません"), error_message, gr.update(interactive=True), gr.update(interactive=False), gr.update()
+            yield None, gr.update(visible=False), translate("エラー: 画像が選択されていません"), error_message, gr.update(interactive=True), gr.update(interactive=False), gr.update(interactive=False), gr.update()
             return
 
         # 画像がある場合は通常の処理を実行
@@ -6171,8 +6295,9 @@ with block:
     #  [35]batch_count, [36]frame_save_mode, [37]use_queue, [38]prompt_queue_file, [39]save_settings_on_start, [40]alarm_on_completion
     ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, image_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, section_settings, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion]
 
-    start_button.click(fn=validate_and_process_with_queue_check, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, queue_start_button, seed])
-    end_button.click(fn=end_process_enhanced, outputs=[end_button,queue_start_button])
+    start_button.click(fn=validate_and_process_with_queue_check, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, queue_start_button, seed])
+    end_button.click(fn=end_process_enhanced, outputs=[end_button, stop_after_button, queue_start_button], queue=False)
+    stop_after_button.click(fn=end_after_current_process_enhanced, outputs=[stop_after_button, queue_start_button], queue=False)
 
     # F1モードではセクション機能とキーフレームコピー機能を削除済み
 

@@ -1,4 +1,6 @@
 import os
+print(f"{os.path.basename(__file__)} : 起動開始....")
+
 import sys
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
 
@@ -17,6 +19,13 @@ vae_cache_enabled = False  # VAEキャッシュのチェックボックス状態
 current_prompt = None      # キューから読み込まれた現在のプロンプト
 current_seed = None        # キューから読み込まれた現在のシード値
 
+# Generation state flag for resync handling
+generation_active = False
+
+def is_generation_running():
+    """Return True if a generation job is currently active."""
+    return generation_active
+
 # 生成状態管理用グローバル変数
 generation_stopped = False      # 生成中断フラグ
 current_batch_data = None      # 現在のバッチデータ
@@ -26,6 +35,7 @@ import os
 import random
 import time
 import subprocess
+import shutil
 import traceback  # ログ出力用
 # クロスプラットフォーム対応のための条件付きインポート
 import yaml
@@ -53,11 +63,7 @@ args = parser.parse_args()
 from locales.i18n_extended import (set_lang, translate)
 set_lang(args.lang)
 
-try:
-    import winsound
-    HAS_WINSOUND = True
-except ImportError:
-    HAS_WINSOUND = False
+from eichi_utils.notification_utils import play_completion_sound
 import json
 import traceback
 from datetime import datetime, timedelta
@@ -120,6 +126,9 @@ from eichi_utils.lora_preset_manager import (
     load_lora_preset,
     get_preset_names
 )
+from eichi_utils import lora_state_cache
+from eichi_utils.path_utils import safe_path_join, ensure_dir
+from eichi_utils.error_utils import log_and_continue
 
 # キーフレーム処理モジュールをインポート
 from eichi_utils.keyframe_handler import (
@@ -155,7 +164,7 @@ from diffusers_helper.thread_utils import AsyncStream, async_run
 from diffusers_helper.gradio.progress_bar import make_progress_bar_css, make_progress_bar_html
 from transformers import SiglipImageProcessor, SiglipVisionModel
 from diffusers_helper.clip_vision import hf_clip_vision_encode
-from diffusers_helper.bucket_tools import find_nearest_bucket
+from diffusers_helper.bucket_tools import find_nearest_bucket, SAFE_RESOLUTIONS
 
 from eichi_utils.transformer_manager import TransformerManager
 from eichi_utils.text_encoder_manager import TextEncoderManager
@@ -169,6 +178,12 @@ print(translate('High-VRAM Mode: {0}').format(high_vram))
 # モデルを並列ダウンロードしておく
 from eichi_utils.model_downloader import ModelDownloader
 ModelDownloader().download_original()
+
+def _norm_dropdown(val):
+    """Return a clean str or None from a Gr.Dropdown value."""
+    if val in (None, False, True, 0, "0", 0.0) or val == translate("なし"):
+        return None
+    return str(val)
 
 # グローバルなモデル状態管理インスタンスを作成
 # 通常モードではuse_f1_model=Falseを指定（デフォルト値なので省略可）
@@ -228,12 +243,20 @@ else:
 
 # グローバル変数
 batch_stopped = False  # バッチ処理の停止フラグ
+stop_after_current = False  # 現在の生成完了後に停止するフラグ
+stop_after_step = False  # 現在のステップ完了後に停止するフラグ
 queue_enabled = False  # キュー機能の有効/無効フラグ
 queue_type = "prompt"  # キューのタイプ（"prompt" または "image"）
 prompt_queue_file_path = None  # プロンプトキューファイルのパス
 vae_cache_enabled = False  # VAEキャッシュの有効/無効フラグ
 image_queue_files = []  # イメージキューのファイルリスト
 input_folder_name_value = "inputs"  # 入力フォルダ名（デフォルト値）
+
+# Resync support - store last progress state
+last_progress_desc = ""
+last_progress_bar = ""
+last_preview_image = None
+last_output_filename = None
 
 # イメージキューのための画像ファイルリストを取得する関数（グローバル関数）
 def get_image_queue_files():
@@ -368,6 +391,7 @@ def set_generation_stopped(stopped=True):
         print(translate("生成中断フラグが設定されました"))
 
 @torch.no_grad()
+@log_and_continue("worker error")
 def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, alarm_on_completion=False):
     # グローバル変数を使用
     global vae_cache_enabled, current_prompt, generation_stopped, current_batch_data, transformer_model
@@ -427,7 +451,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
                 try:
                     # ファイルが存在し、読み込める場合
-                    if queue_file_path and os.path.exists(queue_file_path):
+                    if queue_file_path and isinstance(queue_file_path, (str, bytes, os.PathLike)) and os.path.exists(queue_file_path):
                         print(translate("プロンプトキューファイルを読み込みます: {0}").format(queue_file_path))
 
                         with open(queue_file_path, 'r', encoding='utf-8') as f:
@@ -576,7 +600,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
     has_any_image = has_any_image or (last_visible_section_image is not None)
     if not has_any_image:
         # UIに直接エラーメッセージを表示
-        stream.output_queue.push(('progress', (None, translate("画像が選択されていません\n生成を開始する前に「Image」欄または表示されている最後のキーフレーム画像に画像をアップロードしてください。これは叡智の始発点となる重要な画像です。"), make_progress_bar_html(0, translate('エラー')))))
+        push_progress(None, translate("画像が選択されていません\n生成を開始する前に「Image」欄または表示されている最後のキーフレーム画像に画像をアップロードしてください。これは叡智の始発点となる重要な画像です。"), 0, translate('エラー'))
         # 処理を終了
         stream.output_queue.push(('end', None))
         return
@@ -607,10 +631,38 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         print(translate("デフォルト出力フォルダを使用: {0}").format(outputs_folder))
 
     # フォルダが存在しない場合は作成
+    outputs_folder = ensure_dir(outputs_folder, "outputs")
     os.makedirs(outputs_folder, exist_ok=True)
 
     # 処理時間計測の開始
     process_start_time = time.time()
+    process_start_dt = datetime.now()
+
+    def push_progress(preview, desc, percent, hint):
+        now = datetime.now()
+        elapsed = now - process_start_dt
+        start_str = process_start_dt.strftime('%H:%M:%S')
+        now_str = now.strftime('%H:%M:%S')
+        elapsed_str = str(elapsed).split('.')[0]
+        if percent and percent > 0:
+            total_secs = elapsed.total_seconds() / (percent / 100)
+            est_dt = process_start_dt + timedelta(seconds=total_secs)
+            est_str = est_dt.strftime('%H:%M:%S')
+        else:
+            est_str = '--:--:--'
+        time_info = f"{start_str}▶{now_str} ({elapsed_str}) ▶{est_str}"
+        if desc:
+            desc = f"{desc}\n{time_info}"
+        else:
+            desc = time_info
+
+        bar_html = make_progress_bar_html(percent, hint)
+        global last_progress_desc, last_progress_bar, last_preview_image
+        last_progress_desc = desc
+        last_progress_bar = bar_html
+        last_preview_image = preview
+
+        stream.output_queue.push(('progress', (preview, desc, bar_html)))
 
     # グローバル変数で状態管理しているモデル変数を宣言する
     global transformer, text_encoder, text_encoder_2
@@ -655,7 +707,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
     print(translate("  - 各セクションのフレーム数: 約{0}フレーム (latent_window_size: {1})").format(frame_count, latent_window_size))
     print(translate("  - 合計セクション数: {0}").format(total_sections))
 
-    stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...'))))
+    push_progress(None, '', 0, 'Starting ...')
 
     try:
         # セクション設定の前処理
@@ -816,7 +868,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         # Text encoding
 
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate("Text encoding ...")))))
+        push_progress(None, '', 0, translate("Text encoding ..."))
 
         if not high_vram:
             fake_diffusers_current_device(text_encoder, gpu)  # since we only encode one text - that is one model move and one encode, offload is same time consumption since it is also one load and one encode.
@@ -870,7 +922,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             try:
                 tensor_path = tensor_data_input.name
                 print(translate("テンソルデータを読み込み: {0}").format(os.path.basename(tensor_path)))
-                stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate('Loading tensor data ...')))))
+                push_progress(None, '', 0, translate('Loading tensor data ...'))
 
                 # safetensorsからテンソルを読み込み
                 tensor_dict = sf.load_file(tensor_path)
@@ -897,14 +949,14 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         print(translate("警告: テンソルデータのフレーム数よりも、先頭フレーム削除数が大きく指定されているため、先頭フレーム削除は実施しません。"))
 
                     print(translate("テンソルデータ読み込み成功: shape={0}, dtype={1}").format(uploaded_tensor.shape, uploaded_tensor.dtype))
-                    stream.output_queue.push(('progress', (None, translate('Tensor data loaded successfully!'), make_progress_bar_html(10, translate('Tensor data loaded successfully!')))))
+                    push_progress(None, translate('Tensor data loaded successfully!'), 10, translate('Tensor data loaded successfully!'))
                 else:
                     print(translate("警告: テンソルデータに 'history_latents' キーが見つかりません"))
             except Exception as e:
                 print(translate("テンソルデータ読み込みエラー: {0}").format(e))
                 traceback.print_exc()
 
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate("Image processing ...")))))
+        push_progress(None, '', 0, translate("Image processing ..."))
 
         def preprocess_image(img_path_or_array, resolution=640):
             """Pathまたは画像配列を処理して適切なサイズに変換する"""
@@ -948,7 +1000,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         # VAE encoding
 
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate("VAE encoding ...")))))
+        push_progress(None, '', 0, translate("VAE encoding ..."))
 
         if not high_vram:
             load_model_as_complete(vae, target_device=gpu)
@@ -987,7 +1039,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
             # UI上でテンソルデータの情報を表示
             tensor_info = translate("テンソルデータ ({0}フレーム) を検出しました。動画生成後に後方に結合します。").format(uploaded_tensor.shape[2])
-            stream.output_queue.push(('progress', (None, tensor_info, make_progress_bar_html(10, translate('テンソルデータを後方に結合')))))
+            push_progress(None, tensor_info, 10, translate('テンソルデータを後方に結合'))
 
         # 常に入力画像から通常のエンコーディングを行う
         start_latent = vae_encode(input_image_pt, vae)
@@ -1010,7 +1062,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         # CLIP Vision
 
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate("CLIP Vision encoding ...")))))
+        push_progress(None, '', 0, translate("CLIP Vision encoding ..."))
 
         if not high_vram:
             load_model_as_complete(image_encoder, target_device=gpu)
@@ -1028,7 +1080,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         # Sampling
 
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, translate("Start sampling ...")))))
+        push_progress(None, '', 0, translate("Start sampling ..."))
 
         rnd = torch.Generator("cpu").manual_seed(seed)
         # latent_window_sizeが4.5の場合は特別に17フレームとする
@@ -1044,6 +1096,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         # ここでlatent_paddingsを再定義していたのが原因だったため、再定義を削除します
 
         # -------- LoRA 設定 START ---------
+
+        # sanitise raw UI values (can be bool when allow_custom_value=True)
+        lora_dropdown1 = _norm_dropdown(lora_dropdown1)
+        lora_dropdown2 = _norm_dropdown(lora_dropdown2)
+        lora_dropdown3 = _norm_dropdown(lora_dropdown3)
 
         # UI設定のuse_loraフラグ値を保存
         original_use_lora = use_lora
@@ -1062,18 +1119,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         if lora_mode == translate("ディレクトリから選択") and has_lora_support:
             # ディレクトリからドロップダウンで選択されたLoRAが1つでもあるか確認
             has_selected_lora = False
-            for dropdown in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
-                dropdown_value = dropdown.value if hasattr(dropdown, 'value') else dropdown
-                
-                # 通常の値が0や0.0などの数値の場合の特別処理（GradioのUIの問題によるもの）
-                if dropdown_value == 0 or dropdown_value == "0" or dropdown_value == 0.0:
-                    # 数値の0を"なし"として扱う
-                    dropdown_value = translate("なし")
-                
-                # 型チェックと文字列変換を追加
-                if not isinstance(dropdown_value, str) and dropdown_value is not None:
-                    dropdown_value = str(dropdown_value)
-                
+            for dropdown_value in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
                 if dropdown_value and dropdown_value != translate("なし"):
                     has_selected_lora = True
                     break
@@ -1155,56 +1201,30 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 dropdown_direct_values = {
                     "dropdown1": original_dropdowns["LoRA1"],
                     "dropdown2": original_dropdowns["LoRA2"],
-                    "dropdown3": original_dropdowns["LoRA3"]
+                    "dropdown3": original_dropdowns["LoRA3"],
                 }
-                
-                # 各ドロップダウンを処理
+
                 for dropdown_name, dropdown_direct_value in dropdown_direct_values.items():
-                    # ドロップダウンの値を直接使用                    
-                    # 特に第2ドロップダウンの処理を強化（問題が最も頻繁に発生している場所）
                     if dropdown_name == "dropdown2" and dropdown_direct_value == 0:
                         if isinstance(lora_dropdown2, str) and lora_dropdown2 != "0" and lora_dropdown2 != translate("なし"):
-                            # 元の引数の値が文字列で、有効な値なら使用
                             dropdown_direct_value = lora_dropdown2
-                    
-                    # 処理用の変数にコピー
+
                     dropdown_value = dropdown_direct_value
-                    
-                    # 通常の値が0や0.0などの数値の場合の特別処理（GradioのUIの問題によるもの）
-                    # 先に数値0かどうかをチェック（文字列変換前）
-                    if dropdown_value == 0 or dropdown_value == 0.0 or dropdown_value == "0":
-                        # 数値の0を"なし"として扱う
-                        print(translate("{name}の値が数値0として検出されました。'なし'として扱います").format(name=dropdown_name))
-                        dropdown_value = translate("なし")
-                    # この段階で文字列変換を強制的に行う（Gradioの型が入り乱れる問題に対処）
-                    elif dropdown_value is not None and not isinstance(dropdown_value, str):
-                        print(translate("{name}の前処理: 非文字列値が検出されたため文字列変換を実施: 値={1}, 型={2}").format(
-                            dropdown_name, dropdown_value, type(dropdown_value).__name__
-                        ))
-                        dropdown_value = str(dropdown_value)
-                    
-                    # 最終的な型チェック - 万一文字列になっていない場合の保険
-                    if dropdown_value is not None and not isinstance(dropdown_value, str):
-                        dropdown_value = str(dropdown_value)
-                                        
-                    if dropdown_value and dropdown_value != translate("なし"):
-                        lora_path = os.path.join(lora_dir, dropdown_value)
-                        if os.path.exists(lora_path):
-                            current_lora_paths.append(lora_path)
-                            print(translate("{name}を選択: {path}").format(name=dropdown_name, path=lora_path))
+
+                    if not dropdown_value or dropdown_value in (0, "0", translate("なし")):
+                        continue
+
+                    lora_path = safe_path_join(lora_dir, str(dropdown_value))
+                    if os.path.exists(lora_path):
+                        current_lora_paths.append(lora_path)
+                        print(translate("{name}を選択: {path}").format(name=dropdown_name, path=lora_path))
+                    else:
+                        lora_path_retry = safe_path_join(lora_dir, os.path.basename(str(dropdown_value)))
+                        if os.path.exists(lora_path_retry):
+                            current_lora_paths.append(lora_path_retry)
+                            print(translate("{name}を選択 (パス修正後): {path}").format(name=dropdown_name, path=lora_path_retry))
                         else:
-                            # パスを修正して再試行（単なるファイル名の場合）
-                            if os.path.dirname(lora_path) == lora_dir and not os.path.isabs(dropdown_value):
-                                # すでに正しく構築されているので再試行不要
-                                print(translate("選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
-                            else:
-                                # 直接ファイル名だけで試行
-                                lora_path_retry = os.path.join(lora_dir, os.path.basename(str(dropdown_value)))
-                                if os.path.exists(lora_path_retry):
-                                    current_lora_paths.append(lora_path_retry)
-                                    print(translate("{name}を選択 (パス修正後): {path}").format(name=dropdown_name, path=lora_path_retry))
-                                else:
-                                    print(translate("選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
+                            print(translate("選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
             else:
                 # ファイルアップロードモード
                 print(translate("LoRA読み込み方式: ファイルアップロード"))
@@ -1440,8 +1460,9 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                             raise
 
             if stream.input_queue.top() == 'end':
-                stream.output_queue.push(('end', None))
-                return
+                global batch_stopped
+                batch_stopped = True
+                return {'user_interrupt': True}
 
             # セクション固有のプロンプトがあれば使用する（事前にエンコードしたキャッシュを使用）
             current_llama_vec, current_clip_l_pooler, current_llama_attention_mask = process_section_prompt(i_section, section_map, llama_vec, clip_l_pooler, llama_attention_mask, section_prompt_embeddings)
@@ -1481,17 +1502,13 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
                 # 中断要求の安全な処理
                 if stream.input_queue.top() == 'end':
-                    print(translate("ユーザーによる中断要求を検知しています..."))
-                    # 安全な状態保存とリソース準備
-                    current_step = d.get('i', 0) + 1
-                    print(translate("中断時点: ステップ {0}/{1}").format(current_step, steps))
-                    
-                    # 中断通知を先に送信
-                    stream.output_queue.push(('end', None))
-                    
-                    # リソース状態をクリアしてから例外発生
-                    print(translate("中断処理を実行中..."))
-                    raise KeyboardInterrupt('User ends the task.')
+                    global batch_stopped
+                    batch_stopped = True
+                    return {'user_interrupt': True}
+
+                # 現在のステップで停止する指示がある場合は次のステップ開始前に終了
+                if stop_after_step and stream.input_queue.top() != 'end':
+                    stream.input_queue.push('end')
 
                 current_step = d['i'] + 1
                 percentage = int(100.0 * current_step / steps)
@@ -1499,7 +1516,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 # セクション情報を追加（現在のセクション/全セクション）
                 section_info = translate('セクション: {0}/{1}').format(i_section+1, total_sections)
                 desc = f"{section_info} " + translate('生成フレーム数: {total_generated_latent_frames}, 動画長: {video_length:.2f} 秒 (FPS-30). 動画が生成中です ...').format(section_info=section_info, total_generated_latent_frames=int(max(0, total_generated_latent_frames * 4 - 3)), video_length=max(0, (total_generated_latent_frames * 4 - 3) / 30))
-                stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
+                push_progress(preview, desc, percentage, hint)
                 return
 
             try:
@@ -1533,6 +1550,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     clean_latent_4x_indices=clean_latent_4x_indices,
                     callback=callback,
                 )
+                # ユーザー中断検出時のメッセージ表示
+                if isinstance(generated_latents, dict) and generated_latents.get('user_interrupt'):
+                    print(translate("バッチ内処理を完了します"))
+                else:
+                    print(translate("生成は正常に完了しました"))
             except KeyboardInterrupt as e:
                 print(translate("生成中断を検知: {0}").format(e))
                 # 確実なリソース解放とCUDA状態クリア
@@ -1884,13 +1906,13 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
                         print(translate("テンソルデータを後方に結合します: アップロードされたフレーム数 = {uploaded_frames}").format(uploaded_frames=uploaded_frames))
                         # UI上で進捗状況を更新
-                        stream.output_queue.push(('progress', (None, translate("テンソルデータ({uploaded_frames}フレーム)の結合を開始します...").format(uploaded_frames=uploaded_frames), make_progress_bar_html(80, translate('テンソルデータ結合準備')))))
+                        push_progress(None, translate("テンソルデータ({uploaded_frames}フレーム)の結合を開始します...").format(uploaded_frames=uploaded_frames), 80, translate('テンソルデータ結合準備'))
 
                         # テンソルデータを後方に結合する前に、互換性チェック
                         if uploaded_tensor.shape[3] != real_history_latents.shape[3] or uploaded_tensor.shape[4] != real_history_latents.shape[4]:
                             print(translate("警告: テンソルサイズが異なります: アップロード={0}, 現在の生成={1}").format(uploaded_tensor.shape, real_history_latents.shape))
                             print(translate("テンソルサイズの不一致のため、前方結合をスキップします"))
-                            stream.output_queue.push(('progress', (None, translate("テンソルサイズの不一致のため、前方結合をスキップしました"), make_progress_bar_html(85, translate('互換性エラー')))))
+                            push_progress(None, translate("テンソルサイズの不一致のため、前方結合をスキップしました"), 85, translate('互換性エラー'))
                         else:
                             # 生成データの末尾のフレームとテンソルデータの先頭のフレームを補間するフレームを追加する
                             if use_interpolation_section:
@@ -1929,14 +1951,15 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                         preview = einops.rearrange(preview, 'b c t h w -> (b h) (t w) c')
 
                                         if stream.input_queue.top() == 'end':
-                                            stream.output_queue.push(('end', None))
-                                            raise KeyboardInterrupt('User ends the task.')
+                                            global batch_stopped
+                                            batch_stopped = True
+                                            return {'user_interrupt': True}
 
                                         current_step = d['i'] + 1
                                         percentage = int(100.0 * current_step / steps)
                                         hint = translate('Sampling {0}/{1}').format(current_step, steps)
                                         desc = "補間データを生成中です ..."
-                                        stream.output_queue.push(('progress', (preview, desc, make_progress_bar_html(percentage, hint))))
+                                        push_progress(preview, desc, percentage, hint)
                                         return
 
                                     uploaded_tensor_size = 1 + 2 + 16
@@ -1989,6 +2012,10 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                         clean_latent_4x_indices=clean_latent_4x_indices_2,
                                         callback=callback_interpolation,
                                     )
+                                    if isinstance(generated_interpolation_latents, dict) and generated_interpolation_latents.get('user_interrupt'):
+                                        print(translate("バッチ内処理を完了します"))
+                                    else:
+                                        print(translate("生成は正常に完了しました"))
 
                                     # 補間された潜在変数を結合
                                     device = real_history_latents.device
@@ -2061,7 +2088,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                 # 進捗状況を更新
                                 chunk_progress = (chunk_idx + 1) / num_chunks * 100
                                 progress_message = translate("テンソルデータ結合中: チャンク {0}/{1} (フレーム {2}-{3}/{4})").format(chunk_idx+1, num_chunks, chunk_start+1, chunk_end, uploaded_frames)
-                                stream.output_queue.push(('progress', (None, progress_message, make_progress_bar_html(int(80 + chunk_progress * 0.1), translate('テンソルデータ処理中')))))
+                                push_progress(None, progress_message, int(80 + chunk_progress * 0.1), translate('テンソルデータ処理中'))
 
                                 # 現在のチャンクを取得
                                 current_chunk = processed_tensor[:, :, chunk_start:chunk_end, :, :]
@@ -2083,7 +2110,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                     # チャンクをデコード
                                     # VAEデコードは時間がかかるため、進行中であることを表示
                                     print(translate("チャンク{0}のVAEデコード開始...").format(chunk_idx+1))
-                                    stream.output_queue.push(('progress', (None, translate("チャンク{0}/{1}のVAEデコード中...").format(chunk_idx+1, num_chunks), make_progress_bar_html(int(80 + chunk_progress * 0.1), translate('デコード処理')))))
+                                    push_progress(None, translate("チャンク{0}/{1}のVAEデコード中...").format(chunk_idx+1, num_chunks), int(80 + chunk_progress * 0.1), translate('デコード処理'))
 
                                     # 明示的にデバイスを合わせる
                                     if current_chunk.device != vae.device:
@@ -2136,7 +2163,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                         # 5チャンクごと、または最後のチャンクで保存
                                         interim_output_filename = os.path.join(outputs_folder, f'{job_id}_combined_interim_{chunk_idx+1}.mp4')
                                         print(translate("中間結果を保存中: チャンク{0}/{1}").format(chunk_idx+1, num_chunks))
-                                        stream.output_queue.push(('progress', (None, translate("中間結果のMP4変換中... (チャンク{0}/{1})").format(chunk_idx+1, num_chunks), make_progress_bar_html(int(85 + chunk_progress * 0.1), translate('MP4保存中')))))
+                                        push_progress(None, translate("中間結果のMP4変換中... (チャンク{0}/{1})").format(chunk_idx+1, num_chunks), int(85 + chunk_progress * 0.1), translate('MP4保存中'))
 
                                         # MP4として保存
                                         save_bcthw_as_mp4(combined_history_pixels, interim_output_filename, fps=30, crf=mp4_crf)
@@ -2160,7 +2187,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                     if torch.cuda.is_available():
                                         print(translate("  - GPU使用量: {0:.2f}GB/{1:.2f}GB").format(torch.cuda.memory_allocated()/1024**3, torch.cuda.get_device_properties(0).total_memory/1024**3))
 
-                                    stream.output_queue.push(('progress', (None, translate("エラー: チャンク{0}の処理に失敗しました - {1}").format(chunk_idx+1, str(e)), make_progress_bar_html(90, translate('エラー')))))
+                                    push_progress(None, translate("エラー: チャンク{0}の処理に失敗しました - {1}").format(chunk_idx+1, str(e)), 90, translate('エラー'))
                                     break
 
                             # 処理完了後に明示的にメモリ解放
@@ -2175,7 +2202,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                             if combined_history_pixels is not None:
                                 # 最終結果の保存
                                 print(translate("最終結果を保存中: 全{0}チャンク完了").format(num_chunks))
-                                stream.output_queue.push(('progress', (None, translate("結合した動画をMP4に変換中..."), make_progress_bar_html(95, translate('最終MP4変換処理')))))
+                                push_progress(None, translate("結合した動画をMP4に変換中..."), 95, translate('最終MP4変換処理'))
 
                                 # 最終的な結合ファイル名
                                 combined_output_filename = os.path.join(outputs_folder, f'{job_id}_combined.mp4')
@@ -2207,7 +2234,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                         print(translate("合計 {0} 個の中間ファイルを削除しました").format(len(deleted_files)))
                                         # 削除ファイル名をユーザーに表示
                                         files_str = ', '.join(deleted_files)
-                                        stream.output_queue.push(('progress', (None, translate("中間ファイルを削除しました: {0}").format(files_str), make_progress_bar_html(97, translate('クリーンアップ完了')))))
+                                        push_progress(None, translate("中間ファイルを削除しました: {0}").format(files_str), 97, translate('クリーンアップ完了'))
                                     else:
                                         print(translate("削除対象の中間ファイルは見つかりませんでした"))
                                 except Exception as e:
@@ -2225,10 +2252,10 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                 print(translate("データサイズ: {0:.2f} MB（制限無し）").format(combined_size_mb))
 
                                 # UI上で完了メッセージを表示
-                                stream.output_queue.push(('progress', (None, translate("テンソルデータ({0}フレーム)と動画({1}フレーム)の結合が完了しました。\n合計フレーム数: {2}フレーム ({3:.2f}秒) - サイズ制限なし").format(uploaded_frames, original_frames, combined_frames, combined_frames / 30), make_progress_bar_html(100, translate('結合完了')))))
+                                push_progress(None, translate("テンソルデータ({0}フレーム)と動画({1}フレーム)の結合が完了しました。\n合計フレーム数: {2}フレーム ({3:.2f}秒) - サイズ制限なし").format(uploaded_frames, original_frames, combined_frames, combined_frames / 30), 100, translate('結合完了'))
                             else:
                                 print(translate("テンソルデータの結合に失敗しました。"))
-                                stream.output_queue.push(('progress', (None, translate("テンソルデータの結合に失敗しました。"), make_progress_bar_html(100, translate('エラー')))))
+                                push_progress(None, translate("テンソルデータの結合に失敗しました。"), 100, translate('エラー'))
 
                             # 正しく結合された動画はすでに生成済みなので、ここでの処理は不要
 
@@ -2252,20 +2279,17 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                             print(translate("データサイズ: {0:.2f} MB（制限無し）").format(combined_size_mb))
 
                             # UI上で完了メッセージを表示
-                            stream.output_queue.push(('progress', (None, translate("テンソルデータ({0}フレーム)と動画({1}フレーム)の結合が完了しました。\n合計フレーム数: {2}フレーム ({3:.2f}秒)").format(uploaded_frames, original_frames, combined_frames, combined_frames / 30), make_progress_bar_html(100, translate('結合完了')))))
+                            push_progress(None, translate("テンソルデータ({0}フレーム)と動画({1}フレーム)の結合が完了しました。\n合計フレーム数: {2}フレーム ({3:.2f}秒)").format(uploaded_frames, original_frames, combined_frames, combined_frames / 30), 100, translate('結合完了'))
                     except Exception as e:
                         print(translate("テンソルデータ結合中にエラーが発生しました: {0}").format(e))
                         traceback.print_exc()
-                        stream.output_queue.push(('progress', (None, translate("エラー: テンソルデータ結合に失敗しました - {0}").format(str(e)), make_progress_bar_html(100, translate('エラー')))))
+                        push_progress(None, translate("エラー: テンソルデータ結合に失敗しました - {0}").format(str(e)), 100, translate('エラー'))
 
                 # 処理終了時に通知
                 # アラーム再生条件
-                if alarm_on_completion == True:  # 明示的にTrueかチェック
-                    if HAS_WINSOUND:
-                        print("Playing alarm sound (Windows)")
-                        winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
-                    else:
-                        print(translate("処理が完了しました"))  # Linuxでの代替通知
+                if alarm_on_completion is True:  # 明示的にTrueかチェック
+                    if not play_completion_sound():
+                        print(translate("処理が完了しました"))
                 else:
                     print(translate("Alarm skip (値: {0})").format(alarm_on_completion))
 
@@ -2294,7 +2318,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         tensor_size_mb = (tensor_to_save.element_size() * tensor_to_save.nelement()) / (1024 * 1024)
 
                         print(translate("テンソルデータを保存中... shape: {shape}, フレーム数: {frames}, サイズ: {size:.2f} MB").format(shape=tensor_to_save.shape, frames=tensor_to_save.shape[2], size=tensor_size_mb))
-                        stream.output_queue.push(('progress', (None, translate('テンソルデータを保存中... ({frames}フレーム)').format(frames=tensor_to_save.shape[2]), make_progress_bar_html(95, translate('テンソルデータの保存')))))
+                        push_progress(None, translate('テンソルデータを保存中... ({frames}フレーム)').format(frames=tensor_to_save.shape[2]), 95, translate('テンソルデータの保存'))
 
                         # メタデータの準備（フレーム数も含める）
                         metadata = torch.tensor([height, width, tensor_to_save.shape[2]], dtype=torch.int32)
@@ -2309,7 +2333,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                         print(translate("テンソルデータを保存しました: {path}").format(path=tensor_file_path))
                         print(translate("保存済みテンソルデータ情報: {frames}フレーム, {size:.2f} MB").format(frames=tensor_to_save.shape[2], size=tensor_size_mb))
                         print(translate("=== テンソルデータ保存処理完了 ==="))
-                        stream.output_queue.push(('progress', (None, translate("テンソルデータが保存されました: {path} ({frames}フレーム, {size:.2f} MB)").format(path=os.path.basename(tensor_file_path), frames=tensor_to_save.shape[2], size=tensor_size_mb), make_progress_bar_html(100, translate('処理完了')))))
+                        push_progress(None, translate("テンソルデータが保存されました: {path} ({frames}フレーム, {size:.2f} MB)").format(path=os.path.basename(tensor_file_path), frames=tensor_to_save.shape[2], size=tensor_size_mb), 100, translate('処理完了'))
 
                         # アップロードされたテンソルデータがあれば、それも結合したものを保存する
                         if tensor_data_input is not None and uploaded_tensor is not None:
@@ -2351,14 +2375,14 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                                     print(translate("結合テンソルを保存しました: {path}").format(path=tensor_combined_path))
                                     print(translate("結合テンソル情報: 合計{0}フレーム ({1}+{2}), {3:.2f} MB").format(combined_frames, tensor_to_save.shape[2], uploaded_tensor.shape[2], combined_size_mb))
                                     print(translate("=== テンソルデータ結合処理完了 ==="))
-                                    stream.output_queue.push(('progress', (None, translate("テンソルデータ結合が保存されました: 合計{frames}フレーム").format(frames=combined_frames), make_progress_bar_html(100, translate('結合テンソル保存完了')))))
+                                    push_progress(None, translate("テンソルデータ結合が保存されました: 合計{frames}フレーム").format(frames=combined_frames), 100, translate('結合テンソル保存完了'))
                             except Exception as e:
                                 print(translate("テンソルデータ結合保存エラー: {0}").format(e))
                                 traceback.print_exc()
                     except Exception as e:
                         print(translate("テンソルデータ保存エラー: {0}").format(e))
                         traceback.print_exc()
-                        stream.output_queue.push(('progress', (None, translate("テンソルデータの保存中にエラーが発生しました。"), make_progress_bar_html(100, translate('処理完了')))))
+                        push_progress(None, translate("テンソルデータの保存中にエラーが発生しました。"), 100, translate('処理完了'))
 
                 # 全体の処理時間を計算
                 process_end_time = time.time()
@@ -2385,7 +2409,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     # 通常の完了メッセージ
                     completion_message = translate("すべてのセクション({sections}/{total_sections})が完了しました。全体の処理時間: {time}").format(sections=total_sections, total_sections=total_sections, time=time_str)
 
-                stream.output_queue.push(('progress', (None, completion_message, make_progress_bar_html(100, translate('処理完了')))))
+                push_progress(None, completion_message, 100, translate('処理完了'))
 
                 # 中間ファイルの削除処理
                 if not keep_section_videos:
@@ -2416,7 +2440,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     if deleted_count > 0:
                         print(translate("{0}個の中間ファイルを削除しました。最終ファイルは保存されています: {1}").format(deleted_count, final_video_name))
                         final_message = translate("中間ファイルを削除しました。最終動画と結合動画は保存されています。")
-                        stream.output_queue.push(('progress', (None, final_message, make_progress_bar_html(100, translate('処理完了')))))
+                        push_progress(None, final_message, 100, translate('処理完了'))
 
                 break
 
@@ -2519,10 +2543,15 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     global prompt_queue_file_path
     global vae_cache_enabled
     global image_queue_files
+    global stop_after_current, stop_after_step
+    global generation_active
+    global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
 
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
-
+    stop_after_current = False
+    stop_after_step = False
+    generation_active = True
     # frame_save_modeから save_latent_frames と save_last_section_frames を算出
     save_latent_frames = False
     save_last_section_frames = False
@@ -2554,7 +2583,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         print(translate("バッチ処理回数が無効です。デフォルト値の1を使用します: {0}").format(batch_count))
         batch_count = 1  # デフォルト値
     # プロンプトキューが有効な場合は行数も表示
-    if bool(use_queue) and queue_type == "prompt" and prompt_queue_file_path is not None and os.path.exists(prompt_queue_file_path):
+    if bool(use_queue) and queue_type == "prompt" \
+        and isinstance(prompt_queue_file_path, (str, bytes, os.PathLike)) \
+        and os.path.exists(prompt_queue_file_path):
         try:
             with open(prompt_queue_file_path, 'r', encoding='utf-8') as f:
                 prompt_lines = [line.strip() for line in f.readlines() if line.strip()]
@@ -2625,8 +2656,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     if lora_mode == translate("ディレクトリから選択") and has_lora_support:
         # ディレクトリからドロップダウンで選択されたLoRAが1つでもあるか確認
         has_selected_lora = False
-        for dropdown in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
-            dropdown_value = dropdown.value if hasattr(dropdown, 'value') else dropdown
+        for dropdown_value in [lora_dropdown1, lora_dropdown2, lora_dropdown3]:
             if dropdown_value and dropdown_value != translate("なし"):
                 has_selected_lora = True
                 break
@@ -2650,24 +2680,17 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             selected_lora_names = []
             
             # 各ドロップダウンを確認
-            for dropdown, dropdown_name in [(lora_dropdown1, "LoRA1"), (lora_dropdown2, "LoRA2"), (lora_dropdown3, "LoRA3")]:
-                # ドロップダウンの値を取得（gr.Dropdownオブジェクトの場合はvalueプロパティを使用）
-                dropdown_value = dropdown.value if hasattr(dropdown, 'value') else dropdown
-                
-                # 通常の値が0や0.0などの数値の場合の特別処理（GradioのUIの問題によるもの）
-                if dropdown_value == 0 or dropdown_value == "0" or dropdown_value == 0.0:
-                    # 数値の0を"なし"として扱う
-                    dropdown_value = translate("なし")
-                
-                # 型チェックと文字列変換を追加
-                if not isinstance(dropdown_value, str) and dropdown_value is not None:
-                    dropdown_value = str(dropdown_value)
-                
-                if dropdown_value and dropdown_value != translate("なし"):
-                    lora_path = os.path.join(lora_dir, dropdown_value)
-                    # よりわかりやすい表記に
-                    model_name = f"LoRA{dropdown_name[-1]}: {dropdown_value}"
-                    selected_lora_names.append(model_name)
+            for dropdown_value, dropdown_name in [
+                (lora_dropdown1, "LoRA1"),
+                (lora_dropdown2, "LoRA2"),
+                (lora_dropdown3, "LoRA3"),
+            ]:
+                if not dropdown_value or dropdown_value == translate("なし"):
+                    continue
+
+                lora_path = safe_path_join(lora_dir, str(dropdown_value))
+                model_name = f"LoRA{dropdown_name[-1]}: {dropdown_value}"
+                selected_lora_names.append(model_name)
             
             # 選択されたLoRAモデルの情報出力を明確に
             if selected_lora_names:
@@ -2758,6 +2781,8 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
     # バッチ処理の全体停止用フラグ
     batch_stopped = False
+    stop_after_current = False
+    stop_after_step = False
 
     # 元のシード値を保存（バッチ処理用）
     original_seed = seed
@@ -2777,12 +2802,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(value=seed)
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(value=seed)
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update()
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
     stream = AsyncStream()
 
@@ -2796,8 +2821,11 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             '',
             gr.update(interactive=True),
             gr.update(interactive=False, value=translate("End Generation")),
+            gr.update(interactive=False),
             gr.update()
         )
+        generation_active = False
+        stream = AsyncStream()
         return
 
     # バッチ処理ループの開始
@@ -2812,6 +2840,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 '',
                 gr.update(interactive=True),
                 gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False),
                 gr.update()
             )
             break
@@ -2821,7 +2850,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             # キューが有効な場合はその情報も表示
             if bool(use_queue):
                 # プロンプトキューの場合
-                if queue_type == "prompt" and prompt_queue_file_path is not None and os.path.exists(prompt_queue_file_path):
+                if queue_type == "prompt" \
+                        and isinstance(prompt_queue_file_path, (str, bytes, os.PathLike)) \
+                        and os.path.exists(prompt_queue_file_path):
                     try:
                         with open(prompt_queue_file_path, 'r', encoding='utf-8') as f:
                             prompt_lines = [line.strip() for line in f.readlines() if line.strip()]
@@ -2862,7 +2893,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update()
+            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
         # バッチインデックスに応じてSEED値を設定
         # ランダムシード使用判定を再度実施
@@ -2898,13 +2929,16 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         if batch_stopped:
             print(translate("バッチ処理が中断されました。worker関数の実行をキャンセルします。"))
             # 中断メッセージをUIに表示
-            yield (gr.skip(),
-                   gr.update(visible=False),
-                   translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index, batch_count),
-                   '',
-                   gr.update(interactive=True),
-                   gr.update(interactive=False, value=translate("End Generation")),
-                   gr.update())
+            yield (
+                gr.skip(),
+                gr.update(visible=False),
+                translate("バッチ処理が中断されました（{0}/{1}）").format(batch_index, batch_count),
+                '',
+                gr.update(interactive=True),
+                gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False),
+                gr.update()
+            )
             break
 
         # GPUメモリの設定値を出力し、正しい型に変換
@@ -3062,11 +3096,13 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         batch_output_filename = None
 
         # 現在のバッチの処理結果を取得
+        listener_queue = stream.output_queue.subscribe()
         while True:
-            flag, data = stream.output_queue.next()
+            flag, data = listener_queue.next()
 
             if flag == 'file':
                 batch_output_filename = data
+                last_output_filename = data
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (
                     batch_output_filename if batch_output_filename is not None else gr.skip(),
@@ -3074,6 +3110,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     gr.update(),
                     gr.update(),
                     gr.update(interactive=False),
+                    gr.update(interactive=True),
                     gr.update(interactive=True),
                     gr.update(),
                 )
@@ -3085,7 +3122,9 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 batch_info = ""
                 if batch_count > 1:
                     # プロンプトキューが有効な場合はその情報も表示
-                    if bool(use_queue) and queue_type == "prompt" and prompt_queue_file_path is not None and os.path.exists(prompt_queue_file_path):
+                    if bool(use_queue) and queue_type == "prompt" \
+                            and isinstance(prompt_queue_file_path, (str, bytes, os.PathLike)) \
+                            and os.path.exists(prompt_queue_file_path):
                         try:
                             with open(prompt_queue_file_path, 'r', encoding='utf-8') as f:
                                 prompt_lines = [line.strip() for line in f.readlines() if line.strip()]
@@ -3111,7 +3150,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 if current_seed_info not in desc:
                     desc = desc + "\n\n" + current_seed_info
                 # preview_imageを明示的に設定
-                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update()
+                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
             if flag == 'end':
                 # このバッチの処理が終了
@@ -3122,6 +3161,10 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         completion_message = translate("バッチ処理が中止されました（{0}/{1}）").format(batch_index + 1, batch_count)
                     else:
                         completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(batch_count, batch_count)
+                    last_output_filename = batch_output_filename
+                    last_progress_desc = completion_message
+                    last_progress_bar = ''
+                    last_preview_image = None
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
                         gr.update(value=None, visible=False),
@@ -3129,6 +3172,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         '',
                         gr.update(interactive=True),
                         gr.update(interactive=False, value=translate("End Generation")),
+                        gr.update(interactive=False),
                         gr.update()
                     )
                 else:
@@ -3141,6 +3185,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                         '',
                         gr.update(interactive=False),
                         gr.update(interactive=True),
+                        gr.update(interactive=True),
                         gr.update()
                     )
                 break
@@ -3151,20 +3196,155 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # バッチ処理が停止されている場合はループを抜ける
         if batch_stopped:
             print(translate("バッチ処理ループを中断します"))
+            last_output_filename = batch_output_filename
+            yield (
+                batch_output_filename if batch_output_filename is not None else gr.skip(),
+                gr.update(value=None, visible=False),
+                translate("バッチ処理が中断されました"),
+                '',
+                gr.update(interactive=True),
+                gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False),
+                gr.update(),
+            )
             break
+
+    generation_active = False
+    stream = AsyncStream()
 
 def end_process():
     global stream
-    global batch_stopped
+    global batch_stopped, generation_active
 
     # 現在のバッチと次のバッチ処理を全て停止するフラグを設定
     batch_stopped = True
     print(translate("停止ボタンが押されました。バッチ処理を停止します..."))
     # 現在実行中のバッチを停止
     stream.input_queue.push('end')
+    generation_active = False
 
     # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
     return gr.update(value=translate("停止処理中..."))
+
+def end_after_current_process():
+    """現在の生成完了後に停止する処理"""
+    global batch_stopped, stop_after_current, stream
+
+    if not stop_after_current:
+        batch_stopped = True
+        stop_after_current = True
+        if stream is not None and stream.input_queue.top() != 'end':
+            stream.input_queue.push('end')
+        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+
+    return gr.update(value=translate("打ち切り処理中..."), interactive=False)
+
+def end_after_step_process():
+    """現在のステップ完了後に停止する処理"""
+    global batch_stopped, stop_after_current, stop_after_step, stream
+
+    if not stop_after_step:
+        batch_stopped = True
+        stop_after_current = True
+        stop_after_step = True
+        print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
+
+    return gr.update(value=translate("停止処理中..."), interactive=False)
+
+def resync_status_handler():
+    """Resume streaming progress after page reload."""
+    global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
+    global current_seed, generation_active, stream
+
+    running = is_generation_running()
+    yield (
+        last_output_filename if last_output_filename is not None else gr.skip(),
+        gr.update(visible=last_preview_image is not None, value=last_preview_image),
+        last_progress_desc,
+        last_progress_bar,
+        gr.update(interactive=not running, value=translate("Start Generation")),
+        gr.update(interactive=running, value=translate("End Generation")),
+        gr.update(interactive=running),
+        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+    )
+
+    if not running or stream is None or not hasattr(stream, "output_queue"):
+        return
+
+    listener_queue = stream.output_queue.subscribe()
+    while True:
+        try:
+            flag, data = listener_queue.next()
+        except Exception:
+            generation_active = False
+            break
+
+        if flag == 'file':
+            last_output_filename = data
+            yield (
+                last_output_filename if last_output_filename is not None else gr.skip(),
+                gr.update(value=None, visible=False),
+                gr.update(),
+                gr.update(),
+                gr.update(interactive=False),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+            )
+
+        if flag == 'progress':
+            preview, desc, html = data
+            last_preview_image = preview
+            last_progress_desc = desc
+            last_progress_bar = html
+            yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(value=current_seed) if current_seed is not None else gr.skip()
+
+        if flag == 'end':
+            generation_active = False
+            last_output_filename = last_output_filename or data
+            yield (
+                last_output_filename if last_output_filename is not None else gr.skip(),
+                gr.update(value=None, visible=False),
+                last_progress_desc,
+                last_progress_bar,
+                gr.update(interactive=True, value=translate("Start Generation")),
+                gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False),
+                gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+            )
+            try:
+                stream.output_queue.clear()
+            except Exception:
+                pass
+            return
+
+    # If we exit the loop without receiving an 'end' flag, ensure the state is reset
+    yield (
+        last_output_filename if last_output_filename is not None else gr.skip(),
+        gr.update(value=None, visible=False),
+        last_progress_desc,
+        last_progress_bar,
+        gr.update(interactive=True, value=translate("Start Generation")),
+        gr.update(interactive=False, value=translate("End Generation")),
+        gr.update(interactive=False),
+        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+    )
+    try:
+        stream.output_queue.clear()
+    except Exception:
+        pass
+
+def end_after_step_process():
+    """現在のステップ完了後に停止する処理"""
+    global batch_stopped, stop_after_current, stop_after_step, stream
+
+    if not stop_after_step:
+        batch_stopped = True
+        stop_after_current = True
+        stop_after_step = True
+        print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
+
+    return gr.update(value=translate("停止処理中..."), interactive=False)
 
 # 既存のQuick Prompts（初期化時にプリセットに変換されるので、互換性のために残す）
 quick_prompts = [
@@ -3177,14 +3357,23 @@ quick_prompts = [
 quick_prompts = [[x] for x in quick_prompts]
 
 css = get_app_css()
+with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
+    css += f.read()
 
 # アプリケーション起動時に保存された設定を読み込む
 from eichi_utils.settings_manager import load_app_settings
 saved_app_settings = load_app_settings()
+if saved_app_settings:
+    lora_state_cache.set_cache_enabled(saved_app_settings.get("lora_cache", False))
 
-block = gr.Blocks(css=css).queue()
+modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
+with open(modal_js_path, encoding="utf8") as f:
+    modal_js = f.read()
+block = gr.Blocks(css=css, js=modal_js).queue()
+
 with block:
     gr.HTML('<h1>FramePack<span class="title-suffix">-eichi</span></h1>')
+    gr.HTML('<dialog id="modal_dlg"><img /></dialog>')
 
     # 一番上の行に「生成モード、セクションフレームサイズ、オールパディング、動画長」を配置
     with gr.Row():
@@ -3243,7 +3432,14 @@ with block:
         with gr.Column():
             # Final Frameの上に説明を追加
             gr.Markdown(translate("**Finalは最後の画像、Imageは最初の画像(最終キーフレーム画像といずれか必須)となります。**"))
-            end_frame = gr.Image(sources=['upload', 'clipboard'], type="filepath", label=translate("Final Frame (Optional)"), height=320)
+            end_frame = gr.Image(
+                sources=['upload', 'clipboard'],
+                type="filepath",
+                label=translate("Final Frame (Optional)"),
+                height=320,
+                elem_id="end_frame_image",
+                elem_classes="modal-image",
+            )
 
             # テンソルデータ設定をグループ化して灰色のタイトルバーに変更
             with gr.Group():
@@ -3361,9 +3557,9 @@ with block:
                     with gr.Column(scale=2):
                         resolution = gr.Dropdown(
                             label=translate("解像度"),
-                            choices=[512, 640, 768, 960, 1080],
+                            choices=SAFE_RESOLUTIONS,
                             value=saved_app_settings.get("resolution", 640) if saved_app_settings else 640,
-                            info=translate("出力動画の基準解像度。640推奨。960/1080は高負荷・高メモリ消費"),
+                            info=translate("出力動画の基準解像度。640推奨。高解像度は高負荷・高メモリ消費"),
                             elem_classes="saveable-setting"
                         )
                     with gr.Column(scale=1):
@@ -3402,7 +3598,7 @@ with block:
 
                 # イメージキュー用グループ
                 with gr.Group(visible=False) as image_queue_group:
-                    gr.Markdown(translate("※ 1回目はImage画像を使用し、2回目以降は入力フォルダの画像ファイルを名前順に使用します。\n※ 画像と同名のテキストファイル（例：image1.jpg → image1.txt）があれば、その内容を自動的にプロンプトとして使用します。\n※ バッチ回数が全画像数を超える場合、残りはImage画像で処理されます。\n※ バッチ処理回数が1でもキュー回数が優先されます。"))
+                    gr.Markdown(translate("※ 1回目はImage画像を使用し、2回目以降は入力フォルダの画像ファイルを修正日時の昇順で使用します。\n※ 画像と同名のテキストファイル（例：image1.jpg → image1.txt）があれば、その内容を自動的にプロンプトとして使用します。\n※ バッチ回数が全画像数を超える場合、残りはImage画像で処理されます。\n※ バッチ処理回数が1でもキュー回数が優先されます。"))
 
                     # 入力フォルダ設定
                     with gr.Row():
@@ -3456,16 +3652,8 @@ with block:
                         # 画像ファイルリストを更新
                         get_image_queue_files()
 
-                        # プラットフォームに応じてフォルダを開く
                         try:
-                            if os.name == 'nt':  # Windows
-                                os.startfile(input_dir)
-                            elif os.name == 'posix':  # macOS, Linux
-                                if sys.platform == 'darwin':  # macOS
-                                    subprocess.Popen(['open', input_dir])
-                                else:  # Linux
-                                    subprocess.Popen(['xdg-open', input_dir])
-                            print(translate("入力フォルダを開きました: {0}").format(input_dir))
+                            open_output_folder(input_dir)
                             return translate("設定を保存し、入力フォルダを開きました")
                         except Exception as e:
                             error_msg = translate("フォルダを開けませんでした: {0}").format(str(e))
@@ -3474,20 +3662,26 @@ with block:
 
                 # ファイルアップロード時のイベントハンドラ
                 def handle_file_upload(file_obj):
+                    """アップロードされたファイル情報を処理する"""
                     global prompt_queue_file_path
 
                     if file_obj is not None:
                         print(translate("ファイルアップロード検出: 型={0}").format(type(file_obj).__name__))
 
+                        # 正規のファイルオブジェクトか、パスとして扱える型かを確認
                         if hasattr(file_obj, 'name'):
                             prompt_queue_file_path = file_obj.name
                             print(translate("アップロードファイルパス保存: {0}").format(prompt_queue_file_path))
-                        else:
+                        elif isinstance(file_obj, (str, bytes, os.PathLike)):
                             prompt_queue_file_path = file_obj
                             print(translate("アップロードファイルデータ保存: {0}").format(file_obj))
+                        else:
+                            # bool などの予期しない型の場合は無効として扱う
+                            prompt_queue_file_path = None
+                            print(translate("無効なアップロードオブジェクトを受信: 型={0}").format(type(file_obj).__name__))
                     else:
                         prompt_queue_file_path = None
-                        print("ファイルアップロード解除")
+                        print(translate("ファイルアップロード解除"))
 
                     return file_obj
 
@@ -3579,6 +3773,9 @@ with block:
             with gr.Row():
                 start_button = gr.Button(value=translate("Start Generation"))
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
+                stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
+                stop_step_button = gr.Button(value=translate("このステップで打ち切り"), interactive=False)
+                resync_status_btn = gr.Button(value=translate("🔃 Resync Status"), variant="secondary")
 
             # FP8最適化設定
             with gr.Row():
@@ -3587,6 +3784,22 @@ with block:
                     value=True,
                     info=translate("メモリ使用量を削減し速度を改善（PyTorch 2.1以上が必要）")
                 )
+
+            # LoRA設定キャッシュ
+            with gr.Row():
+                lora_cache_checkbox = gr.Checkbox(
+                    label=translate("LoRAの設定を再起動時再利用する"),
+                    value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
+                    info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
+                )
+
+            def update_lora_cache(value):
+                lora_state_cache.set_cache_enabled(value)
+                return None
+
+            lora_cache_checkbox.change(
+                fn=update_lora_cache, inputs=[lora_cache_checkbox], outputs=[]
+            )
 
             # セクション入力用のリストを初期化
             section_number_inputs = []
@@ -3700,7 +3913,13 @@ with block:
 
                             # 右側にキーフレーム画像のみ配置
                             with gr.Column(scale=2):
-                                section_image = gr.Image(label=translate("キーフレーム画像 {0}").format(i), sources="upload", type="filepath", height=200)
+                                section_image = gr.Image(
+                                    label=translate("キーフレーム画像 {0}").format(i),
+                                    sources="upload",
+                                    type="filepath",
+                                    height=200,
+                                    elem_classes="modal-image",
+                                )
 
                                 # プロンプト変更時にStateを更新するハンドラー
                                 def update_prompt_state(prompt_value, section_idx=i):
@@ -3915,7 +4134,14 @@ with block:
                         outputs=[section_image_inputs[0], section_image_inputs[1]]
                     )
 
-            input_image = gr.Image(sources=['upload', 'clipboard'], type="filepath", label="Image", height=320)
+            input_image = gr.Image(
+                sources=['upload', 'clipboard'],
+                type="filepath",
+                label="Image",
+                height=320,
+                elem_id="input_image",
+                elem_classes="modal-image",
+            )
 
             # メタデータ抽出関数を定義（後で登録する）
             def update_from_image_metadata(image_path, copy_enabled=False):
@@ -4012,19 +4238,19 @@ with block:
                         label=translate("LoRAモデル選択 1"),
                         choices=initial_lora_choices,
                         value=translate("なし"),
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     lora_dropdown2 = gr.Dropdown(
                         label=translate("LoRAモデル選択 2"),
                         choices=initial_lora_choices,
                         value=translate("なし"),
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     lora_dropdown3 = gr.Dropdown(
                         label=translate("LoRAモデル選択 3"),
                         choices=initial_lora_choices,
                         value=translate("なし"),
-                        allow_custom_value=False
+                        allow_custom_value=True
                     )
                     # スキャンボタン
                     lora_scan_button = gr.Button(translate("LoRAディレクトリを再スキャン"), variant="secondary")
@@ -4076,6 +4302,10 @@ with block:
                     """./loraディレクトリからLoRAモデルファイルを検索する関数"""
                     lora_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lora')
                     choices = []
+
+                    # 現在の作業ディレクトリとLoRAディレクトリのパスを表示
+                    print(translate("現在の作業ディレクトリ: {0}").format(os.getcwd()))
+                    print(translate("LoRAディレクトリパス: {0}").format(lora_dir))
                     
                     # ディレクトリが存在しない場合は作成
                     if not os.path.exists(lora_dir):
@@ -5266,7 +5496,13 @@ with block:
             )
             progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
             progress_bar = gr.HTML('', elem_classes='no-generating-animation')
-            preview_image = gr.Image(label=translate("Next Latents"), height=200, visible=False)
+            preview_image = gr.Image(
+                label=translate("Next Latents"),
+                height=200,
+                visible=False,
+                elem_id="preview_image",
+                elem_classes="modal-image",
+            )
 
             # フレームサイズ切替用のUIコントロールは上部に移動したため削除
 
@@ -5762,9 +5998,9 @@ with block:
                 # 完了時のアラーム設定
                 alarm_default_value = saved_app_settings.get("alarm_on_completion", True) if saved_app_settings else True
                 alarm_on_completion = gr.Checkbox(
-                    label=translate("完了時にアラームを鳴らす(Windows)"),
+                    label=translate("完了時にアラームを鳴らす"),
                     value=alarm_default_value,
-                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします（Windows）"),
+                    info=translate("チェックをオンにすると、生成完了時にアラーム音を鳴らします。"),
                     elem_classes="saveable-setting",
                     interactive=True
                 )
@@ -6035,6 +6271,13 @@ with block:
     # 実行前のバリデーション関数
     def validate_and_process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, save_settings_on_start=False, alarm_on_completion=False):
         """入力画像または最後のキーフレーム画像のいずれかが有効かどうかを確認し、問題がなければ処理を実行する"""
+
+        # 前回の進捗情報をリセットし、常に最初から開始されるようにする
+        global last_progress_desc, last_progress_bar, last_preview_image, last_output_filename
+        last_progress_desc = ""
+        last_progress_bar = ""
+        last_preview_image = None
+        last_output_filename = None
         # Gradioオブジェクトの場合は値を取得（save_settings_on_start）
         actual_save_settings_value = save_settings_on_start
         
@@ -6131,7 +6374,7 @@ with block:
 
         if not is_valid:
             # 画像が無い場合はエラーメッセージを表示して終了
-            yield None, gr.update(visible=False), translate("エラー: 画像が選択されていません"), error_message, gr.update(interactive=True), gr.update(interactive=False), gr.update()
+            yield None, gr.update(visible=False), translate("エラー: 画像が選択されていません"), error_message, gr.update(interactive=True), gr.update(interactive=False), gr.update(interactive=False), gr.update()
             return
 
         # 自動保存機能: actual_save_settings_valueがTrueの場合、現在の設定を保存
@@ -6274,7 +6517,7 @@ with block:
             print(translate("プロンプトキューファイル: {0}").format(queue_file_path))
 
             # ファイルパスが有効かチェック
-            if queue_file_path and os.path.exists(queue_file_path):
+            if queue_file_path and isinstance(queue_file_path, (str, bytes, os.PathLike)) and os.path.exists(queue_file_path):
                 print(translate("プロンプトキューファイルの内容を読み込みます: {0}").format(queue_file_path))
                 try:
                     with open(queue_file_path, 'r', encoding='utf-8') as f:
@@ -6305,58 +6548,80 @@ with block:
                 print(translate("プロンプトキュー無効: ファイルが正しくアップロードされていません"))
 
         # process関数のジェネレータを返す - 明示的に全ての引数を渡す
-        yield from process(
-            input_image=input_image,
-            prompt=prompt,
-            n_prompt=n_prompt,
-            seed=seed,
-            total_second_length=total_second_length,
-            latent_window_size=latent_window_size,
-            steps=steps,
-            cfg=cfg,
-            gs=gs,
-            rs=rs,
-            gpu_memory_preservation=gpu_memory_preservation,
-            use_teacache=use_teacache,
-            use_random_seed=use_random_seed,
-            mp4_crf=mp4_crf,
-            all_padding_value=all_padding_value,
-            end_frame=end_frame,
-            end_frame_strength=end_frame_strength,
-            frame_size_setting=frame_size_setting,
-            keep_section_videos=keep_section_videos,
-            lora_files=lora_files,
-            lora_files2=lora_files2,
-            lora_files3=lora_files3,
-            lora_scales_text=lora_scales_text,
-            output_dir=output_dir,
-            save_section_frames=save_section_frames,
-            section_settings=section_settings,
-            use_all_padding=use_all_padding,
-            use_lora=use_lora,
-            lora_mode=lora_mode,
-            lora_dropdown1=lora_dropdown1,
-            lora_dropdown2=lora_dropdown2,
-            lora_dropdown3=lora_dropdown3,
-            save_tensor_data=save_tensor_data,
-            tensor_data_input=tensor_data_input,
-            fp8_optimization=fp8_optimization,
-            resolution=resolution_value,
-            batch_count=batch_count,
-            frame_save_mode=frame_save_mode,  # frame_save_modeを追加
-            use_vae_cache=use_vae_cache,
-            use_queue=bool(queue_enabled),  # 確実にブール値として渡す
-            prompt_queue_file=prompt_queue_file,
-            save_settings_on_start=actual_save_settings_value,  # 値取得後の自動保存パラメータを追加
-            alarm_on_completion=actual_alarm_value  # 値取得後のアラームパラメータを追加
-        )
+        try:
+            yield from process(
+                input_image=input_image,
+                prompt=prompt,
+                n_prompt=n_prompt,
+                seed=seed,
+                total_second_length=total_second_length,
+                latent_window_size=latent_window_size,
+                steps=steps,
+                cfg=cfg,
+                gs=gs,
+                rs=rs,
+                gpu_memory_preservation=gpu_memory_preservation,
+                use_teacache=use_teacache,
+                use_random_seed=use_random_seed,
+                mp4_crf=mp4_crf,
+                all_padding_value=all_padding_value,
+                end_frame=end_frame,
+                end_frame_strength=end_frame_strength,
+                frame_size_setting=frame_size_setting,
+                keep_section_videos=keep_section_videos,
+                lora_files=lora_files,
+                lora_files2=lora_files2,
+                lora_files3=lora_files3,
+                lora_scales_text=lora_scales_text,
+                output_dir=output_dir,
+                save_section_frames=save_section_frames,
+                section_settings=section_settings,
+                use_all_padding=use_all_padding,
+                use_lora=use_lora,
+                lora_mode=lora_mode,
+                lora_dropdown1=lora_dropdown1,
+                lora_dropdown2=lora_dropdown2,
+                lora_dropdown3=lora_dropdown3,
+                save_tensor_data=save_tensor_data,
+                tensor_data_input=tensor_data_input,
+                fp8_optimization=fp8_optimization,
+                resolution=resolution_value,
+                batch_count=batch_count,
+                frame_save_mode=frame_save_mode,  # frame_save_modeを追加
+                use_vae_cache=use_vae_cache,
+                use_queue=bool(queue_enabled),  # 確実にブール値として渡す
+                prompt_queue_file=prompt_queue_file,
+                save_settings_on_start=actual_save_settings_value,  # 値取得後の自動保存パラメータを追加
+                alarm_on_completion=actual_alarm_value  # 値取得後のアラームパラメータを追加
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield (
+                None,
+                gr.update(visible=False),
+                translate("エラー: {0}").format(str(e)),
+                '',
+                gr.update(interactive=True),
+                gr.update(interactive=False),
+                gr.update(interactive=False),
+                gr.update(),
+            )
 
     # 実行ボタンのイベント
     # UIから渡されるパラメーターリスト
     ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, end_frame, end_frame_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, section_settings, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_vae_cache, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion]
     
-    start_button.click(fn=validate_and_process, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, seed])
-    end_button.click(fn=end_process, outputs=[end_button])
+    start_button.click(fn=validate_and_process, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed])
+    end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button], queue=False)
+    stop_after_button.click(fn=end_after_current_process, outputs=[stop_after_button], queue=False)
+    stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button], queue=False)
+    resync_status_btn.click(
+        fn=resync_status_handler,
+        inputs=[],
+        outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed],
+        queue=False
+    )
 
     # キーフレーム画像変更時のイベント登録
     # セクション0（赤枚)からの自動コピー処理

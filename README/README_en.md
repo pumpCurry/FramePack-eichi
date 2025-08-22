@@ -16,6 +16,29 @@ In other words, it's a ~~local~~ **worldwide** modification specialized in creat
 
 We're extremely grateful to [https://github.com/hinablue](https://github.com/hinablue) **Hina Chen** for multilingual support cooperation.
 
+## 🌟 Feature Enhancements (v1.9.5.2)
+
+**FramePack-eichi v1.9.5** focuses on smoother startup feedback and richer queue management to improve overall usability.
+
+### 🚀 Key New Features
+
+- **Improved startup messages with spinner**: display a spinner and completion checkmark during module loading so the app never looks frozen
+- **Expanded image queue & batch management**: specify repeat counts per source image
+  - Generated frame count becomes `image count × batch size`, removing the previous limit of 100
+- **Reference image queue and batch control**: enqueue reference images and process them with their own batch count
+  - Each image queue entry can cycle through multiple reference images sequentially
+- **Progress time display**: show elapsed time and estimated completion for ongoing generation
+- **Input image save option**: automatically store input images to a user-defined folder
+  - Clipboard images no longer vanish after use
+- **Log output settings**: enable console log saving, specify the destination folder, and open it directly from the UI
+- **Favorite setting management**: save UI configurations as favorites for quick reuse
+- **Prompt cache with switchable LoRA state cache**: persist prompt analysis results to disk and toggle LoRA state caching
+- **High-resolution support**: generate up to 2K (2160) resolution
+  - Added trimming mode that matches the longer edge with padding when comparing reference images
+- **“Stop After Current” button**: stop processing after the current image finishes (F1/UI integration)
+- **“Stop After Step” button**: stop after the current frame generation step completes (F1/UI integration)
+- **Image preview & original-size modal**: preview generated images in a window and view them in their original resolution
+
 ## 🌟 Feature Expansion (v1.9.4) ※Official Release
 
 **FramePack-eichi v1.9.4** focuses on usability improvements and stability enhancements.
@@ -422,6 +445,7 @@ First, you need to install the original FramePack.
 
 3. Necessary models will be automatically downloaded during the first launch (approximately 30GB).
    If you already have downloaded models, place them in the `framepack\webui\hf_download` folder.
+   Download progress for each model is displayed; please wait for completion.
 
 4. At this point, it will work, but processing will be slower if acceleration libraries (Xformers, Flash Attn, Sage Attn) are not installed.
    ```

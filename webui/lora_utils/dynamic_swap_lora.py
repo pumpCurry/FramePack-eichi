@@ -6,6 +6,7 @@
 import os
 import torch
 import warnings
+from eichi_utils import lora_state_cache
 
 # 国際化対応
 from locales.i18n_extended import translate as _
@@ -70,7 +71,8 @@ class DynamicSwapLoRAManager:
             model,
             self.lora_path,
             self.lora_scale,
-            device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+            cache_enabled=lora_state_cache.cache_enabled
         )
 
         print(_("LoRAは直接適用モードで適用されました。"))

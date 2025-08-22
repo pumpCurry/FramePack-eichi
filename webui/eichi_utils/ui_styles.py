@@ -207,4 +207,5 @@ def get_app_css():
     .group-border {
         border: solid 1px;
     }
+
     """

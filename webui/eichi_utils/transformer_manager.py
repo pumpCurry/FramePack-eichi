@@ -6,6 +6,7 @@ from accelerate import init_empty_weights
 from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
 from diffusers_helper.memory import DynamicSwapInstaller
 from locales.i18n_extended import translate
+from eichi_utils import lora_state_cache
 
 class TransformerManager:
     """transformerモデルの状態管理を行うクラス
@@ -195,7 +196,7 @@ class TransformerManager:
             if self.transformer is not None:
                 self.current_state['is_loaded'] = False
                 # モデルの参照を削除
-                del self.transformer
+                self.transformer = None
                 # 明示的にガベージコレクションを実行
                 import gc
                 gc.collect()
@@ -258,11 +259,12 @@ class TransformerManager:
                 try:
                     from lora_utils.lora_loader import load_and_apply_lora
                     state_dict = load_and_apply_lora(
-                        model_files, 
+                        model_files,
                         lora_paths,
                         lora_scales,
                         self.next_state['fp8_enabled'],
-                        device=self.device
+                        device=self.device,
+                        cache_enabled=lora_state_cache.cache_enabled
                     )
                     if lora_paths:
                         if len(lora_paths) == 1:
@@ -380,3 +382,14 @@ class TransformerManager:
             traceback.print_exc()
             self.current_state['is_loaded'] = False
             return False
+
+    def dispose_transformer(self):
+        """Safely move transformer to CPU and reset state."""
+        if self.transformer is not None:
+            try:
+                self.transformer.to('cpu')
+                print(translate("transformerをCPUに移動しました"))
+            except Exception:
+                pass
+            self.transformer = None
+        self.current_state['is_loaded'] = False
