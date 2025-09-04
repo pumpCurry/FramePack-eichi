@@ -1,5 +1,3 @@
-from webui.eichi_utils.console import info
-
 import os
 import traceback
 
@@ -271,25 +269,26 @@ def _preview_update(image):
 
 def _cleanup_models(force: bool = False):
     global transformer, vae, text_encoder, text_encoder_2, image_encoder
-    if not force and high_vram:
-        return
+
+    # ① まず設定から再利用フラグを読む
     try:
-    _reuse = os.environ.get('FRAMEPACK_REUSE_FP8','0') in ('1','true','TRUE')
-    if not _reuse:
-        try:
-            from webui.eichi_utils import settings_manager as _sm
-            _load = getattr(_sm,'load_app_settings_oichi',None) or getattr(_sm,'load_app_settings',None)
-            if _load:
-                _reuse = bool(_load().get('reuse_optimized_dict', False))
-        except Exception:
-            _reuse = False
+        from eichi_utils import settings_manager as _sm
+        _load_app = getattr(_sm, 'load_app_settings_oichi', None) or getattr(_sm, 'load_app_settings', None)
+        _cfg = _load_app() if _load_app else {}
+        _reuse = bool(_cfg.get('reuse_optimized_dict', False))
+    except Exception:
+        _reuse = False
+
+    # ② 再利用ONなら、Transformer破棄は常にスキップ
     if _reuse:
-        info('Transformer保持: 破棄スキップ (reuse_optimized_dict / FRAMEPACK_REUSE_FP8)')
+        print(translate("Transformer保持: 破棄スキップ（reuse_optimized_dict が有効）"))
     else:
+        # ③ 再利用OFFのときだけ、従来の high_vram 最適化を適用
+        if not force and high_vram:
+            return
         transformer_manager.dispose_transformer()
 
-    except Exception:
-        pass
+    # ④ 既存のアンロード処理（必要ならそのまま維持）
     try:
         unload_complete_models(text_encoder, text_encoder_2, image_encoder, vae, None)
     except Exception:
@@ -302,6 +301,7 @@ def _cleanup_models(force: bool = False):
     import gc
     gc.collect()
     torch.cuda.empty_cache()
+
 
 def is_generation_running():
     """生成ジョブが実行中なら True を返す。"""
@@ -3690,7 +3690,16 @@ with block:
                 )
 
             def update_lora_cache(value):
+                # グローバルなロラキャッシュフラグを更新
                 lora_state_cache.set_cache_enabled(value)
+                # 設定ファイルに保存
+                try:
+                    current = load_app_settings_oichi()
+                    current["lora_cache"] = bool(value)
+                    save_app_settings_oichi(current)
+                    print(translate("設定を保存しました"))
+                except Exception as e:
+                    print(e)
                 return None
 
             lora_cache_checkbox.change(
@@ -3706,7 +3715,27 @@ with block:
                 info=translate("チェックをオンにすると、画像のメタデータからプロンプトとシードを自動的に取得します"),
                 visible=False  # 元の位置では非表示
             )
-                
+
+            # 生成都度破棄せずに連続して最適化済み辞書利用する機能
+            with gr.Row():
+                reuse_optimized_dict_checkbox = gr.Checkbox(
+                    label=translate("生成都度破棄せずに連続して最適化済み辞書利用する"),
+                    value=saved_app_settings.get("reuse_optimized_dict", False) if saved_app_settings else False,
+                    info=translate("チェックをオンにすると、FP8最適化済みのLoRA辞書を破棄せず次のジョブで再利用します")
+                )
+
+                # チェック状態が変わったときに設定を保存
+                def update_reuse(value):
+                    try:
+                        current = load_app_settings_oichi()
+                        current["reuse_optimized_dict"] = bool(value)
+                        save_app_settings_oichi(current)
+                        print(translate("設定を保存しました"))
+                    except Exception as e:
+                        print(e)
+
+                reuse_optimized_dict_checkbox.change(fn=update_reuse, inputs=[reuse_optimized_dict_checkbox], outputs=[])
+
             # メタデータ抽出結果表示用（非表示）
             extracted_info = gr.Markdown(visible=False)
             extracted_prompt = gr.Textbox(visible=False)
@@ -3744,11 +3773,19 @@ with block:
             )
 
             # 参照画像キュー設定
+            # キュー機能のグループ
             with gr.Group(visible=use_reference_image_default) as reference_queue_group:
+                # 見出しと説明（画像キュー機能と同様の体裁）
+                gr.Markdown("### " + translate("参照キュー機能"))
+
+                # 参照キュー機能の使用有無
+                use_reference_queue = gr.Checkbox(
+                    label=translate("参照キュー機能を使用"),
+                    value=False,
+                    info=translate("参照画像ディレクトリの画像を使用して連続して画像を生成します")
+                )
+
                 with gr.Row(equal_height=True):
-                    use_reference_queue = gr.Checkbox(
-                        label=translate("参照画像キューを使用"), value=False, scale=0
-                    )
                     reference_batch_count = gr.Slider(
                         label=translate("参照画像用バッチ処理回数"),
                         minimum=1,
@@ -3760,6 +3797,7 @@ with block:
                         min_width=160,
                     )
 
+                # 参照キュー機能 ON のときだけ見せる設定（入力フォルダなど）
                 with gr.Column(visible=False) as reference_queue_only:
                     with gr.Row():
                         reference_input_folder_name = gr.Textbox(
@@ -3768,8 +3806,13 @@ with block:
                             info=translate("参照画像ファイルを格納するフォルダ名"),
                         )
                         open_reference_folder_btn = gr.Button(
-                            value="📂 " + translate("保存及び入力フォルダを開く"), size="md"
+                            value="📂 " + translate("保存及び入力フォルダを開く"),
+                            size="md",
                         )
+
+                    # 動作説明
+                    gr.Markdown(translate("※ 1回目は参照画像を使用し、2回目以降は入力フォルダの画像ファイルを修正日時の昇順で使用します。"))
+
 
                 def toggle_reference_queue(val):
                     val = bool(val.value) if hasattr(val, 'value') else bool(val)
@@ -3796,6 +3839,8 @@ with block:
                     open_folder(input_dir)
                     return None
 
+
+                # 参照キュー機能の ON/OFF でフォルダ欄の可視を切替
                 use_reference_queue.change(
                     fn=toggle_reference_queue,
                     inputs=[use_reference_queue],
@@ -3809,6 +3854,7 @@ with block:
                 open_reference_folder_btn.click(
                     fn=open_reference_folder, inputs=[], outputs=[gr.Textbox(visible=False)]
                 )
+
             # 参照画像の説明
             reference_image_info = gr.Markdown(
                 translate("特徴を抽出する画像（スタイル、服装、背景など）"),
@@ -3897,7 +3943,9 @@ with block:
                     gr.update(value=target_index_value),  # target_index
                     gr.update(value=history_index_value),  # history_index
                     gr.update(visible=use_reference),  # reference_queue_group
-                    gr.update(visible=False),  # reference_queue_only
+                    gr.update(visible=False),          # reference_queue_only（ONにするのは個別トグル）
+                    gr.update(visible=use_reference),  # reference_batch_count（参照機能ON時は常時表示）
+
                 ]
             
             # イベントハンドラーの設定
