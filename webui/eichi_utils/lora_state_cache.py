@@ -1,9 +1,41 @@
 import os
+import sys
 import hashlib
 import torch
+import threading
 
 # グローバルキャッシュ設定
 cache_enabled = False
+
+# ------------------------------------------------------------
+# オンメモリキャッシュ（プロセス内シングルトン）
+# ------------------------------------------------------------
+_INMEM_CACHE = {}
+_INMEM_LOCK = threading.Lock()
+
+
+def _inmem_get(cache_key):
+    """スレッド安全にオンメモリキャッシュを取得"""
+    with _INMEM_LOCK:
+        return _INMEM_CACHE.get(cache_key)
+
+
+def _inmem_set(cache_key, state_dict):
+    """スレッド安全にオンメモリキャッシュへ保存"""
+    with _INMEM_LOCK:
+        _INMEM_CACHE[cache_key] = state_dict
+
+
+def _inmem_pop(cache_key):
+    """特定キーをオンメモリキャッシュから削除"""
+    with _INMEM_LOCK:
+        return _INMEM_CACHE.pop(cache_key, None)
+
+
+def _inmem_clear():
+    """オンメモリキャッシュを全てクリア"""
+    with _INMEM_LOCK:
+        _INMEM_CACHE.clear()
 
 
 def set_cache_enabled(value: bool):
@@ -47,49 +79,26 @@ def generate_cache_key(model_files, lora_paths, lora_scales, fp8_enabled):
     return hashlib.sha256(key_str.encode('utf-8')).hexdigest()
 
 def load_from_cache(cache_key):
-    """キャッシュがあれば読み込み、なければ None を返す（tqdm/スピナー対応）"""
-    from locales.i18n_extended import translate
-    # from eichi_utils.console import echo_fetching_cache  # tqdm が無ければスピナーにフォールバック
-
-    # 読み込み開始メッセージ
-    cache_file = os.path.join(get_cache_dir(), cache_key + '.pt')
-    print(translate("出力済みLoRA キャッシュを読み込んでいます: {0}").format(cache_file))
-
-    if os.path.exists(cache_file):
-        try:
-            # 進捗（tqdm 1/1 即完了 or スピナー）
-            _echo_fetching_cache(translate("キャッシュ読み込み中..."))
-            data = torch.load(cache_file)
-            print(translate("LoRA キャッシュ Hit"))
-            return data
-        except Exception as e:
-            print(translate("LoRA キャッシュ が読み込めません: {0}").format(cache_file))
-            print(translate("エラー内容: {0}").format(e))
-            print(translate("キャッシュが得られなかったので、最適化処理及び再生成します"))
-            return None
-
-    print(translate("LoRA キャッシュ Miss"))
-    print(translate("キャッシュがみつからないか、初めて生成します: {0}").format(cache_file))
-    return None
-
-def load_from_cache(cache_key):
-    """キャッシュがあれば読み込み、なければ None を返す（tqdmで実測％を表示）"""
+    """キャッシュがあれば読み込み、なければ None を返す（オンメモリ優先）"""
     import os, torch
     from webui.locales.i18n_extended import translate
-    cache_file = os.path.join(get_cache_dir(), cache_key + '.pt')
 
+    # ① まずオンメモリキャッシュを確認
+    mem = _inmem_get(cache_key)
+    if mem is not None:
+        print(translate("オンメモリのLoRA キャッシュを再利用します: {0}").format(cache_key))
+        return mem
+
+    cache_file = os.path.join(get_cache_dir(), cache_key + '.pt')
     print(translate("出力済みLoRA キャッシュを読み込んでいます: {0}").format(cache_key + '.pt'))
 
     if not os.path.exists(cache_file):
-        # キャッシュ無し（ミス）
         print(translate("LoRA キャッシュ Miss"))
         print(translate("キャッシュがみつからないか、初めて生成します: {0}").format(cache_key + '.pt'))
         return None
 
-    # ここからキャッシュあり（ヒット候補）
     try:
         size = os.path.getsize(cache_file)
-        # tqdmが利用可能なら実測％、ダメならスピナー
         try:
             from tqdm import tqdm
             with open(cache_file, "rb") as f:
@@ -99,21 +108,20 @@ def load_from_cache(cache_key):
                     unit="B", unit_scale=True, unit_divisor=1024,
                     desc=translate("キャッシュ読み込み中")
                 ) as wrapped:
-                    obj = torch.load(wrapped, map_location=None)
+                    obj = torch.load(wrapped, map_location="cpu")
         except Exception:
-            # tqdmが使えない／失敗 → 既存スピナー（または簡易出力）でフォールバック
             try:
-                # from webui.eichi_utils.console import echo_fetching_cache
                 _echo_fetching_cache(translate("キャッシュ読み込み中"))
             except Exception:
                 pass
-            obj = torch.load(cache_file, map_location=None)
+            obj = torch.load(cache_file, map_location="cpu")
 
+        # ② 読み込んだデータをオンメモリに保存
+        _inmem_set(cache_key, obj)
         print(translate("LoRA キャッシュ Hit"))
         return obj
 
     except Exception as e:
-        # 読み込み失敗 → 通常ルートへフォールバック
         print(translate("LoRA キャッシュ が読み込めません: {0}").format(cache_file))
         print(translate("エラー内容: {0}").format(e))
         print(translate("キャッシュが得られなかったので、最適化処理及び再生成します"))
@@ -121,9 +129,12 @@ def load_from_cache(cache_key):
 
 
 def save_to_cache(cache_key, state_dict):
-    """現在の LoRA 状態をキャッシュに保存する（tqdmで書き込みバイト数を可視化）"""
+    """現在の LoRA 状態をキャッシュに保存する（オンメモリ＋ディスク）"""
     import os, torch
     from webui.locales.i18n_extended import translate
+
+    # ① 先にオンメモリへ登録
+    _inmem_set(cache_key, state_dict)
 
     cache_dir = get_cache_dir()
     os.makedirs(cache_dir, exist_ok=True)
@@ -132,7 +143,6 @@ def save_to_cache(cache_key, state_dict):
     print(translate("メモリ上のLoRA キャッシュを書き出しています: {0}").format(cache_file))
 
     try:
-        # tqdmが利用可能なら write をラップ（総サイズは未知のため％は原理的に不可、バイト進捗のみ）
         try:
             from tqdm import tqdm
             with open(cache_file, "wb") as f:
@@ -143,7 +153,6 @@ def save_to_cache(cache_key, state_dict):
                 ) as wrapped:
                     torch.save(state_dict, wrapped)
         except Exception:
-            # tqdmが使えない／失敗 → そのまま保存
             with open(cache_file, "wb") as f:
                 torch.save(state_dict, f)
 

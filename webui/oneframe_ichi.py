@@ -1,5 +1,7 @@
 import os
 import traceback
+import importlib
+import sys
 
 __version__ = "1.9.5.3"
 
@@ -7,6 +9,12 @@ __version__ = "1.9.5.3"
 print(f"\n------------------------------------------------------------")
 print(f"{os.path.basename(__file__)} : version {__version__} Starting....")
 print(f"------------------------------------------------------------\n")
+
+# 'locales' パッケージをトップレベルでも参照できるようエイリアスを登録
+_locales_pkg = importlib.import_module("webui.locales")
+sys.modules.setdefault("locales", _locales_pkg)
+sys.modules.setdefault("locales.i18n", importlib.import_module("webui.locales.i18n"))
+sys.modules.setdefault("locales.i18n_extended", importlib.import_module("webui.locales.i18n_extended"))
 
 # 進捗バーやスピナーと協調するスレッドセーフなprint文を有効化
 from eichi_utils.tqdm_print import enable_tqdm_print
@@ -48,8 +56,8 @@ args = parser.parse_args()
 set_lang, translate = spinner_while_running(
     "Load: i18n",
     lambda: (
-        importlib.import_module("locales.i18n_extended").set_lang,
-        importlib.import_module("locales.i18n_extended").translate,
+        importlib.import_module("webui.locales.i18n_extended").set_lang,
+        importlib.import_module("webui.locales.i18n_extended").translate,
     ),
 )
 set_lang(args.lang)
@@ -283,6 +291,12 @@ def _cleanup_models(force: bool = False):
     if _reuse:
         print(translate("Transformer保持: 破棄スキップ（reuse_optimized_dict が有効）"))
     else:
+        # オンメモリのLoRAキャッシュを無効化
+        try:
+            from eichi_utils import lora_state_cache as _lsc
+            _lsc._inmem_clear()
+        except Exception:
+            pass
         # ③ 再利用OFFのときだけ、従来の high_vram 最適化を適用
         if not force and high_vram:
             return
@@ -306,6 +320,11 @@ def _cleanup_models(force: bool = False):
 def is_generation_running():
     """生成ジョブが実行中なら True を返す。"""
     return generation_active
+
+
+def _compute_stop_controls(running: bool):
+    """UI停止系コントロールの状態を返すダミー実装（テスト用）"""
+    return False, False, False, '', ''
 
 
 def progress_resync():
@@ -454,7 +473,10 @@ def _stream_job_to_ui(ctx: JobContext):
                 )
                 break
 
-            if ctx.stream.input_queue.top() == STREAM_END_SENTINEL or (batch_stopped and ctx.stop_mode is None):
+            stream_obj = getattr(ctx, "stream", None)
+            if stream_obj is not None and (
+                stream_obj.input_queue.top() == STREAM_END_SENTINEL or (batch_stopped and ctx.stop_mode is None)
+            ):
                 batch_stopped = True
                 last_stop_mode = ctx.stop_mode
                 stop_after_current = False
@@ -2805,6 +2827,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         reference_images_list = [None]
 
     base_reference_count = len(reference_images_list)
+    progress_ref_total = base_reference_count
+    progress_img_total = batch_count * base_reference_count
 
     if use_reference_queue and base_reference_count > 1:
         print(translate("参照画像キュー: 有効, 参照画像数={0}個, 繰り返し回数={1}回").format(base_reference_count, reference_repeat_count))
@@ -2993,7 +3017,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     total_batches = batch_count * ref_count
     current_image = None
     progress_ref_total = ref_count
-    progress_img_total = batch_count
+    progress_img_total = total_batches
     progress_ref_idx = 0
     progress_img_idx = 0
     prev_reference_idx = -1

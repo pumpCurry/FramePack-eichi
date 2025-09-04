@@ -3,7 +3,7 @@ import itertools
 import sys
 import threading
 import time
-from locales.i18n_extended import translate
+from webui.locales.i18n_extended import translate
 
 
 def spinner_while_running(message, function, *args, **kwargs):
