@@ -233,6 +233,9 @@ def get_default_app_settings(current_lang="ja"):
         
         # アラーム設定
         "alarm_on_completion": True
+    
+
+        "reuse_optimized_dict": False,
     }
 
 def get_default_app_settings_f1(current_lang="ja"):
@@ -273,6 +276,9 @@ def get_default_app_settings_f1(current_lang="ja"):
         
         # CONFIG QUEUE設定 - NEW SECTION
         "add_timestamp_to_config": True  # Default to True to maintain current behavior
+    
+
+        "reuse_optimized_dict": False,
     }
 
 def get_default_app_settings_oichi():
@@ -328,6 +334,9 @@ def get_default_app_settings_oichi():
         "save_before_input_images": False,
         "save_settings_on_start": False,
         "alarm_on_completion": True
+    
+
+        "reuse_optimized_dict": False,
     }
 
 def load_app_settings():

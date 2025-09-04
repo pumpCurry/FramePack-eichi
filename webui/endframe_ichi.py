@@ -1,4 +1,5 @@
 import os
+from webui.eichi_utils.console import info
 print(f"{os.path.basename(__file__)} : 起動開始....")
 
 import sys
@@ -363,7 +364,33 @@ def cleanup_generation_resources():
     # モデルメモリ解放（存在する場合）
     if transformer_model is not None:
         try:
-            del transformer_model
+    _reuse = os.environ.get('FRAMEPACK_REUSE_FP8','0') in ('1','true','TRUE')
+    if not _reuse:
+        try:
+            from webui.eichi_utils import settings_manager as _sm
+            _load = getattr(_sm,'load_app_settings',None)
+            if _load:
+                _reuse = bool(_load().get('reuse_optimized_dict', False))
+        except Exception:
+            _reuse = False
+    if _reuse:
+        info('Transformer保持: 破棄スキップ (reuse_optimized_dict / FRAMEPACK_REUSE_FP8)')
+    else:
+    _reuse = os.environ.get('FRAMEPACK_REUSE_FP8','0') in ('1','true','TRUE')
+    if not _reuse:
+        try:
+            from webui.eichi_utils import settings_manager as _sm
+            _load = getattr(_sm,'load_app_settings',None)
+            if _load:
+                _reuse = bool(_load().get('reuse_optimized_dict', False))
+        except Exception:
+            _reuse = False
+    if _reuse:
+        info('Transformer保持: 破棄スキップ (reuse_optimized_dict / FRAMEPACK_REUSE_FP8)')
+    else:
+        del transformer_model
+
+
             transformer_model = None
         except:
             pass

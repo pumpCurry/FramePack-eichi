@@ -1,8 +1,9 @@
+from webui.eichi_utils.console import info
 
 import os
 import traceback
 
-__version__ = "1.9.5.2"
+__version__ = "1.9.5.3"
 
 # 即座に起動しているファイル名をまずは出力して、画面に応答を表示する
 print(f"\n------------------------------------------------------------")
@@ -273,7 +274,20 @@ def _cleanup_models(force: bool = False):
     if not force and high_vram:
         return
     try:
+    _reuse = os.environ.get('FRAMEPACK_REUSE_FP8','0') in ('1','true','TRUE')
+    if not _reuse:
+        try:
+            from webui.eichi_utils import settings_manager as _sm
+            _load = getattr(_sm,'load_app_settings_oichi',None) or getattr(_sm,'load_app_settings',None)
+            if _load:
+                _reuse = bool(_load().get('reuse_optimized_dict', False))
+        except Exception:
+            _reuse = False
+    if _reuse:
+        info('Transformer保持: 破棄スキップ (reuse_optimized_dict / FRAMEPACK_REUSE_FP8)')
+    else:
         transformer_manager.dispose_transformer()
+
     except Exception:
         pass
     try:
