@@ -1,20 +1,14 @@
 import os
 import traceback
-import importlib
-import sys
+# 新たに import する際は、起動時の無応答表示を避けるため、os,traceback以外はすべてスピナーで囲い、スピナー読み込み以降にimportしてください
 
+# version表記
 __version__ = "1.9.5.3"
 
 # 即座に起動しているファイル名をまずは出力して、画面に応答を表示する
 print(f"\n------------------------------------------------------------")
 print(f"{os.path.basename(__file__)} : version {__version__} Starting....")
 print(f"------------------------------------------------------------\n")
-
-# 'locales' パッケージをトップレベルでも参照できるようエイリアスを登録
-_locales_pkg = importlib.import_module("webui.locales")
-sys.modules.setdefault("locales", _locales_pkg)
-sys.modules.setdefault("locales.i18n", importlib.import_module("webui.locales.i18n"))
-sys.modules.setdefault("locales.i18n_extended", importlib.import_module("webui.locales.i18n_extended"))
 
 # 進捗バーやスピナーと協調するスレッドセーフなprint文を有効化
 from eichi_utils.tqdm_print import enable_tqdm_print
