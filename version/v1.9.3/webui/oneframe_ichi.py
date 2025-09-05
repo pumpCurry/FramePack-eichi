@@ -3054,12 +3054,12 @@ with block:
                             
                             # Load/Save選択（ラベルなし、横並び）
                             with gr.Row(scale=1):
-                                load_btn = gr.Button(translate("Load"), variant="primary", scale=1)
-                                save_btn = gr.Button(translate("Save"), variant="secondary", scale=1)
+                                load_btn = gr.Button(translate("読み込み"), variant="primary", scale=1)
+                                save_btn = gr.Button(translate("保存"), variant="secondary", scale=1)
                             # 内部的に使うRadio（非表示）
                             lora_preset_mode = gr.Radio(
-                                choices=[translate("Load"), translate("Save")],
-                                value=translate("Load"),
+                                choices=[translate("読み込み"), translate("保存")],
+                                value=translate("読み込み"),
                                 visible=False
                             )
                         
@@ -3242,7 +3242,7 @@ with block:
                     # LoRAプリセット機能のハンドラー関数
                     def handle_lora_preset_button(button_index, mode, lora1, lora2, lora3, scales):
                         """LoRAプリセットボタンのクリックを処理する"""
-                        if mode == translate("Load"):  # Load
+                        if mode == translate("読み込み"):  # Load
                             # ロードモード
                             loaded_values = load_lora_preset(button_index)
                             if loaded_values:
@@ -3269,14 +3269,14 @@ with block:
                     # Load/Saveボタンのイベントハンドラー
                     def set_load_mode():
                         return (
-                            gr.update(value=translate("Load")),
+                            gr.update(value=translate("読み込み")),
                             gr.update(variant="primary"),
                             gr.update(variant="secondary")
                         )
                     
                     def set_save_mode():
                         return (
-                            gr.update(value=translate("Save")),
+                            gr.update(value=translate("保存")),
                             gr.update(variant="secondary"),
                             gr.update(variant="primary")
                         )
@@ -3440,11 +3440,11 @@ with block:
             
             # endframe_ichiと同じ順序で設定項目を配置
             # TeaCacheとランダムシード設定
-            use_teacache = gr.Checkbox(label=translate('Use TeaCache'), value=True, info=translate('Faster speed, but often makes hands and fingers slightly worse.'))
+            use_teacache = gr.Checkbox(label=translate('TeaCacheを使用'), value=True, info=translate('速度は速くなりますが、手や指の表現が若干劣化する可能性があります。'))
             
             # Use Random Seedの初期値
-            use_random_seed = gr.Checkbox(label=translate("Use Random Seed"), value=use_random_seed_default)
-            seed = gr.Number(label=translate("Seed"), value=seed_default, precision=0)
+            use_random_seed = gr.Checkbox(label=translate("ランダムシードを使用"), value=use_random_seed_default)
+            seed = gr.Number(label=translate("シード"), value=seed_default, precision=0)
             
             # ステップ数などの設定を右カラムに配置
             steps = gr.Slider(label=translate("ステップ数"), minimum=1, maximum=100, value=25, step=1, info=translate('この値の変更は推奨されません'))

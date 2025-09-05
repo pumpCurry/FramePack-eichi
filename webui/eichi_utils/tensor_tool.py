@@ -3055,11 +3055,11 @@ with block:
 
                         with gr.Row(variant="compact"):
                             use_random_seed = gr.Checkbox(
-                                label=translate("Use Random Seed"),
+                                label=translate("ランダムシードを使用"),
                                 value=use_random_seed_default,
                             )
                             seed = gr.Number(
-                                label=translate("Seed"), value=seed_default, precision=0
+                                label=translate("シード"), value=seed_default, precision=0
                             )
 
                         def set_random_seed(is_checked):
@@ -3893,7 +3893,7 @@ with block:
                     with gr.Row():
                         # 動画
                         result_video = gr.Video(
-                            label=translate("Finished Frames"),
+                            label=translate("処理済みフレーム"),
                             autoplay=True,
                             show_share_button=False,
                             height=512,
@@ -3915,7 +3915,7 @@ with block:
 
                     with gr.Row():
                         preview_image = gr.Image(
-                            label=translate("Next Latents"), height=200, visible=False
+                            label=translate("次の潜在"), height=200, visible=False
                         )
 
                     with gr.Row():
@@ -4076,10 +4076,10 @@ with block:
 
         with gr.Row():
             use_teacache = gr.Checkbox(
-                label=translate("Use TeaCache"),
+                label=translate("TeaCacheを使用"),
                 value=True,
                 info=translate(
-                    "Faster speed, but often makes hands and fingers slightly worse."
+                    "速度は速くなりますが、手や指の表現が若干劣化する可能性があります。"
                 ),
             )
 
