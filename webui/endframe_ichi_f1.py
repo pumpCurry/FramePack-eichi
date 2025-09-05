@@ -5991,7 +5991,7 @@ with block:
                     "log_folder": "logs"
                 }
 
-                # CONFIG QUEUE設定 - NEW (17番目の要素)
+                # CONFIG QUEUE設定 (18番目の要素)
                 updates.append(gr.update(value=default_settings.get("add_timestamp_to_config", True)))  # 18
                 
                 # 設定ファイルを更新
@@ -6002,7 +6002,7 @@ with block:
                 # ログ設定を適用 (既存のログファイルを閉じて、設定に従って再設定)
                 disable_logging()  # 既存のログを閉じる
                 
-                # 設定状態メッセージ (18番目の要素)
+                # 設定状態メッセージ (19番目の要素)
                 updates.append(translate("設定をデフォルトに戻しました"))  # 19
                 
                 return updates
