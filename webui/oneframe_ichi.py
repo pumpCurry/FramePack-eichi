@@ -2887,7 +2887,12 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("=== 現在の設定を自動保存します ==="))
         # 現在のUIの値を収集してアプリケーション設定として保存
         # Gradioオブジェクトから値を取得（直接値が渡る場合も考慮）
-        lora_cache_val = False
+        # lora_cache_checkbox が存在する場合はその値を取得し、
+        # 存在しない場合は lora_state_cache の状態を使用する
+        try:
+            lora_cache_val = bool(lora_cache_checkbox.value)
+        except Exception:
+            lora_cache_val = getattr(lora_state_cache, "cache_enabled", False)
 
         # Gradioオブジェクトの値を正規化
         log_enabled_val = log_enabled

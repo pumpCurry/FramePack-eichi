@@ -4000,6 +4000,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 "steps": steps,
                 "cfg": cfg,
                 "use_teacache": use_teacache,
+                "lora_cache": lora_state_cache.cache_enabled,
                 "gpu_memory_preservation": gpu_memory_preservation,
                 "gs": gs,
                 "image_strength": image_strength,
@@ -5855,6 +5856,7 @@ with block:
                 cfg_val,
                 # Performance settings
                 use_teacache_val,
+                lora_cache_val,
                 gpu_memory_preservation_val,
                 # Detail settings
                 gs_val,
@@ -5886,6 +5888,7 @@ with block:
                     "cfg": cfg_val,
                     # パフォーマンス設定
                     "use_teacache": use_teacache_val,
+                    "lora_cache": lora_cache_val,
                     "gpu_memory_preservation": gpu_memory_preservation_val,
                     # 詳細設定
                     "gs": gs_val,
@@ -5966,21 +5969,22 @@ with block:
                 updates.append(gr.update(value=default_settings.get("steps", 25)))  # 3
                 updates.append(gr.update(value=default_settings.get("cfg", 1.0)))  # 4
                 updates.append(gr.update(value=default_settings.get("use_teacache", True)))  # 5
-                updates.append(gr.update(value=default_settings.get("gpu_memory_preservation", 6)))  # 6
-                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 7
+                updates.append(gr.update(value=default_settings.get("lora_cache", False)))  # 6
+                updates.append(gr.update(value=default_settings.get("gpu_memory_preservation", 6)))  # 7
+                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 8
                 # F1独自
-                updates.append(gr.update(value=default_settings.get("image_strength", 1.0)))  # 8
-                updates.append(gr.update(value=default_settings.get("keep_section_videos", False)))  # 9
-                updates.append(gr.update(value=default_settings.get("save_section_frames", False)))  # 10
-                updates.append(gr.update(value=default_settings.get("save_tensor_data", False)))  # 11
-                updates.append(gr.update(value=default_settings.get("frame_save_mode", translate("保存しない"))))  # 12
-                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 13
-                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 14
-                
-                # ログ設定 (15番目め16番目の要素)
+                updates.append(gr.update(value=default_settings.get("image_strength", 1.0)))  # 9
+                updates.append(gr.update(value=default_settings.get("keep_section_videos", False)))  # 10
+                updates.append(gr.update(value=default_settings.get("save_section_frames", False)))  # 11
+                updates.append(gr.update(value=default_settings.get("save_tensor_data", False)))  # 12
+                updates.append(gr.update(value=default_settings.get("frame_save_mode", translate("保存しない"))))  # 13
+                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 14
+                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 15
+
+                # ログ設定 (16番目め17番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
-                updates.append(gr.update(value=False))  # log_enabled (15)
-                updates.append(gr.update(value="logs"))  # log_folder (16)
+                updates.append(gr.update(value=False))  # log_enabled (16)
+                updates.append(gr.update(value="logs"))  # log_folder (17)
                 
                 # ログ設定をアプリケーションに適用
                 default_log_settings = {
@@ -5988,20 +5992,23 @@ with block:
                     "log_folder": "logs"
                 }
 
-                # CONFIG QUEUE設定 - NEW (17番目の要素)
-                updates.append(gr.update(value=default_settings.get("add_timestamp_to_config", True)))  # 17
+                # CONFIG QUEUE設定 - NEW (18番目の要素)
+                updates.append(gr.update(value=default_settings.get("add_timestamp_to_config", True)))  # 18
                 
                 # 設定ファイルを更新
                 all_settings = load_settings()
                 all_settings['log_settings'] = default_log_settings
                 save_settings(all_settings)
-                
+
                 # ログ設定を適用 (既存のログファイルを閉じて、設定に従って再設定)
                 disable_logging()  # 既存のログを閉じる
-                
-                # 設定状態メッセージ (18番目の要素)
+
+                # LoRAキャッシュをデフォルト値に合わせる
+                lora_state_cache.set_cache_enabled(default_settings.get("lora_cache", False))
+
+                # 設定状態メッセージ (19番目の要素)
                 updates.append(translate("設定をデフォルトに戻しました"))
-                
+
                 return updates
 
     # 実行前のバリデーション関数
@@ -6234,6 +6241,7 @@ with block:
             steps,
             cfg,
             use_teacache,
+            lora_cache_checkbox,
             gpu_memory_preservation,
             gs,
             image_strength,
@@ -6262,19 +6270,20 @@ with block:
             steps,                # 3
             cfg,                  # 4
             use_teacache,         # 5
-            gpu_memory_preservation, # 6
-            gs,                   # 7
-            image_strength,       # 8
-            keep_section_videos,  # 9
-            save_section_frames,  # 10
-            save_tensor_data,     # 11
-            frame_save_mode,      # 12
-            save_settings_on_start, # 13
-            alarm_on_completion,  # 14
-            log_enabled,          # 15
-            log_folder,           # 16
-            config_queue_components['add_timestamp_to_config'], # 17 - NEW OUTPUT
-            settings_status       # 18
+            lora_cache_checkbox,  # 6
+            gpu_memory_preservation, # 7
+            gs,                   # 8
+            image_strength,       # 9
+            keep_section_videos,  #10
+            save_section_frames,  #11
+            save_tensor_data,     #12
+            frame_save_mode,      #13
+            save_settings_on_start, #14
+            alarm_on_completion,  #15
+            log_enabled,          #16
+            log_folder,           #17
+            config_queue_components['add_timestamp_to_config'], #18 - NEW OUTPUT
+            settings_status       #19
         ]
     )
 
