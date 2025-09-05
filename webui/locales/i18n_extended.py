@@ -1,11 +1,11 @@
 def set_lang(language):
     """言語設定を行う"""
-    from webui.locales import i18n
+    from locales import i18n
     i18n.lang = language
     i18n.init(language)  # 言語設定を反映（明示的に言語を渡す）
 
 # i18nモジュールからtranslate関数をインポート
-from webui.locales.i18n import translate
+from locales.i18n import translate
 
 """
 FramePack-eichi 拡張i18nモジュール
@@ -14,7 +14,7 @@ FramePack-eichi 拡張i18nモジュール
 
 import json
 import os.path
-from webui.locales import i18n
+from locales import i18n
 
 # 逆マッピング用辞書
 _reverse_mapping = {
