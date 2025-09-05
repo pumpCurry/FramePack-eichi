@@ -5980,7 +5980,7 @@ with block:
                 updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 14
                 updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 15
                 
-                # ログ設定 (16番目め17番目の要素)
+                # ログ設定 (16番目,17番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
                 updates.append(gr.update(value=False))  # log_enabled (16)
                 updates.append(gr.update(value="logs"))  # log_folder (17)
