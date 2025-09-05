@@ -48,8 +48,8 @@ args = parser.parse_args()
 set_lang, translate = spinner_while_running(
     "Load: i18n",
     lambda: (
-        importlib.import_module("locales.i18n_extended").set_lang,
-        importlib.import_module("locales.i18n_extended").translate,
+        importlib.import_module("webui.locales.i18n_extended").set_lang,
+        importlib.import_module("webui.locales.i18n_extended").translate,
     ),
 )
 set_lang(args.lang)
@@ -262,7 +262,7 @@ generation_active = False
 
 
 def _preview_update(image):
-    """Update helper that preserves visibility when image is None."""
+    """画面更新ヘルパー: イメージがNoneの場合、生成済みイメージを見られるようにを維持"""
     if image is None:
         return gr.update()
     return gr.update(value=image)
@@ -283,6 +283,12 @@ def _cleanup_models(force: bool = False):
     if _reuse:
         print(translate("Transformer保持: 破棄スキップ（reuse_optimized_dict が有効）"))
     else:
+        # オンメモリのLoRAキャッシュを無効化
+        try:
+            from eichi_utils import lora_state_cache as _lsc
+            _lsc._inmem_clear()
+        except Exception:
+            pass
         # ③ 再利用OFFのときだけ、従来の high_vram 最適化を適用
         if not force and high_vram:
             return
@@ -306,6 +312,11 @@ def _cleanup_models(force: bool = False):
 def is_generation_running():
     """生成ジョブが実行中なら True を返す。"""
     return generation_active
+
+
+def _compute_stop_controls(running: bool):
+    """UI停止系コントロールの状態を返すダミー実装（テスト用）"""
+    return False, False, False, '', ''
 
 
 def progress_resync():
@@ -454,7 +465,10 @@ def _stream_job_to_ui(ctx: JobContext):
                 )
                 break
 
-            if ctx.stream.input_queue.top() == STREAM_END_SENTINEL or (batch_stopped and ctx.stop_mode is None):
+            stream_obj = getattr(ctx, "stream", None)
+            if stream_obj is not None and (
+                stream_obj.input_queue.top() == STREAM_END_SENTINEL or (batch_stopped and ctx.stop_mode is None)
+            ):
                 batch_stopped = True
                 last_stop_mode = ctx.stop_mode
                 stop_after_current = False
@@ -2805,6 +2819,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         reference_images_list = [None]
 
     base_reference_count = len(reference_images_list)
+    progress_ref_total = base_reference_count
+    progress_img_total = batch_count * base_reference_count
 
     if use_reference_queue and base_reference_count > 1:
         print(translate("参照画像キュー: 有効, 参照画像数={0}個, 繰り返し回数={1}回").format(base_reference_count, reference_repeat_count))
@@ -2993,7 +3009,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     total_batches = batch_count * ref_count
     current_image = None
     progress_ref_total = ref_count
-    progress_img_total = batch_count
+    progress_img_total = total_batches
     progress_ref_idx = 0
     progress_img_idx = 0
     prev_reference_idx = -1
@@ -3793,11 +3809,11 @@ with block:
                         value=1,
                         step=1,
                         info=translate("参照画像1枚につき連続生成する回数"),
-                        scale=0,
-                        min_width=160,
+                        scale=1,
+                        min_width=0,
                     )
 
-                # 参照キュー機能 ON のときだけ見せる設定（入力フォルダなど）
+                # 参照キュー機能 ON のときだけ見せる設定（参照画像フォルダなど）
                 with gr.Column(visible=False) as reference_queue_only:
                     with gr.Row():
                         reference_input_folder_name = gr.Textbox(
@@ -3806,12 +3822,12 @@ with block:
                             info=translate("参照画像ファイルを格納するフォルダ名"),
                         )
                         open_reference_folder_btn = gr.Button(
-                            value="📂 " + translate("保存及び入力フォルダを開く"),
+                            value="📂 " + translate("保存及び参照画像フォルダを開く"),
                             size="md",
                         )
 
                     # 動作説明
-                    gr.Markdown(translate("※ 1回目は参照画像を使用し、2回目以降は入力フォルダの画像ファイルを修正日時の昇順で使用します。"))
+                    gr.Markdown(translate("※ 1回目は参照画像を使用し、2回目以降は参照画像フォルダの画像ファイルを修正日時の昇順で使用します。"))
 
 
                 def toggle_reference_queue(val):
