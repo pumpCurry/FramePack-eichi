@@ -1,6 +1,8 @@
 import os
 import traceback
+# 新たに import する際は、起動時の無応答表示を避けるため、os,traceback以外はすべてスピナーで囲い、スピナー読み込み以降にimportしてください
 
+# version表記
 __version__ = "1.9.5.3"
 
 # 即座に起動しているファイル名をまずは出力して、画面に応答を表示する
@@ -282,6 +284,7 @@ def _cleanup_models(force: bool = False):
     # ② 再利用ONなら、Transformer破棄は常にスキップ
     if _reuse:
         print(translate("Transformer保持: 破棄スキップ（reuse_optimized_dict が有効）"))
+        return
     else:
         # オンメモリのLoRAキャッシュを無効化
         try:
@@ -3700,9 +3703,9 @@ with block:
             # LoRA設定キャッシュ
             with gr.Row():
                 lora_cache_checkbox = gr.Checkbox(
-                    label=translate("LoRAの設定を再起動時再利用する"),
+                    label=translate("FP8最適化辞書データをディスクにキャッシュする"),
                     value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
-                    info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
+                    info=translate("チェックをオンにすると、プロンプトやLoRA設定などを適用後して毎回生成するFP8最適化辞書データを再利用できるようにキャッシュとして保存します。プロンプトやLoRA設定の組み合わせごとに数十GBの大きなファイルが生成されますが、速度向上に寄与します。")
                 )
 
             def update_lora_cache(value):
