@@ -262,7 +262,7 @@ generation_active = False
 
 
 def _preview_update(image):
-    """Update helper that preserves visibility when image is None."""
+    """画面更新ヘルパー: イメージがNoneの場合、生成済みイメージを見られるようにを維持"""
     if image is None:
         return gr.update()
     return gr.update(value=image)
