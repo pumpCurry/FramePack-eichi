@@ -89,19 +89,21 @@ def load_from_cache(cache_key):
         print(translate("オンメモリのLoRA キャッシュを再利用します: {0}").format(cache_key))
         return mem
 
-    cache_file = os.path.join(get_cache_dir(), cache_key + '.pt')
+    cache_fullpath = os.path.join(cache_dir, cache_key + '.pt')
+    cache_filename = cache_key + '.pt'
+
     print(translate("出力済みLoRA キャッシュを読み込んでいます: {0}").format(cache_key + '.pt'))
 
-    if not os.path.exists(cache_file):
+    if not os.path.exists(cache_fullpath):
         print(translate("LoRA キャッシュ Miss"))
-        print(translate("キャッシュがみつからないか、初めて生成します: {0}").format(cache_file))
+        print(translate("キャッシュがみつからないか、初めて生成します: {0}").format(cache_filename))
         return None
 
     try:
-        size = os.path.getsize(cache_file)
+        size = os.path.getsize(cache_fullpath)
         try:
             from tqdm import tqdm
-            with open(cache_file, "rb") as f:
+            with open(cache_fullpath, "rb") as f:
                 with tqdm.wrapattr(
                     f, "read",
                     total=size,
@@ -118,9 +120,9 @@ def load_from_cache(cache_key):
             except Exception:
                 pass
             try:
-                obj = torch.load(cache_file, map_location="cpu", mmap=False)
+                obj = torch.load(cache_fullpath, map_location="cpu", mmap=False)
             except TypeError:
-                obj = torch.load(cache_file, map_location="cpu")
+                obj = torch.load(cache_fullpath, map_location="cpu")
 
         # ② 読み込んだデータをオンメモリに保存
         _inmem_set(cache_key, obj)
@@ -128,7 +130,7 @@ def load_from_cache(cache_key):
         return obj
 
     except Exception as e:
-        print(translate("LoRA キャッシュ が読み込めません: {0}").format(cache_file))
+        print(translate("LoRA キャッシュ が読み込めません: {0}").format(cache_filename))
         print(translate("エラー内容: {0}").format(e))
         print(translate("キャッシュが得られなかったので、最適化処理及び再生成します"))
         return None
@@ -144,14 +146,15 @@ def save_to_cache(cache_key, state_dict):
 
     cache_dir = get_cache_dir()
     os.makedirs(cache_dir, exist_ok=True)
-    cache_file = os.path.join(cache_dir, cache_key + '.pt')
-
-    print(translate("メモリ上のLoRA キャッシュを書き出しています: {0}").format(cache_file))
+    cache_fullpath = os.path.join(cache_dir, cache_key + '.pt')
+    cache_filename = cache_key + '.pt'
+    
+    print(translate("メモリ上のLoRA キャッシュを書き出しています: {0}").format(cache_filename))
 
     try:
         try:
             from tqdm import tqdm
-            with open(cache_file, "wb") as f:
+            with open(cache_fullpath, "wb") as f:
                 with tqdm.wrapattr(
                     f, "write",
                     unit="B", unit_scale=True, unit_divisor=1024,
@@ -159,13 +162,13 @@ def save_to_cache(cache_key, state_dict):
                 ) as wrapped:
                     torch.save(state_dict, wrapped)
         except Exception:
-            with open(cache_file, "wb") as f:
+            with open(cache_fullpath, "wb") as f:
                 torch.save(state_dict, f)
 
-        print(translate("メモリ上のLoRA キャッシュの書き出しに成功: {0}").format(cache_file))
+        print(translate("メモリ上のLoRA キャッシュの書き出しに成功: {0}").format(cache_filename))
 
     except Exception as e:
-        print(translate("メモリ上のLoRA キャッシュの書き出しに失敗: {0}").format(cache_file))
+        print(translate("メモリ上のLoRA キャッシュの書き出しに失敗: {0}").format(cache_filename))
         print(translate("エラー内容: {0}").format(e))
 
 def _echo_fetching_cache(title: str) -> None:
