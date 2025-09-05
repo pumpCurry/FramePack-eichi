@@ -4296,12 +4296,12 @@ with block:
                         
                         # Load/Save選択（ラベルなし、横並び）
                         with gr.Row(scale=1):
-                            load_btn = gr.Button(translate("Load"), variant="primary", scale=1)
-                            save_btn = gr.Button(translate("Save"), variant="secondary", scale=1)
+                            load_btn = gr.Button(translate("読み込み"), variant="primary", scale=1)
+                            save_btn = gr.Button(translate("保存"), variant="secondary", scale=1)
                         # 内部的に使うRadio（非表示）
                         lora_preset_mode = gr.Radio(
-                            choices=[translate("Load"), translate("Save")],
-                            value=translate("Load"),
+                            choices=[translate("読み込み"), translate("保存")],
+                            value=translate("読み込み"),
                             visible=False
                         )
                     
@@ -4544,7 +4544,7 @@ with block:
                 # LoRAプリセット機能のハンドラー関数
                 def handle_lora_preset_button(button_index, mode, lora1, lora2, lora3, scales):
                     """LoRAプリセットボタンのクリックを処理する"""
-                    if mode == translate("Load"):  # Load
+                    if mode == translate("読み込み"):  # Load
                         # ロードモード
                         loaded_values = load_lora_preset(button_index)
                         if loaded_values:
@@ -4571,14 +4571,14 @@ with block:
                 # Load/Saveボタンのイベントハンドラー
                 def set_load_mode():
                     return (
-                        gr.update(value=translate("Load")),
+                        gr.update(value=translate("読み込み")),
                         gr.update(variant="primary"),
                         gr.update(variant="secondary")
                     )
                 
                 def set_save_mode():
                     return (
-                        gr.update(value=translate("Save")),
+                        gr.update(value=translate("保存")),
                         gr.update(variant="secondary"),
                         gr.update(variant="primary")
                     )
@@ -4717,7 +4717,7 @@ with block:
                 queue=False  # 高速化のためキューをスキップ
             )
 
-            prompt = gr.Textbox(label=translate("Prompt"), value=get_default_startup_prompt(), lines=6)
+            prompt = gr.Textbox(label=translate("プロンプト"), value=get_default_startup_prompt(), lines=6)
 
             # プロンプト管理パネルの追加
             with gr.Group(visible=True) as prompt_management:
@@ -4763,7 +4763,7 @@ with block:
 
             # 互換性のためにQuick Listも残しておくが、非表示にする
             with gr.Row(visible=False):
-                example_quick_prompts = gr.Dataset(samples=quick_prompts, label=translate("Quick List"), samples_per_page=1000, components=[prompt])
+                example_quick_prompts = gr.Dataset(samples=quick_prompts, label=translate("クイックリスト"), samples_per_page=1000, components=[prompt])
                 example_quick_prompts.click(lambda x: x[0], inputs=[example_quick_prompts], outputs=prompt, show_progress=False, queue=False)
 
                 # section_settingsは入力欄の値をまとめてリスト化
@@ -5501,7 +5501,7 @@ with block:
 
         with gr.Column():
             result_video = gr.Video(
-                label=translate("Finished Frames"),
+                label=translate("処理済みフレーム"),
                 key="result_video",
                 autoplay=True,
                 show_share_button=False,
@@ -5513,7 +5513,7 @@ with block:
             progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
             progress_bar = gr.HTML('', elem_classes='no-generating-animation')
             preview_image = gr.Image(
-                label=translate("Next Latents"),
+                label=translate("次の潜在"),
                 height=200,
                 visible=False,
                 elem_id="preview_image",
@@ -5526,9 +5526,9 @@ with block:
             section_calc_display = gr.HTML("", label="")
 
             use_teacache = gr.Checkbox(
-                label=translate('Use TeaCache'), 
+                label=translate('TeaCacheを使用'), 
                 value=saved_app_settings.get("use_teacache", True) if saved_app_settings else True, 
-                info=translate('Faster speed, but often makes hands and fingers slightly worse.'),
+                info=translate('速度は速くなりますが、手や指の表現が若干劣化する可能性があります。'),
                 elem_classes="saveable-setting"
             )
             
@@ -5555,10 +5555,10 @@ with block:
             use_random_seed_default = True
             seed_default = random.randint(0, 2**32 - 1) if use_random_seed_default else 1
 
-            use_random_seed = gr.Checkbox(label=translate("Use Random Seed"), value=use_random_seed_default)
+            use_random_seed = gr.Checkbox(label=translate("ランダムシードを使用"), value=use_random_seed_default)
 
-            n_prompt = gr.Textbox(label=translate("Negative Prompt"), value="", visible=False)  # Not used
-            seed = gr.Number(label=translate("Seed"), value=seed_default, precision=0)
+            n_prompt = gr.Textbox(label=translate("ネガティブプロンプト"), value="", visible=False)  # Not used
+            seed = gr.Number(label=translate("シード"), value=seed_default, precision=0)
     
             # ここで、メタデータ取得処理の登録を移動する
             # ここでは、promptとseedの両方が定義済み
@@ -5681,7 +5681,7 @@ with block:
                     return gr.update()
             use_random_seed.change(fn=set_random_seed, inputs=use_random_seed, outputs=seed)
 
-            total_second_length = gr.Slider(label=translate("Total Video Length (Seconds)"), minimum=1, maximum=120, value=1, step=1)
+            total_second_length = gr.Slider(label=translate("動画の長さ（秒）"), minimum=1, maximum=120, value=1, step=1)
             latent_window_size = gr.Slider(label=translate("Latent Window Size"), minimum=1, maximum=33, value=9, step=1, visible=False)  # Should not change
             steps = gr.Slider(
                 label=translate("Steps"), 
