@@ -666,7 +666,7 @@ def print_settings_summary(enable_debug=False):
     print("\n==== ビデオモード設定の概要 ====")
     for mode_key in VIDEO_MODE_SETTINGS:
         settings = VIDEO_MODE_SETTINGS[mode_key]
-        print(translate("\nモード: {mode_key}").format(mode_key=mode_key))
+        print("\n" + translate("モード: {mode_key}").format(mode_key=mode_key))
         print(translate("  フレーム数: {frames}").format(frames=settings['frames']))
         print(translate("  セクション数: {sections}").format(sections=settings['sections']))
         print(translate("  表示秒数: {display_seconds}").format(display_seconds=settings['display_seconds']))
@@ -678,7 +678,7 @@ def print_settings_summary(enable_debug=False):
                 print(translate("      キーフレーム{src} → {targets}").format(src=src, targets=targets))
 
     max_kf = get_max_keyframes_count()
-    print(translate("\n最大キーフレーム数: {max_kf}").format(max_kf=max_kf))
+    print("\n" + translate("最大キーフレーム数: {max_kf}").format(max_kf=max_kf))
     print("============================\n")
 
 

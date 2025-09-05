@@ -829,7 +829,7 @@ def perform_save_operation_v3(config_name_input, add_timestamp, input_image, pro
                 lora_files_list = lora_settings.get("lora_files", [])
                 if lora_files_list:
                     filenames = [os.path.basename(path) for path in lora_files_list]
-                    user_message += translate("\n📦 LoRA files configured: {0}").format(', '.join(filenames))
+                    user_message += "\n" + translate("📦 LoRAファイルが設定されました: {0}").format(', '.join(filenames))
             
             return (
                 user_message,
@@ -1099,7 +1099,7 @@ def end_after_current_process_enhanced():
         stop_after_current = True
         if stream is not None and stream.input_queue.top() != 'end':
             stream.input_queue.push('end')
-        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+        print("\n" + translate("停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
 
     return (
         gr.update(value=translate("打ち切り処理中...")),
