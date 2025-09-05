@@ -257,6 +257,7 @@ def get_default_app_settings_f1(current_lang="ja"):
         # パフォーマンス設定
         "use_teacache": True,
         "gpu_memory_preservation": 6,
+        "lora_cache": False,
         
         # 詳細設定
         "gs": 10,

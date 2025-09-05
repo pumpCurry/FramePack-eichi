@@ -357,52 +357,41 @@ def cleanup_generation_resources():
     global transformer_model, current_batch_data
     import torch
     import gc
-    
+
     # バッチデータクリア
     current_batch_data = None
-    
+
     # モデルメモリ解放（存在する場合）
     if transformer_model is not None:
-        try:
-    _reuse = os.environ.get('FRAMEPACK_REUSE_FP8','0') in ('1','true','TRUE')
-    if not _reuse:
-        try:
-            from webui.eichi_utils import settings_manager as _sm
-            _load = getattr(_sm,'load_app_settings',None)
-            if _load:
-                _reuse = bool(_load().get('reuse_optimized_dict', False))
-        except Exception:
-            _reuse = False
-    if _reuse:
-        info('Transformer保持: 破棄スキップ (reuse_optimized_dict / FRAMEPACK_REUSE_FP8)')
-    else:
-    _reuse = os.environ.get('FRAMEPACK_REUSE_FP8','0') in ('1','true','TRUE')
-    if not _reuse:
-        try:
-            from webui.eichi_utils import settings_manager as _sm
-            _load = getattr(_sm,'load_app_settings',None)
-            if _load:
-                _reuse = bool(_load().get('reuse_optimized_dict', False))
-        except Exception:
-            _reuse = False
-    if _reuse:
-        info('Transformer保持: 破棄スキップ (reuse_optimized_dict / FRAMEPACK_REUSE_FP8)')
-    else:
-        del transformer_model
-
-
+        _reuse = os.environ.get('FRAMEPACK_REUSE_FP8', '0') in ('1', 'true', 'TRUE')
+        if not _reuse:
+            try:
+                from webui.eichi_utils import settings_manager as _sm
+                _load = getattr(_sm, 'load_app_settings', None)
+                if _load:
+                    _reuse = bool(_load().get('reuse_optimized_dict', False))
+            except Exception:
+                _reuse = False
+        if _reuse:
+            info('Transformer保持: 破棄スキップ (reuse_optimized_dict / FRAMEPACK_REUSE_FP8)')
+        else:
+            # オンメモリのLoRAキャッシュをクリア
+            try:
+                from eichi_utils import lora_state_cache as _lsc
+                _lsc._inmem_clear()
+            except Exception:
+                pass
+            del transformer_model
             transformer_model = None
-        except:
-            pass
-    
+
     # CUDA メモリクリア
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
-    
+
     # Python ガベージコレクション
     gc.collect()
-    
+
     print(translate("生成リソースをクリーンアップしました"))
 
 def check_generation_interrupted():
@@ -3133,7 +3122,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (
                     batch_output_filename if batch_output_filename is not None else gr.skip(),
-                    gr.update(value=None, visible=False),
+                    gr.update(visible=False),
                     gr.update(),
                     gr.update(),
                     gr.update(interactive=False),
@@ -3194,7 +3183,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     last_preview_image = None
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
-                        gr.update(value=None, visible=False),
+                        gr.update(visible=False),
                         completion_message,
                         '',
                         gr.update(interactive=True),
@@ -3207,7 +3196,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     next_batch_message = translate("バッチ処理: {0}/{1} 完了、次のバッチに進みます...").format(batch_index + 1, batch_count)
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
-                        gr.update(value=None, visible=False),
+                        gr.update(visible=False),
                         next_batch_message,
                         '',
                         gr.update(interactive=False),
@@ -3226,7 +3215,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             last_output_filename = batch_output_filename
             yield (
                 batch_output_filename if batch_output_filename is not None else gr.skip(),
-                gr.update(value=None, visible=False),
+                gr.update(visible=False),
                 translate("バッチ処理が中断されました"),
                 '',
                 gr.update(interactive=True),
@@ -3310,7 +3299,7 @@ def resync_status_handler():
             last_output_filename = data
             yield (
                 last_output_filename if last_output_filename is not None else gr.skip(),
-                gr.update(value=None, visible=False),
+                gr.update(visible=False),
                 gr.update(),
                 gr.update(),
                 gr.update(interactive=False),
@@ -3331,7 +3320,7 @@ def resync_status_handler():
             last_output_filename = last_output_filename or data
             yield (
                 last_output_filename if last_output_filename is not None else gr.skip(),
-                gr.update(value=None, visible=False),
+                gr.update(visible=False),
                 last_progress_desc,
                 last_progress_bar,
                 gr.update(interactive=True, value=translate("Start Generation")),
@@ -3348,7 +3337,7 @@ def resync_status_handler():
     # If we exit the loop without receiving an 'end' flag, ensure the state is reset
     yield (
         last_output_filename if last_output_filename is not None else gr.skip(),
-        gr.update(value=None, visible=False),
+        gr.update(visible=False),
         last_progress_desc,
         last_progress_bar,
         gr.update(interactive=True, value=translate("Start Generation")),
@@ -3815,9 +3804,9 @@ with block:
             # LoRA設定キャッシュ
             with gr.Row():
                 lora_cache_checkbox = gr.Checkbox(
-                    label=translate("LoRAの設定を再起動時再利用する"),
+                    label=translate("FP8最適化辞書データをディスクにキャッシュする"),
                     value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
-                    info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
+                    info=translate("チェックをオンにすると、プロンプトやLoRA設定などを適用後して毎回生成するFP8最適化辞書データを再利用できるようにキャッシュとして保存します。プロンプトやLoRA設定の組み合わせごとに数十GBの大きなファイルが生成されますが、速度向上に寄与します。")
                 )
 
             def update_lora_cache(value):
@@ -6076,6 +6065,7 @@ with block:
                 cfg_val,
                 use_teacache_val,
                 gpu_memory_preservation_val,
+                lora_cache_val,
                 gs_val,
                 use_all_padding_val,
                 all_padding_value_val,
@@ -6104,6 +6094,7 @@ with block:
                     # パフォーマンス設定
                     "use_teacache": use_teacache_val,
                     "gpu_memory_preservation": gpu_memory_preservation_val,
+                    "lora_cache": lora_cache_val,
                     "use_vae_cache": use_vae_cache_val,
                     # 詳細設定
                     "gs": gs_val,
@@ -6190,6 +6181,7 @@ with block:
                 # パフォーマンス設定
                 updates.append(gr.update(value=default_settings["use_teacache"]))
                 updates.append(gr.update(value=default_settings["gpu_memory_preservation"]))
+                updates.append(gr.update(value=default_settings.get("lora_cache", False)))
                 updates.append(gr.update(value=default_settings.get("use_vae_cache", False)))
                 
                 # 詳細設定
@@ -6248,6 +6240,7 @@ with block:
                     cfg,
                     use_teacache,
                     gpu_memory_preservation,
+                    lora_cache_checkbox,
                     gs,
                     use_all_padding,
                     all_padding_value,
@@ -6276,20 +6269,21 @@ with block:
                     cfg,                  # 4
                     use_teacache,         # 5
                     gpu_memory_preservation, # 6
-                    use_vae_cache,        # 7
-                    gs,                   # 8
-                    use_all_padding,      # 9
-                    all_padding_value,    # 10
-                    end_frame_strength,   # 11
-                    keep_section_videos,  # 12
-                    save_section_frames,  # 13
-                    save_tensor_data,     # 14
-                    frame_save_mode,      # 15
-                    save_settings_on_start, # 16
-                    alarm_on_completion,  # 17
-                    log_enabled,          # 18
-                    log_folder,           # 19
-                    settings_status       # 20
+                    lora_cache_checkbox,  # 7
+                    use_vae_cache,        # 8
+                    gs,                   # 9
+                    use_all_padding,      # 10
+                    all_padding_value,    # 11
+                    end_frame_strength,   # 12
+                    keep_section_videos,  # 13
+                    save_section_frames,  # 14
+                    save_tensor_data,     # 15
+                    frame_save_mode,      # 16
+                    save_settings_on_start, # 17
+                    alarm_on_completion,  # 18
+                    log_enabled,          # 19
+                    log_folder,           # 20
+                    settings_status       # 21
                 ]
             )
 

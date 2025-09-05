@@ -4405,7 +4405,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (
                     batch_output_filename if batch_output_filename is not None else gr.skip(),
-                    gr.update(value=None, visible=False),
+                    gr.update(visible=False),
                     gr.update(),
                     gr.update(),
                     gr.update(interactive=False),
@@ -4447,7 +4447,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
-                        gr.update(value=None, visible=False),
+                        gr.update(visible=False),
                         completion_message,
                         '',
                         gr.update(interactive=True),
@@ -4463,7 +4463,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     print(translate("バッチ {0}/{1} 完了 - 次のバッチに進みます").format(batch_index + 1, batch_count))
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
-                        gr.update(value=None, visible=False),
+                        gr.update(visible=False),
                         next_batch_message,
                         '',
                         gr.update(interactive=False),
@@ -4851,9 +4851,9 @@ with block:
             # LoRA設定キャッシュ
             with gr.Row():
                 lora_cache_checkbox = gr.Checkbox(
-                    label=translate("LoRAの設定を再起動時再利用する"),
+                    label=translate("FP8最適化辞書データをディスクにキャッシュする"),
                     value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
-                    info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
+                    info=translate("チェックをオンにすると、プロンプトやLoRA設定などを適用後して毎回生成するFP8最適化辞書データを再利用できるようにキャッシュとして保存します。プロンプトやLoRA設定の組み合わせごとに数十GBの大きなファイルが生成されますが、速度向上に寄与します。")
                 )
 
             def update_lora_cache(value):
@@ -5856,6 +5856,7 @@ with block:
                 # Performance settings
                 use_teacache_val,
                 gpu_memory_preservation_val,
+                lora_cache_val,
                 # Detail settings
                 gs_val,
                 # F1 specific settings
@@ -5887,6 +5888,7 @@ with block:
                     # パフォーマンス設定
                     "use_teacache": use_teacache_val,
                     "gpu_memory_preservation": gpu_memory_preservation_val,
+                    "lora_cache": lora_cache_val,
                     # 詳細設定
                     "gs": gs_val,
                     # F1独自設定
@@ -5967,20 +5969,21 @@ with block:
                 updates.append(gr.update(value=default_settings.get("cfg", 1.0)))  # 4
                 updates.append(gr.update(value=default_settings.get("use_teacache", True)))  # 5
                 updates.append(gr.update(value=default_settings.get("gpu_memory_preservation", 6)))  # 6
-                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 7
+                updates.append(gr.update(value=default_settings.get("lora_cache", False)))  # 7
+                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 8
                 # F1独自
-                updates.append(gr.update(value=default_settings.get("image_strength", 1.0)))  # 8
-                updates.append(gr.update(value=default_settings.get("keep_section_videos", False)))  # 9
-                updates.append(gr.update(value=default_settings.get("save_section_frames", False)))  # 10
-                updates.append(gr.update(value=default_settings.get("save_tensor_data", False)))  # 11
-                updates.append(gr.update(value=default_settings.get("frame_save_mode", translate("保存しない"))))  # 12
-                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 13
-                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 14
+                updates.append(gr.update(value=default_settings.get("image_strength", 1.0)))  # 9
+                updates.append(gr.update(value=default_settings.get("keep_section_videos", False)))  # 10
+                updates.append(gr.update(value=default_settings.get("save_section_frames", False)))  # 11
+                updates.append(gr.update(value=default_settings.get("save_tensor_data", False)))  # 12
+                updates.append(gr.update(value=default_settings.get("frame_save_mode", translate("保存しない"))))  # 13
+                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 14
+                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 15
                 
                 # ログ設定 (15番目め16番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
-                updates.append(gr.update(value=False))  # log_enabled (15)
-                updates.append(gr.update(value="logs"))  # log_folder (16)
+                updates.append(gr.update(value=False))  # log_enabled (16)
+                updates.append(gr.update(value="logs"))  # log_folder (17)
                 
                 # ログ設定をアプリケーションに適用
                 default_log_settings = {
@@ -5989,7 +5992,7 @@ with block:
                 }
 
                 # CONFIG QUEUE設定 - NEW (17番目の要素)
-                updates.append(gr.update(value=default_settings.get("add_timestamp_to_config", True)))  # 17
+                updates.append(gr.update(value=default_settings.get("add_timestamp_to_config", True)))  # 18
                 
                 # 設定ファイルを更新
                 all_settings = load_settings()
@@ -6000,7 +6003,7 @@ with block:
                 disable_logging()  # 既存のログを閉じる
                 
                 # 設定状態メッセージ (18番目の要素)
-                updates.append(translate("設定をデフォルトに戻しました"))
+                updates.append(translate("設定をデフォルトに戻しました"))  # 19
                 
                 return updates
 
@@ -6235,6 +6238,7 @@ with block:
             cfg,
             use_teacache,
             gpu_memory_preservation,
+            lora_cache_checkbox,
             gs,
             image_strength,
             keep_section_videos,
@@ -6263,18 +6267,19 @@ with block:
             cfg,                  # 4
             use_teacache,         # 5
             gpu_memory_preservation, # 6
-            gs,                   # 7
-            image_strength,       # 8
-            keep_section_videos,  # 9
-            save_section_frames,  # 10
-            save_tensor_data,     # 11
-            frame_save_mode,      # 12
-            save_settings_on_start, # 13
-            alarm_on_completion,  # 14
-            log_enabled,          # 15
-            log_folder,           # 16
-            config_queue_components['add_timestamp_to_config'], # 17 - NEW OUTPUT
-            settings_status       # 18
+            lora_cache_checkbox,  # 7
+            gs,                   # 8
+            image_strength,       # 9
+            keep_section_videos,  # 10
+            save_section_frames,  # 11
+            save_tensor_data,     # 12
+            frame_save_mode,      # 13
+            save_settings_on_start, # 14
+            alarm_on_completion,  # 15
+            log_enabled,          # 16
+            log_folder,           # 17
+            config_queue_components['add_timestamp_to_config'], # 18 - NEW OUTPUT
+            settings_status       # 19
         ]
     )
 
