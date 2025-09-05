@@ -1793,7 +1793,7 @@ def start_queue_processing_with_current_ui_values(
                 
                 if current_config:
                     if batch_progress['total'] > 0:
-                        batch_info = translate("Batch {0}/{1}").format(batch_progress['current'], batch_progress['total'])
+                        batch_info = translate("バッチ {0}/{1}").format(batch_progress['current'], batch_progress['total'])
                         status_msg = translate("📋 Processing: {0} ({1}) - {2} videos remaining").format(current_config, batch_info, remaining_videos)
                         desc_msg = translate("Processing {0} - {1} - {2} videos remaining").format(current_config, batch_info, remaining_videos)
                     else:

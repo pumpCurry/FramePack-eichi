@@ -897,6 +897,7 @@
   "ネガティブプロンプト": "Negative Prompt",
   "ネガティブプロンプトをエンコードしています...": "Encoding negative prompt...",
   "バックアップ作成エラー: {0}": "Backup creation error: {0}",
+  "バッチ {0}/{1}": "Batch {0}/{1}",
   "バッチ {0}/{1} のプロンプト: {2}...": "Batch {0}/{1} prompt: {2}...",
   "バッチ {0}/{1} の処理を開始: SEED値を {2} に設定しました。": "Starting batch {0}/{1} processing: Set SEED value to {2}.",
   "バッチ {0}/{1} の処理を開始: 新しいランダムSEED値 {2} を生成しました。": "Starting batch {0}/{1} processing: Generated new random SEED value {2}.",
