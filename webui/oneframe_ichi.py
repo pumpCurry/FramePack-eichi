@@ -2060,7 +2060,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     batch_stopped = True
                     user_abort = True
                     if not user_abort_notified:
-                        print(translate("\n[INFO] 開始前または現在の処理完了後に停止します..."))
+                        print("\n[INFO] " + translate("開始前または現在の処理完了後に停止します..."))
                         user_abort_notified = True
                     raise _UserStop()
 

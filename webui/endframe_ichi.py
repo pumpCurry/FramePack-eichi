@@ -3251,7 +3251,7 @@ def end_after_current_process():
         stop_after_current = True
         if stream is not None and stream.input_queue.top() != 'end':
             stream.input_queue.push('end')
-        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+        print("\n" + translate("停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
 
     return gr.update(value=translate("打ち切り処理中..."), interactive=False)
 
@@ -3263,7 +3263,7 @@ def end_after_step_process():
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
-        print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
+        print("\n" + translate("停止ボタンが押されました。現在のステップ完了後に停止します..."))
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
 
@@ -3358,7 +3358,7 @@ def end_after_step_process():
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
-        print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
+        print("\n" + translate("停止ボタンが押されました。現在のステップ完了後に停止します..."))
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
 
