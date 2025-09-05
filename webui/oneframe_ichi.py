@@ -311,15 +311,32 @@ def _cleanup_models(force: bool = False):
     gc.collect()
     torch.cuda.empty_cache()
 
-
 def is_generation_running():
     """生成ジョブが実行中なら True を返す。"""
     return generation_active
 
 
-def _compute_stop_controls(running: bool):
-    """UI停止系コントロールの状態を返すダミー実装（テスト用）"""
-    return False, False, False, '', ''
+def _compute_stop_controls(running: bool) -> tuple[bool, bool, str, str]:
+    """
+    ジェネレーターの停止条件を計算して返す。
+
+    Args:
+        running (bool): ジョブが現在実行中かどうかを表すフラグ。
+
+    Returns:
+        tuple:
+            stop_after_current (bool): 現在のステップ終了後に停止するか。
+            stop_after_step (bool): 次のステップ終了後に停止するか。
+            status_message (str): 状態を示すメッセージ（例: "Running" または "Stopped"）。
+            progress_message (str): 進捗を示すメッセージや空文字列。
+    """
+    # 実際の停止条件ロジックをここに記述する。
+    # 例えば、running が False の場合は即座に停止すべきとしてフラグを立てる。
+    stop_after_current = not running
+    stop_after_step = False
+    status_message = "Stopped" if not running else "Running"
+    progress_message = ""
+    return stop_after_current, stop_after_step, status_message, progress_message
 
 
 def progress_resync():
