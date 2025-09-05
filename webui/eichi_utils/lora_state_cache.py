@@ -108,13 +108,20 @@ def load_from_cache(cache_key):
                     unit="B", unit_scale=True, unit_divisor=1024,
                     desc=translate("キャッシュ読み込み中")
                 ) as wrapped:
-                    obj = torch.load(wrapped, map_location="cpu")
+                    try:
+                        obj = torch.load(wrapped, map_location="cpu", mmap=False)
+                    except TypeError:
+                        obj = torch.load(wrapped, map_location="cpu")
         except Exception:
             try:
                 _echo_fetching_cache(translate("キャッシュ読み込み中"))
             except Exception:
                 pass
-            obj = torch.load(cache_file, map_location="cpu")
+            try:
+                obj = torch.load(cache_file, map_location="cpu", mmap=False)
+            except TypeError:
+                obj = torch.load(cache_file, map_location="cpu")
+
 
         # ② 読み込んだデータをオンメモリに保存
         _inmem_set(cache_key, obj)

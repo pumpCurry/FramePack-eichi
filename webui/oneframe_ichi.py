@@ -1,7 +1,5 @@
 import os
 import traceback
-import importlib
-import sys
 
 __version__ = "1.9.5.3"
 
@@ -9,12 +7,6 @@ __version__ = "1.9.5.3"
 print(f"\n------------------------------------------------------------")
 print(f"{os.path.basename(__file__)} : version {__version__} Starting....")
 print(f"------------------------------------------------------------\n")
-
-# 'locales' パッケージをトップレベルでも参照できるようエイリアスを登録
-_locales_pkg = importlib.import_module("webui.locales")
-sys.modules.setdefault("locales", _locales_pkg)
-sys.modules.setdefault("locales.i18n", importlib.import_module("webui.locales.i18n"))
-sys.modules.setdefault("locales.i18n_extended", importlib.import_module("webui.locales.i18n_extended"))
 
 # 進捗バーやスピナーと協調するスレッドセーフなprint文を有効化
 from eichi_utils.tqdm_print import enable_tqdm_print
@@ -3817,11 +3809,11 @@ with block:
                         value=1,
                         step=1,
                         info=translate("参照画像1枚につき連続生成する回数"),
-                        scale=0,
-                        min_width=160,
+                        scale=1,
+                        min_width=0,
                     )
 
-                # 参照キュー機能 ON のときだけ見せる設定（入力フォルダなど）
+                # 参照キュー機能 ON のときだけ見せる設定（参照画像フォルダなど）
                 with gr.Column(visible=False) as reference_queue_only:
                     with gr.Row():
                         reference_input_folder_name = gr.Textbox(
@@ -3830,12 +3822,12 @@ with block:
                             info=translate("参照画像ファイルを格納するフォルダ名"),
                         )
                         open_reference_folder_btn = gr.Button(
-                            value="📂 " + translate("保存及び入力フォルダを開く"),
+                            value="📂 " + translate("保存及び参照画像フォルダを開く"),
                             size="md",
                         )
 
                     # 動作説明
-                    gr.Markdown(translate("※ 1回目は参照画像を使用し、2回目以降は入力フォルダの画像ファイルを修正日時の昇順で使用します。"))
+                    gr.Markdown(translate("※ 1回目は参照画像を使用し、2回目以降は参照画像フォルダの画像ファイルを修正日時の昇順で使用します。"))
 
 
                 def toggle_reference_queue(val):
