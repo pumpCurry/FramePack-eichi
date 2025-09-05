@@ -282,7 +282,14 @@ def _cleanup_models(force: bool = False):
     # ② 再利用ONなら、Transformer破棄は常にスキップ
     if _reuse:
         print(translate("Transformer保持: 破棄スキップ（reuse_optimized_dict が有効）"))
+        # LoRAキャッシュも保持
     else:
+        # 再利用OFF時はオンメモリLoRAキャッシュをクリア
+        try:
+            lora_state_cache._inmem_clear()
+            print(translate("LoRAオンメモリキャッシュをクリアしました"))
+        except Exception:
+            pass
         # ③ 再利用OFFのときだけ、従来の high_vram 最適化を適用
         if not force and high_vram:
             return
