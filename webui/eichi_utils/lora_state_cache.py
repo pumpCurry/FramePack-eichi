@@ -90,7 +90,7 @@ def load_from_cache(cache_key):
         return mem
 
     cache_file = os.path.join(get_cache_dir(), cache_key + '.pt')
-    print(translate("出力済みLoRA キャッシュを読み込んでいます: {0}").format(cache_file))
+    print(translate("出力済みLoRA キャッシュを読み込んでいます: {0}").format(cache_key + '.pt'))
 
     if not os.path.exists(cache_file):
         print(translate("LoRA キャッシュ Miss"))
@@ -121,6 +121,7 @@ def load_from_cache(cache_key):
                 obj = torch.load(cache_file, map_location="cpu", mmap=False)
             except TypeError:
                 obj = torch.load(cache_file, map_location="cpu")
+
         # ② 読み込んだデータをオンメモリに保存
         _inmem_set(cache_key, obj)
         print(translate("LoRA キャッシュ Hit"))
