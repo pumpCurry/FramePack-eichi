@@ -1,9 +1,10 @@
 import json
+import logging
 from pathlib import Path
 
 import pytest
 
-from webui.locales.i18n import init, test_translate
+from webui.locales.i18n import init, test_translate as translate_checker
 
 def test_all_locale_keys_have_translations(caplog: pytest.LogCaptureFixture) -> None:
     """
@@ -37,7 +38,7 @@ def test_all_locale_keys_have_translations(caplog: pytest.LogCaptureFixture) -> 
         data = json.loads(json_path.read_text(encoding="utf-8"))
         # 各キーを取得し、全ロケールで翻訳されているか判定
         for key in data.keys():
-            all_present, _, results = test_translate(key, locales)
+            all_present, _, results = translate_checker(key, locales)
             if all_present:
                 # すべての言語で翻訳が存在した場合
                 success_total += 1
@@ -50,7 +51,8 @@ def test_all_locale_keys_have_translations(caplog: pytest.LogCaptureFixture) -> 
                         failure_counts[locale] += 1
 
     # ログ出力（pytest の caplog フィクスチャを通して確認可能）
-    caplog.info(
+    logger = logging.getLogger(__name__)
+    logger.info(
         "Translation test completed: success=%s, failure=%s, failures_by_locale=%s",
         success_total,
         failure_total,
