@@ -6048,6 +6048,7 @@ with block:
                 steps_val,
                 cfg_val,
                 use_teacache_val,
+                lora_cache_val,
                 gpu_memory_preservation_val,
                 gs_val,
                 use_all_padding_val,
@@ -6076,6 +6077,7 @@ with block:
                     "cfg": cfg_val,
                     # パフォーマンス設定
                     "use_teacache": use_teacache_val,
+                    "lora_cache": lora_cache_val,
                     "gpu_memory_preservation": gpu_memory_preservation_val,
                     "use_vae_cache": use_vae_cache_val,
                     # 詳細設定
@@ -6162,6 +6164,7 @@ with block:
                 
                 # パフォーマンス設定
                 updates.append(gr.update(value=default_settings["use_teacache"]))
+                updates.append(gr.update(value=default_settings.get("lora_cache", False)))
                 updates.append(gr.update(value=default_settings["gpu_memory_preservation"]))
                 updates.append(gr.update(value=default_settings.get("use_vae_cache", False)))
                 
@@ -6184,31 +6187,34 @@ with block:
                 # 自動保存設定
                 updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))
                 
-                # アラーム設定 (17番目の要素)
+                # アラーム設定 (18番目の要素)
                 updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))
-                
-                # ログ設定 (18番目と19番目の要素)
+
+                # ログ設定 (19番目と20番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
-                updates.append(gr.update(value=False))  # log_enabled (18)
-                updates.append(gr.update(value="logs"))  # log_folder (19)
+                updates.append(gr.update(value=False))  # log_enabled (19)
+                updates.append(gr.update(value="logs"))  # log_folder (20)
                 
-                # ステータスメッセージ (20番目の要素)
+                # ステータスメッセージ (21番目の要素)
                 updates.append(translate("🔄 設定をデフォルト値にリセットしました"))
-                
+
                 # ログ設定をアプリケーションに適用
                 default_log_settings = {
                     "log_enabled": False,
                     "log_folder": "logs"
                 }
-                
+
                 # 設定ファイルを更新
                 all_settings = load_settings()
                 all_settings['log_settings'] = default_log_settings
                 save_settings(all_settings)
-                
+
                 # ログ設定を適用 (既存のログファイルを閉じて、設定に従って再設定)
                 disable_logging()  # 既存のログを閉じる
-                
+
+                # LoRAキャッシュをデフォルト値に合わせる
+                lora_state_cache.set_cache_enabled(default_settings.get("lora_cache", False))
+
                 return updates
             
             # イベントハンドラの登録
@@ -6220,6 +6226,7 @@ with block:
                     steps,
                     cfg,
                     use_teacache,
+                    lora_cache_checkbox,
                     gpu_memory_preservation,
                     gs,
                     use_all_padding,
@@ -6238,7 +6245,7 @@ with block:
                 outputs=[settings_status]
             )
             
-            # リセットボタンのクリックイベント (20出力)
+            # リセットボタンのクリックイベント (21出力)
             reset_settings_btn.click(
                 fn=reset_app_settings_handler,
                 inputs=[],
@@ -6248,21 +6255,22 @@ with block:
                     steps,                # 3
                     cfg,                  # 4
                     use_teacache,         # 5
-                    gpu_memory_preservation, # 6
-                    use_vae_cache,        # 7
-                    gs,                   # 8
-                    use_all_padding,      # 9
-                    all_padding_value,    # 10
-                    end_frame_strength,   # 11
-                    keep_section_videos,  # 12
-                    save_section_frames,  # 13
-                    save_tensor_data,     # 14
-                    frame_save_mode,      # 15
-                    save_settings_on_start, # 16
-                    alarm_on_completion,  # 17
-                    log_enabled,          # 18
-                    log_folder,           # 19
-                    settings_status       # 20
+                    lora_cache_checkbox,  # 6
+                    gpu_memory_preservation, # 7
+                    use_vae_cache,        # 8
+                    gs,                   # 9
+                    use_all_padding,      # 10
+                    all_padding_value,    # 11
+                    end_frame_strength,   # 12
+                    keep_section_videos,  # 13
+                    save_section_frames,  # 14
+                    save_tensor_data,     # 15
+                    frame_save_mode,      # 16
+                    save_settings_on_start, # 17
+                    alarm_on_completion,  # 18
+                    log_enabled,          # 19
+                    log_folder,           # 20
+                    settings_status       # 21
                 ]
             )
 
@@ -6390,6 +6398,7 @@ with block:
                 "cfg": cfg,
                 # パフォーマンス設定
                 "use_teacache": use_teacache,
+                "lora_cache": lora_state_cache.cache_enabled,
                 "gpu_memory_preservation": gpu_memory_preservation,
                 "use_vae_cache": use_vae_cache,
                 # 詳細設定

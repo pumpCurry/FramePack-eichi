@@ -208,6 +208,7 @@ def get_default_app_settings(current_lang="ja"):
         
         # パフォーマンス設定
         "use_teacache": True,
+        "lora_cache": False,
         "use_prompt_cache": True,
         "gpu_memory_preservation": 6,
         "use_vae_cache": False,
@@ -253,6 +254,7 @@ def get_default_app_settings_f1(current_lang="ja"):
         
         # パフォーマンス設定
         "use_teacache": True,
+        "lora_cache": False,
         "gpu_memory_preservation": 6,
         
         # 詳細設定
@@ -402,7 +404,7 @@ def save_app_settings_f1(app_settings):
     
     # 保存すべきキーのみを含める（許可リスト方式）
     allowed_keys = [
-        'resolution', 'mp4_crf', 'steps', 'cfg', 'use_teacache',
+        'resolution', 'mp4_crf', 'steps', 'cfg', 'use_teacache', 'lora_cache',
         'gpu_memory_preservation', 'gs', 'image_strength',
         'keep_section_videos', 'save_section_frames', 'save_tensor_data',
         'frame_save_mode', 'save_settings_on_start', 'alarm_on_completion',
