@@ -89,6 +89,7 @@ def load_from_cache(cache_key):
         print(translate("オンメモリのLoRA キャッシュを再利用します: {0}").format(cache_key))
         return mem
 
+    cache_dir = get_cache_dir()
     cache_fullpath = os.path.join(cache_dir, cache_key + '.pt')
     cache_filename = cache_key + '.pt'
 
