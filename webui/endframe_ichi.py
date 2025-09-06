@@ -2482,6 +2482,10 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         stream.output_queue.push(('end', None))
     except Exception as stream_e:
         print(f"ストリーム終了処理でエラーが発生: {str(stream_e)}")
+
+    # 生成処理終了後のクリーンアップを必ず実行
+    cleanup_generation_resources()
+
     return
 
 # 画像のバリデーション関数
