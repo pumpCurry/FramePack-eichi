@@ -280,26 +280,29 @@ def _cleanup_models(force: bool = False):
     global transformer, vae, text_encoder, text_encoder_2, image_encoder
     global current_reuse_optimized_dict
 
-    # ① 現在のジョブ設定から再利用フラグを参照
+    # 0. 呼ばれたときのフラグ情報をCUIに出力
+    print(translate("cleanup: force={0}, reuse_job_flag={1}").format(force, current_reuse_optimized_dict))
+
+    # 1. 現在のジョブ設定から再利用フラグを参照
     _reuse = bool(current_reuse_optimized_dict)
 
-    # ② 再利用ONなら、Transformer破棄は常にスキップ
+    # 2. 再利用ONなら、Transformer破棄は常にスキップ
     if _reuse:
         print(translate("Transformer保持: 破棄スキップ（reuse_optimized_dict が有効）"))
         return
 
-    # ③ 再利用OFFのときはLoRAオンメモリキャッシュを確実に破棄
+    # 3. 再利用OFFのときはLoRAオンメモリキャッシュを確実に破棄
     try:
         from eichi_utils import lora_state_cache as _lsc
         _lsc._inmem_clear()
     except Exception:
         pass
 
-    # ④ 従来の high_vram 最適化を尊重
+    # 4. 従来の high_vram 最適化を尊重
     if not force and high_vram:
         return
 
-    # ⑤ Transformer/各モデルの破棄
+    # 5. Transformer/各モデルの破棄
     try:
         transformer_manager.dispose_transformer()
     except Exception:
@@ -1348,7 +1351,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     current_lora_scales = [0.8] * len(current_lora_paths)
                     for i, (path, scale) in enumerate(zip(current_lora_paths, current_lora_scales)):
                         print(translate("LoRA {0}: {1} (デフォルトスケール: {2})").format(i+1, os.path.basename(path), scale))
-        
+
         # -------- LoRA 設定 START ---------
 
         # UIの生値を正規化（allow_custom_value=True の場合はboolの可能性あり）
@@ -1363,20 +1366,25 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             use_lora = True
 
         # LoRA設定のみを更新
-        # v1.9.4 までは、常に辞書分割 (force_dict_split=True) を行っていましたが、
-        # LoRA の設定を再起動時に再利用する (lora_cache) が有効な場合は
-        # FP8 最適化済みの状態辞書をディスクから読み込み直すため、辞書の再分割をスキップします。
-        # ここでは引数で渡された lora_cache の値を参照してキャッシュ状態を判断し、
-        # force_dict_split を動的に切り替えます。
+        # v1.9.4 までは常に辞書分割 (force_dict_split=True) でしたが、
+        # LoRAキャッシュ (lora_cache) または 最適化辞書の再利用 (reuse_optimized_dict)
+        # のいずれかが有効な場合は、辞書の再分割を抑止します。
         lora_cache_enabled = bool(lora_cache)
 
-        # LoRA キャッシュを利用する場合は、FP8 最適化を再度実行せず、辞書の分割も行わない。
-        if lora_cache_enabled:
-            fp8_enabled_flag = False
-            force_dict_split_flag = False
-        else:
-            fp8_enabled_flag = fp8_optimization
-            force_dict_split_flag = True
+        # 実行中ジョブの reuse フラグ（Start押下時に process() 冒頭で確定）
+        global current_reuse_optimized_dict
+        reuse_flag = bool(current_reuse_optimized_dict)
+
+        # LoRA キャッシュ利用時は FP8 最適化を再実行しない。
+        # それ以外では UI の fp8_optimization に従う。
+        fp8_enabled_flag = bool(fp8_optimization) and not lora_cache_enabled
+
+        # 「LoRAキャッシュ」または「最適化辞書の再利用」のどちらかが有効なら分割を抑止
+        force_dict_split_flag = not (lora_cache_enabled or reuse_flag)
+
+        # （LoRA設定を診断できるログ）
+        print(translate("LoRA設定: lora_cache={0}, reuse={1}, fp8={2}, force_split={3}")
+              .format(lora_cache_enabled, reuse_flag, fp8_enabled_flag, force_dict_split_flag))
 
         transformer_manager.set_next_settings(
             lora_paths=current_lora_paths,
@@ -1386,7 +1394,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             force_dict_split=force_dict_split_flag
         )
         # -------- LoRA 設定 END ---------
-        
+
+
         # セクション処理開始前にtransformerの状態を確認
         print(translate("LoRA適用前のtransformer状態チェック..."))
         try:
