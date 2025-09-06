@@ -267,6 +267,8 @@ current_seed = None
 # 再同期処理に使用される生成状態フラグ
 generation_active = False
 
+# Transformer再利用フラグ（生成中の設定を保持）
+current_reuse_optimized_dict = False
 
 def _preview_update(image):
     """画面更新ヘルパー: イメージがNoneの場合、生成済みイメージを見られるようにを維持"""
@@ -276,34 +278,31 @@ def _preview_update(image):
 
 def _cleanup_models(force: bool = False):
     global transformer, vae, text_encoder, text_encoder_2, image_encoder
+    global current_reuse_optimized_dict
 
-    # ① まず設定から再利用フラグを読む
-    try:
-        from eichi_utils import settings_manager as _sm
-        _load_app = getattr(_sm, 'load_app_settings_oichi', None) or getattr(_sm, 'load_app_settings', None)
-        _cfg = _load_app() if _load_app else {}
-        _reuse = bool(_cfg.get('reuse_optimized_dict', False))
-    except Exception:
-        print(translate("Transformer破棄の可否判定時、例外トラップしました"))
-        _reuse = False
+    # ① 現在のジョブ設定から再利用フラグを参照
+    _reuse = bool(current_reuse_optimized_dict)
 
     # ② 再利用ONなら、Transformer破棄は常にスキップ
-    if _reuse:
         print(translate("Transformer保持: 破棄スキップ（reuse_optimized_dict が有効）"))
         return
-    else:
-        # オンメモリのLoRAキャッシュを無効化
-        try:
-            from eichi_utils import lora_state_cache as _lsc
-            _lsc._inmem_clear()
-        except Exception:
-            pass
-        # ③ 再利用OFFのときだけ、従来の high_vram 最適化を適用
-        if not force and high_vram:
-            return
-        transformer_manager.dispose_transformer()
 
-    # ④ 既存のアンロード処理（必要ならそのまま維持）
+    # ③ 再利用OFFのときはLoRAオンメモリキャッシュを確実に破棄
+    try:
+        from eichi_utils import lora_state_cache as _lsc
+        _lsc._inmem_clear()
+    except Exception:
+        pass
+
+    # ④ 従来の high_vram 最適化を尊重
+    if not force and high_vram:
+        return
+
+    # ⑤ Transformer/各モデルの破棄
+    try:
+        transformer_manager.dispose_transformer()
+    except Exception:
+        pass
     try:
         unload_complete_models(text_encoder, text_encoder_2, image_encoder, vae, None)
     except Exception:
@@ -2658,6 +2657,7 @@ def check_metadata_on_checkbox_change(should_copy, image_path):
     """チェックボックスの状態が変更された時に画像からメタデータを抽出する関数"""
     return update_from_image_metadata(image_path, should_copy)
 
+
 def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_prompt_cache,
             lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, lora_cache, resolution, output_directory=None,
             save_input_images=False, save_before_input_images=False, batch_count=1, use_random_seed=False, latent_window_size=9, latent_index=0,
@@ -2670,6 +2670,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             reference_batch_count=1, use_reference_queue=False,
             save_settings_on_start=False, alarm_on_completion=True,
             log_enabled=None, log_folder=None, reuse_optimized_dict=False):
+
     global stream
     global batch_stopped, stop_after_current, stop_after_step, stop_mode, last_stop_mode, user_abort, user_abort_notified
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
@@ -2690,6 +2691,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # 新たな処理開始時にグローバルフラグをリセット
     user_abort = False
     user_abort_notified = False
+
+    # 今回ジョブの再利用設定を反映
+    global current_reuse_optimized_dict
+    current_reuse_optimized_dict = bool(reuse_optimized_dict)
 
     # プロセス開始時にバッチ中断フラグをリセット
     batch_stopped = False
@@ -4940,10 +4945,10 @@ with block:
                 updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  #21
                 updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  #22
 
-                # ログ設定 (17番目め18番目の要素)
+                # ログ設定 (23番目と24番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
-                updates.append(gr.update(value=False))  # log_enabled (17)
-                updates.append(gr.update(value="logs"))  # log_folder (18)
+                updates.append(gr.update(value=False))  # log_enabled (23)
+                updates.append(gr.update(value="logs"))  # log_folder (24)
                 
                 # ログ設定をアプリケーションに適用
                 default_log_settings = {
@@ -5188,6 +5193,11 @@ with block:
                 lora_mode_val = fav.get("lora_mode", translate("ディレクトリから選択"))
                 use_ref = fav.get("use_reference_image", False)
                 lora_state_cache.set_cache_enabled(fav.get("lora_cache", False))
+                # reuse_optimized_dict も永続設定へ即時反映（gr.update はchangeを発火しないため）
+                try:
+                    update_reuse(fav.get("reuse_optimized_dict", False))
+                except Exception as _e:
+                    print(translate("reuse_optimized_dict の反映に失敗しました: {0}").format(_e))
 
                 message_parts = []
                 # 現在のLoRA候補を取得
