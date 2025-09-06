@@ -1405,4 +1405,17 @@
   "🗑️ Delete": "🗑️ Delete",
   "🗑️ Removed file: {0}": "🗑️ Removed file: {0}",
   "🛑 Stopping queue processing...": "🛑 Stopping queue processing..."
+
+  ,"{0} : Starting....": "{0} : Starting...."
+  ,"{0} : version {1} Starting....": "{0} : version {1} Starting...."
+  ,"Batch index is not specified.": "Batch index is not specified."
+  ,"No valid lines in prompt file.": "No valid lines in prompt file."
+  ,"Using normal decode: history frame.": "Using normal decode: history frame."
+  ,"An error occurred: {0}": "An error occurred: {0}"
+  ,"Another error occurred during error handling: {0}": "Another error occurred during error handling: {0}"
+  ,"Error occurred during cleanup: {0}": "Error occurred during cleanup: {0}"
+  ,"Error occurred during stream finalization: {0}": "Error occurred during stream finalization: {0}"
+  ,"Enabled LoRA usage because a LoRA was selected in the directory.": "Enabled LoRA usage because a LoRA was selected in the directory."
+  ,"Checkbox is off; keeping current prompt value.": "Checkbox is off; keeping current prompt value."
+  ,"No valid prompts in prompt queue file.": "No valid prompts in prompt queue file."
 }
