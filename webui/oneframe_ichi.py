@@ -3176,6 +3176,20 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             target_index, history_index, reference_long_edge, input_mask, reference_mask
         )
 
+        # 何らかの理由でコンテキスト生成に失敗した場合は現在のジョブを参照して復旧を試みる
+        if ctx is None:
+            with ctx_lock:
+                ctx = cur_job
+        if ctx is None:
+            print(translate("ジョブの初期化に失敗しました"))
+            yield None, _preview_update(last_preview_image), translate("エラーにより処理が中断されました"), '', \
+                gr.update(interactive=True, value=translate("Start Generation")), \
+                gr.update(interactive=False, value=translate("End Generation")), \
+                gr.update(interactive=False, value=translate("この生成で打ち切り")), \
+                gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            generation_active = False
+            return
+
         try:
             yield from _stream_job_to_ui(ctx)
 
