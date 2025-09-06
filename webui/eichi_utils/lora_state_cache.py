@@ -102,18 +102,71 @@ def load_from_cache(cache_key):
     try:
         size = os.path.getsize(cache_fullpath)
         try:
+            import sys
             from tqdm import tqdm
-            with open(cache_fullpath, "rb") as f:
-                with tqdm.wrapattr(
-                    f, "read",
-                    total=size,
-                    unit="B", unit_scale=True, unit_divisor=1024,
-                    desc=translate("キャッシュ読み込み中")
-                ) as wrapped:
-                    try:
-                        obj = torch.load(wrapped, map_location="cpu", mmap=False)
-                    except TypeError:
-                        obj = torch.load(wrapped, map_location="cpu")
+
+            class _TqdmReader:
+                """ファイルオブジェクトをラップし、読み取り操作時にtqdmの進行状況を更新"""
+
+                def __init__(self, f, total, desc):
+                    self._f = f
+                    self._t = tqdm(
+                        total=total,
+                        unit="B",
+                        unit_scale=True,
+                        unit_divisor=1024,
+                        desc=desc,
+                        mininterval=0.2,
+                        disable=not sys.stderr.isatty(),
+                    )
+
+                def read(self, *args, **kwargs):
+                    data = self._f.read(*args, **kwargs)
+                    self._t.update(len(data))
+                    return data
+
+                def readinto(self, b):
+                    n = self._f.readinto(b)
+                    self._t.update(n)
+                    return n
+
+                # 一部のZip/IOスタックではread1()を使用する場合があるので考慮にふくめる
+                def read1(self, n=-1):
+                    if hasattr(self._f, "read1"):
+                        data = self._f.read1(n)
+                        self._t.update(len(data))
+                        return data
+                    # Fallback to normal read
+                    data = self._f.read(n)
+                    self._t.update(len(data))
+                    return data
+
+
+                def finalize(self):
+                    if self._t.total is not None and self._t.n < self._t.total:
+                        self._t.update(self._t.total - self._t.n)
+
+                def close(self):
+                    self.finalize()
+                    self._t.close()
+                    self._f.close()
+
+                def __getattr__(self, name):
+                    return getattr(self._f, name)
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    self.close()
+
+            with open(cache_fullpath, "rb") as f, _TqdmReader(
+                f, size, translate("キャッシュ読み込み中")
+            ) as wrapped:
+                try:
+                    obj = torch.load(wrapped, map_location="cpu", mmap=False)
+                except TypeError:
+                    obj = torch.load(wrapped, map_location="cpu")
         except Exception:
             try:
                 _echo_fetching_cache(translate("キャッシュ読み込み中"))
