@@ -3812,7 +3812,8 @@ with block:
                 fp8_optimization = gr.Checkbox(
                     label=translate("FP8 最適化"),
                     value=saved_app_settings.get("fp8_optimization", True) if saved_app_settings else True,
-                    info=translate("メモリ使用量を削減し速度を改善（PyTorch 2.1以上が必要）")
+                    info=translate("メモリ使用量を削減し速度を改善（PyTorch 2.1以上が必要）"),
+                    elem_classes="saveable-setting",
                 )
 
             # LoRA設定キャッシュ(FP8最適化辞書データをディスクにキャッシュする)
@@ -3820,7 +3821,8 @@ with block:
                 lora_cache_checkbox = gr.Checkbox(
                     label=translate("FP8最適化辞書データをディスクにキャッシュする"),
                     value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
-                    info=translate("チェックをオンにすると、プロンプトやLoRA設定などを適用後して毎回生成するFP8最適化辞書データを再利用できるようにキャッシュとして保存します。プロンプトやLoRA設定の組み合わせごとに数十GBの大きなファイルが生成されますが、速度向上に寄与します。")
+                    info=translate("チェックをオンにすると、プロンプトやLoRA設定などを適用後して毎回生成するFP8最適化辞書データを再利用できるようにキャッシュとして保存します。プロンプトやLoRA設定の組み合わせごとに数十GBの大きなファイルが生成されますが、速度向上に寄与します。"),
+                    elem_classes="saveable-setting",
                 )
 
             def update_lora_cache(value):
