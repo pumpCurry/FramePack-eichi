@@ -2889,7 +2889,17 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # 空の入力画像を生成
         # ここではNoneのままとし、実際のworker関数内でNoneの場合に対応する
     
-    yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+    yield (
+        last_output_filename if last_output_filename is not None else gr.skip(),
+        gr.update(value=None, visible=False),
+        '',
+        '',
+        gr.update(interactive=False),
+        gr.update(interactive=True),
+        gr.update(interactive=True),
+        gr.update(interactive=True),
+        gr.update(),
+    )
     
     # バッチ処理用の変数 - 各フラグをリセット
     batch_stopped = False
@@ -2916,7 +2926,17 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update(value=seed)
+        yield (
+            last_output_filename if last_output_filename is not None else gr.skip(),
+            gr.update(value=None, visible=False),
+            '',
+            '',
+            gr.update(interactive=False),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
+            gr.update(value=seed),
+        )
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
@@ -2925,7 +2945,17 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             seed = 31337
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
         # UI更新（値は変更しない）
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+        yield (
+            last_output_filename if last_output_filename is not None else gr.skip(),
+            gr.update(value=None, visible=False),
+            '',
+            '',
+            gr.update(interactive=False),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
+            gr.update(),
+        )
         original_seed = seed
     
     # 設定の自動保存処理（最初のバッチ開始時のみ）
@@ -3038,7 +3068,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         if batch_stopped:
             print(translate("バッチ処理がユーザーによって中止されました"))
             yield (
-                gr.skip(),
+                last_output_filename if last_output_filename is not None else gr.skip(),
                 _preview_update(last_preview_image),
                 translate("バッチ処理が中止されました。"),
                 '',
@@ -3055,7 +3085,17 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), _preview_update(last_preview_image), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+            yield (
+                last_output_filename if last_output_filename is not None else gr.skip(),
+                _preview_update(last_preview_image),
+                batch_info,
+                "",
+                gr.update(interactive=False),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.update(),
+            )
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
         current_prompt = prompt
@@ -3130,7 +3170,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         )
         last_progress_bar = make_progress_bar_html(0, '')
         yield (
-            gr.skip(),
+            last_output_filename if last_output_filename is not None else gr.skip(),
             _preview_update(last_preview_image),
             last_progress_desc,
             last_progress_bar,
@@ -3187,11 +3227,17 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 ctx = cur_job
         if ctx is None:
             print(translate("ジョブの初期化に失敗しました"))
-            yield gr.skip(), _preview_update(last_preview_image), translate("エラーにより処理が中断されました"), '', \
-                gr.update(interactive=True, value=translate("Start Generation")), \
-                gr.update(interactive=False, value=translate("End Generation")), \
-                gr.update(interactive=False, value=translate("この生成で打ち切り")), \
-                gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            yield (
+                last_output_filename if last_output_filename is not None else gr.skip(),
+                _preview_update(last_preview_image),
+                translate("エラーにより処理が中断されました"),
+                '',
+                gr.update(interactive=True, value=translate("Start Generation")),
+                gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                gr.update(interactive=False, value=translate("このステップで打ち切り")),
+                gr.update(),
+            )
             generation_active = False
             return
 
@@ -3234,14 +3280,34 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 pass
             
             # UIをリセット
-            yield gr.skip(), _preview_update(last_preview_image), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            yield (
+                last_output_filename if last_output_filename is not None else gr.skip(),
+                _preview_update(last_preview_image),
+                translate("キーボード割り込みにより処理が中断されました"),
+                '',
+                gr.update(interactive=True, value=translate("Start Generation")),
+                gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                gr.update(interactive=False, value=translate("このステップで打ち切り")),
+                gr.update(),
+            )
             generation_active = False
             return
         except Exception as e:
             import traceback
             traceback.print_exc()
             # UIをリセット
-            yield gr.skip(), _preview_update(last_preview_image), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            yield (
+                last_output_filename if last_output_filename is not None else gr.skip(),
+                _preview_update(last_preview_image),
+                translate("エラーにより処理が中断されました"),
+                '',
+                gr.update(interactive=True, value=translate("Start Generation")),
+                gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False, value=translate("この生成で打ち切り")),
+                gr.update(interactive=False, value=translate("このステップで打ち切り")),
+                gr.update(),
+            )
             generation_active = False
             return
         finally:
