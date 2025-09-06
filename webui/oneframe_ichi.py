@@ -284,6 +284,7 @@ def _cleanup_models(force: bool = False):
     _reuse = bool(current_reuse_optimized_dict)
 
     # ② 再利用ONなら、Transformer破棄は常にスキップ
+    if _reuse:
         print(translate("Transformer保持: 破棄スキップ（reuse_optimized_dict が有効）"))
         return
 
@@ -314,7 +315,10 @@ def _cleanup_models(force: bool = False):
     image_encoder = None
     import gc
     gc.collect()
-    torch.cuda.empty_cache()
+    
+    # cudaじゃない環境で動かされていた時の例外を防ぐ
+    if hasattr(torch, "cuda") and torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 def is_generation_running():
     """生成ジョブが実行中なら True を返す。"""
@@ -3811,7 +3815,7 @@ with block:
                     info=translate("メモリ使用量を削減し速度を改善（PyTorch 2.1以上が必要）")
                 )
 
-            # LoRA設定キャッシュ
+            # LoRA設定キャッシュ(FP8最適化辞書データをディスクにキャッシュする)
             with gr.Row():
                 lora_cache_checkbox = gr.Checkbox(
                     label=translate("FP8最適化辞書データをディスクにキャッシュする"),
@@ -3820,14 +3824,10 @@ with block:
                 )
 
             def update_lora_cache(value):
-                # グローバルなロラキャッシュフラグを更新
-                lora_state_cache.set_cache_enabled(value)
-                # 設定ファイルに保存
+                # チェック状態変更：設定トグル時CUI表示
                 try:
-                    current = load_app_settings_oichi()
-                    current["lora_cache"] = bool(value)
-                    save_app_settings_oichi(current)
-                    print(translate("設定を保存しました"))
+                    lora_state_cache.set_cache_enabled(value)
+                    print(translate("FP8最適化辞書データをディスクにキャッシュする: {0}").format(bool(value)))
                 except Exception as e:
                     print(e)
                 return None
@@ -3855,15 +3855,13 @@ with block:
                     elem_classes="saveable-setting"
                 )
 
-                # チェック状態が変わったときに設定を保存
                 def update_reuse(value):
+                # チェック状態変更：設定トグル時CUI表示
                     try:
-                        current = load_app_settings_oichi()
-                        current["reuse_optimized_dict"] = bool(value)
-                        save_app_settings_oichi(current)
-                        print(translate("設定を保存しました"))
+                        print(translate(" 生成都度破棄せずに連続して最適化済み辞書利用する: {0}").format(bool(value)))
                     except Exception as e:
                         print(e)
+                    return None
 
                 reuse_optimized_dict_checkbox.change(fn=update_reuse, inputs=[reuse_optimized_dict_checkbox], outputs=[])
 
@@ -5193,11 +5191,6 @@ with block:
                 lora_mode_val = fav.get("lora_mode", translate("ディレクトリから選択"))
                 use_ref = fav.get("use_reference_image", False)
                 lora_state_cache.set_cache_enabled(fav.get("lora_cache", False))
-                # reuse_optimized_dict も永続設定へ即時反映（gr.update はchangeを発火しないため）
-                try:
-                    update_reuse(fav.get("reuse_optimized_dict", False))
-                except Exception as _e:
-                    print(translate("reuse_optimized_dict の反映に失敗しました: {0}").format(_e))
 
                 message_parts = []
                 # 現在のLoRA候補を取得
