@@ -279,6 +279,7 @@ def _cleanup_models(force: bool = False):
         _cfg = _load_app() if _load_app else {}
         _reuse = bool(_cfg.get('reuse_optimized_dict', False))
     except Exception:
+        print(translate("Transformer破棄の可否判定時、例外トラップしました"))
         _reuse = False
 
     # ② 再利用ONなら、Transformer破棄は常にスキップ
@@ -3186,7 +3187,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 ctx = cur_job
         if ctx is None:
             print(translate("ジョブの初期化に失敗しました"))
-            yield None, _preview_update(last_preview_image), translate("エラーにより処理が中断されました"), '', \
+            yield gr.skip(), _preview_update(last_preview_image), translate("エラーにより処理が中断されました"), '', \
                 gr.update(interactive=True, value=translate("Start Generation")), \
                 gr.update(interactive=False, value=translate("End Generation")), \
                 gr.update(interactive=False, value=translate("この生成で打ち切り")), \
@@ -3233,14 +3234,14 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 pass
             
             # UIをリセット
-            yield None, _preview_update(last_preview_image), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            yield gr.skip(), _preview_update(last_preview_image), translate("キーボード割り込みにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
             generation_active = False
             return
         except Exception as e:
             import traceback
             traceback.print_exc()
             # UIをリセット
-            yield None, _preview_update(last_preview_image), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
+            yield gr.skip(), _preview_update(last_preview_image), translate("エラーにより処理が中断されました"), '', gr.update(interactive=True, value=translate("Start Generation")), gr.update(interactive=False, value=translate("End Generation")), gr.update(interactive=False, value=translate("この生成で打ち切り")), gr.update(interactive=False, value=translate("このステップで打ち切り")), gr.update()
             generation_active = False
             return
         finally:
