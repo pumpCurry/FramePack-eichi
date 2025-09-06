@@ -366,14 +366,14 @@ def cleanup_generation_resources():
         _reuse = os.environ.get('FRAMEPACK_REUSE_FP8', '0') in ('1', 'true', 'TRUE')
         if not _reuse:
             try:
-                from webui.eichi_utils import settings_manager as _sm
+                from eichi_utils import settings_manager as _sm
                 _load = getattr(_sm, 'load_app_settings', None)
                 if _load:
                     _reuse = bool(_load().get('reuse_optimized_dict', False))
             except Exception:
                 _reuse = False
         if _reuse:
-            info('Transformer保持: 破棄スキップ (reuse_optimized_dict / FRAMEPACK_REUSE_FP8)')
+            info(translate("Transformer保持: 破棄スキップ（reuse_optimized_dict が有効）"))
         else:
             # オンメモリのLoRAキャッシュをクリア
             try:
