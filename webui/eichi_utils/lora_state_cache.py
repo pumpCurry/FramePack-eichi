@@ -102,10 +102,11 @@ def load_from_cache(cache_key):
     try:
         size = os.path.getsize(cache_fullpath)
         try:
+            import sys
             from tqdm import tqdm
 
             class _TqdmReader:
-                """Wrap a file object and update tqdm progress on read operations."""
+                """ファイルオブジェクトをラップし、読み取り操作時にtqdmの進行状況を更新"""
 
                 def __init__(self, f, total, desc):
                     self._f = f
@@ -115,6 +116,8 @@ def load_from_cache(cache_key):
                         unit_scale=True,
                         unit_divisor=1024,
                         desc=desc,
+                        mininterval=0.2,
+                        disable=not sys.stderr.isatty(),
                     )
 
                 def read(self, *args, **kwargs):
@@ -126,6 +129,18 @@ def load_from_cache(cache_key):
                     n = self._f.readinto(b)
                     self._t.update(n)
                     return n
+
+                # 一部のZip/IOスタックではread1()を使用する場合があるので考慮にふくめる
+                def read1(self, n=-1):
+                    if hasattr(self._f, "read1"):
+                        data = self._f.read1(n)
+                        self._t.update(len(data))
+                        return data
+                    # Fallback to normal read
+                    data = self._f.read(n)
+                    self._t.update(len(data))
+                    return data
+
 
                 def finalize(self):
                     if self._t.total is not None and self._t.n < self._t.total:
