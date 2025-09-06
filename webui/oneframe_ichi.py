@@ -3164,17 +3164,21 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         if batch_stopped:
             break
 
+        try:
             ctx = _start_job_for_single_task(
-            current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
-            gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
-            output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, lora_cache, resolution,
-            current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
-            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
-            batch_index, use_queue, prompt_queue_file,
-            # Kisekaeichi関連パラメータを追加
-            use_reference_image, reference_image_current,
-            target_index, history_index, reference_long_edge, input_mask, reference_mask
-        )
+                current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
+                gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
+                output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, lora_cache, resolution,
+                current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
+                lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
+                batch_index, use_queue, prompt_queue_file,
+                # Kisekaeichi関連パラメータを追加
+                use_reference_image, reference_image_current,
+                target_index, history_index, reference_long_edge, input_mask, reference_mask
+            )
+        except Exception:
+            traceback.print_exc()
+            ctx = None
 
         # 何らかの理由でコンテキスト生成に失敗した場合は現在のジョブを参照して復旧を試みる
         if ctx is None:
