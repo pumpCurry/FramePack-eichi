@@ -1,7 +1,5 @@
 
 import os
-# Show which script is launching for easier debugging
-print(f"{os.path.basename(__file__)} : Starting....")
 
 import sys
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
@@ -40,6 +38,9 @@ parser.add_argument("--port", type=int, default=8001)
 parser.add_argument("--inbrowser", action='store_true')
 parser.add_argument("--lang", type=str, default='ja', help="Language: ja, zh-tw, en")
 args = parser.parse_args()
+
+# 起動直後にメッセージを表示して応答までの時間を短縮
+print(f"{os.path.basename(__file__)} : Starting....")
 
 # Load translations from JSON files
 from locales.i18n_extended import (set_lang, translate)
@@ -806,7 +807,7 @@ def perform_save_operation_v3(config_name_input, add_timestamp, input_image, pro
                 # Try case-insensitive search as fallback
                 for config in available_configs:
                     if config.lower() == actual_config_name.lower():
-                        print(f"   Found case-insensitive match: '{config}'")
+                        print(translate("   Found case-insensitive match: '{0}'").format(config))
                         actual_config_name = config
                         current_loaded_config = config
                         break

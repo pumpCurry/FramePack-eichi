@@ -16,28 +16,20 @@ In other words, it's a ~~local~~ **worldwide** modification specialized in creat
 
 We're extremely grateful to [https://github.com/hinablue](https://github.com/hinablue) **Hina Chen** for multilingual support cooperation.
 
-## 🌟 Feature Enhancements (v1.9.5.2)
+## 🌟 Feature Enhancements (v1.9.5.3)
 
-**FramePack-eichi v1.9.5** focuses on smoother startup feedback and richer queue management to improve overall usability.
+**FramePack-eichi v1.9.5.3** introduces enhanced LoRA cache reuse, stability improvements, and translation updates.
 
-### 🚀 Key New Features
-
-- **Improved startup messages with spinner**: display a spinner and completion checkmark during module loading so the app never looks frozen
-- **Expanded image queue & batch management**: specify repeat counts per source image
-  - Generated frame count becomes `image count × batch size`, removing the previous limit of 100
-- **Reference image queue and batch control**: enqueue reference images and process them with their own batch count
-  - Each image queue entry can cycle through multiple reference images sequentially
-- **Progress time display**: show elapsed time and estimated completion for ongoing generation
-- **Input image save option**: automatically store input images to a user-defined folder
-  - Clipboard images no longer vanish after use
-- **Log output settings**: enable console log saving, specify the destination folder, and open it directly from the UI
-- **Favorite setting management**: save UI configurations as favorites for quick reuse
-- **Prompt cache with switchable LoRA state cache**: persist prompt analysis results to disk and toggle LoRA state caching
-- **High-resolution support**: generate up to 2K (2160) resolution
-  - Added trimming mode that matches the longer edge with padding when comparing reference images
-- **“Stop After Current” button**: stop processing after the current image finishes (F1/UI integration)
-- **“Stop After Step” button**: stop after the current frame generation step completes (F1/UI integration)
-- **Image preview & original-size modal**: preview generated images in a window and view them in their original resolution
+- **Improved LoRA cache reuse**: Enhanced disk caching of FP8/LoRA-optimized dictionary data.
+  - Strengthened and renamed the feature added in 1.9.5.2 for reusing LoRA settings on restart.
+  - Added option to keep optimized dictionaries in memory and reuse them across generations instead of discarding each time.
+    - May not work on low-VRAM GPUs, but avoids reloads and greatly speeds up generation.
+- **Stability enhancements**: Improved job context initialization and streaming safeguards, adding additional startup error defenses.
+- **Persist generated result**: Bug fix to retain the previous generation result.
+- **Expanded logs**: Added progress bar and more feedback during slow LoRA cache loading.
+- **Translation improvements**: Better consistency of translation keys.
+  - Prepared to accept locale JSON definition files for other languages when placed under `locales`.
+  - Added a test file for verifying translations.
 
 ## 🌟 Feature Expansion (v1.9.4) ※Official Release
 

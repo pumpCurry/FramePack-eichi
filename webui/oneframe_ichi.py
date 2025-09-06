@@ -1,6 +1,7 @@
 import os
 import traceback
 # 新たに import する際は、起動時の無応答表示を避けるため、os,traceback以外はすべてスピナーで囲い、スピナー読み込み以降にimportしてください
+# 翻訳関連の初期読み込みに時間がかかるため、startingを表示してから翻訳関連の読み込みまで翻訳機能が使えません
 
 # version表記
 __version__ = "1.9.5.3"
@@ -55,6 +56,9 @@ set_lang, translate = spinner_while_running(
     ),
 )
 set_lang(args.lang)
+
+# これ以降transrate()が使えます
+# CUI各所のprint文や各GUIメッセージにはtransrate()を利用し各言語翻訳jsonに定義も行ってください
 
 (
     asyncio,
