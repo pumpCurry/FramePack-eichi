@@ -1,7 +1,6 @@
 import os
 import sys
 import hashlib
-import torch
 import threading
 
 # グローバルキャッシュ設定
@@ -80,7 +79,7 @@ def generate_cache_key(model_files, lora_paths, lora_scales, fp8_enabled):
 
 def load_from_cache(cache_key):
     """キャッシュがあれば読み込み、なければ None を返す（オンメモリ優先）"""
-    import os, torch
+    import torch
     from webui.locales.i18n_extended import translate
 
     # ① まずオンメモリキャッシュを確認
@@ -139,7 +138,7 @@ def load_from_cache(cache_key):
 
 def save_to_cache(cache_key, state_dict):
     """現在の LoRA 状態をキャッシュに保存する（オンメモリ＋ディスク）"""
-    import os, torch
+    import torch
     from webui.locales.i18n_extended import translate
 
     # ① 先にオンメモリへ登録
