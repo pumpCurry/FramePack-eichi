@@ -1148,7 +1148,7 @@ def get_reference_queue_files():
 # ワーカー関数
 def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cfg, gs, rs,
            gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files=None, lora_files2=None, lora_scales_text="0.8,0.8,0.8",
-           output_dir=None, save_input_images=False, save_before_input_images=False, use_lora=False, fp8_optimization=False, resolution=640,
+           output_dir=None, save_input_images=False, save_before_input_images=False, use_lora=False, fp8_optimization=False, lora_cache=False, resolution=640,
            latent_window_size=9, latent_index=0, use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
            lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
            batch_index=None, use_queue=False, prompt_queue_file=None,
@@ -1354,16 +1354,11 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
         # LoRA設定のみを更新
         # v1.9.4 までは、常に辞書分割 (force_dict_split=True) を行っていましたが、
-        # LoRA の設定を再起動時に再利用する (lora_cache_checkbox) が有効な場合は
+        # LoRA の設定を再起動時に再利用する (lora_cache) が有効な場合は
         # FP8 最適化済みの状態辞書をディスクから読み込み直すため、辞書の再分割をスキップします。
-        # ここでは lora_cache_checkbox の value を参照してキャッシュ状態を判断し、
+        # ここでは引数で渡された lora_cache の値を参照してキャッシュ状態を判断し、
         # force_dict_split を動的に切り替えます。
-        try:
-            # Gradio のチェックボックスは .value に現在の状態が入っています。
-            lora_cache_enabled = bool(lora_cache_checkbox.value)
-        except Exception:
-            # UI が存在しない場合や属性が無い場合は保存済み設定から取得
-            lora_cache_enabled = saved_app_settings.get("lora_cache", False) if saved_app_settings else False
+        lora_cache_enabled = bool(lora_cache)
 
         # LoRA キャッシュを利用する場合は、FP8 最適化を再度実行せず、辞書の分割も行わない。
         if lora_cache_enabled:
@@ -2657,7 +2652,7 @@ def check_metadata_on_checkbox_change(should_copy, image_path):
     return update_from_image_metadata(image_path, should_copy)
 
 def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_prompt_cache,
-            lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_directory=None,
+            lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, lora_cache, resolution, output_directory=None,
             save_input_images=False, save_before_input_images=False, batch_count=1, use_random_seed=False, latent_window_size=9, latent_index=0,
             use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
             lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
@@ -2937,7 +2932,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("=== 現在の設定を自動保存します ==="))
         # 現在のUIの値を収集してアプリケーション設定として保存
         # Gradioオブジェクトから値を取得（直接値が渡る場合も考慮）
-        lora_cache_val = False
+        lora_cache_val = _to_bool(lora_cache)
 
         # Gradioオブジェクトの値を正規化
         log_enabled_val = log_enabled
@@ -3169,10 +3164,10 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         if batch_stopped:
             break
 
-        ctx = _start_job_for_single_task(
+            ctx = _start_job_for_single_task(
             current_image, current_prompt, n_prompt, current_seed, steps, cfg, gs, rs,
             gpu_memory_preservation, use_teacache, use_prompt_cache, lora_files, lora_files2, lora_scales_text,
-            output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, resolution,
+            output_dir, save_input_images, save_before_input_images, use_lora, fp8_optimization, lora_cache, resolution,
             current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
             lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
             batch_index, use_queue, prompt_queue_file,
@@ -5254,7 +5249,7 @@ with block:
     
     # 生成開始・中止のイベント
     ips = [input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_prompt_cache,
-           lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, resolution, output_dir, save_input_images,
+           lora_files, lora_files2, lora_scales_text, use_lora, fp8_optimization, lora_cache_checkbox, resolution, output_dir, save_input_images,
            save_before_input_images, batch_count, use_random_seed, latent_window_size, latent_index,
            use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
            lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3, use_rope_batch,
