@@ -1,6 +1,6 @@
 import os
+print(f"{os.path.basename(__file__)} : Starting....")
 from webui.eichi_utils.console import info
-print(f"{os.path.basename(__file__)} : 起動開始....")
 
 import sys
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
@@ -484,11 +484,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                             # バッチインデックスが不正な場合やプロンプトが足りない場合は元のプロンプトを使用
                             current_prompt = prompt  # 元のプロンプトを使用
                             if batch_index is None:
-                                print("バッチインデックスが未指定です")
+                                print(translate("Batch index is not specified."))
                             elif batch_index < 0 or (prompt_lines and batch_index >= len(prompt_lines)):
                                 print(translate("バッチインデックスが範囲外です: {0}, プロンプト数: {1}").format(batch_index, len(prompt_lines) if prompt_lines else 0))
                             elif not prompt_lines:
-                                print("プロンプトファイルに有効な行がありません")
+                                print(translate("No valid lines in prompt file."))
 
                             print(translate("元のプロンプトを使用します: {0}...").format(prompt[:50]))
                     else:
@@ -1623,7 +1623,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     print(translate("VAEキャッシュを使用: 履歴フレーム"))
                     history_pixels = vae_decode_cache(real_history_latents, vae).cpu()
                 else:
-                    print("通常デコード使用: 履歴フレーム")
+                    print(translate("Using normal decode: history frame."))
                     history_pixels = vae_decode(real_history_latents, vae).cpu()
                 
                 # 最初のセクションで全フレーム画像を保存
@@ -2464,11 +2464,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 unload_complete_models()
     except Exception as e:
         try:
-            print(f"エラーが発生しました: {str(e)}")
+            print(translate("An error occurred: {0}").format(str(e)))
             import traceback
             traceback.print_exc()
         except Exception as inner_e:
-            print(f"エラー処理中にさらにエラーが発生: {str(inner_e)}")
+            print(translate("Another error occurred during error handling: {0}").format(str(inner_e)))
             
         try:
             if not high_vram:
@@ -2476,12 +2476,12 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     text_encoder, text_encoder_2, image_encoder, vae, transformer
                 )
         except Exception as cleanup_e:
-            print(f"クリーンアップ中にエラーが発生: {str(cleanup_e)}")
+            print(translate("Error occurred during cleanup: {0}").format(str(cleanup_e)))
 
     try:
         stream.output_queue.push(('end', None))
     except Exception as stream_e:
-        print(f"ストリーム終了処理でエラーが発生: {str(stream_e)}")
+        print(translate("Error occurred during stream finalization: {0}").format(str(stream_e)))
 
     # 生成処理終了後のクリーンアップを必ず実行
     cleanup_generation_resources()
@@ -2684,7 +2684,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # LoRA選択があれば強制的に有効にする
         if has_selected_lora:
             use_lora = True
-            print("ディレクトリでLoRAが選択されているため、LoRA使用を有効にしました")
+            print(translate("Enabled LoRA usage because a LoRA was selected in the directory."))
     
     if use_lora and has_lora_support:
         all_lora_files = []
@@ -5620,7 +5620,7 @@ with block:
             def update_section_metadata_on_checkbox_change(copy_enabled, *section_images):
                 if not copy_enabled:
                     # チェックボックスがオフの場合は、何も変更せずに現在の値を維持する
-                    print("チェックボックスがオフのため、現在のプロンプト値を維持します")
+                    print(translate("Checkbox is off; keeping current prompt value."))
                     
                     # gr.updateの配列を返す - valueを指定しないとUI値が維持される
                     updates = []
@@ -6560,7 +6560,7 @@ with block:
                                 print(translate("プロンプト数に合わせてバッチ数を自動調整: {0} → {1}").format(batch_count, queue_prompts_count))
                                 batch_count = queue_prompts_count
                         else:
-                            print("プロンプトキューファイルに有効なプロンプトがありません")
+                            print(translate("No valid prompts in prompt queue file."))
                 except Exception as e:
                     print(translate("プロンプトキューファイル読み込みエラー: {0}").format(str(e)))
             else:

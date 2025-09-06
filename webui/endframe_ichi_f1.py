@@ -1,6 +1,5 @@
 
 import os
-# Show which script is launching for easier debugging
 print(f"{os.path.basename(__file__)} : Starting....")
 
 import sys
@@ -806,7 +805,7 @@ def perform_save_operation_v3(config_name_input, add_timestamp, input_image, pro
                 # Try case-insensitive search as fallback
                 for config in available_configs:
                     if config.lower() == actual_config_name.lower():
-                        print(f"   Found case-insensitive match: '{config}'")
+                        print(translate("   Found case-insensitive match: '{0}'").format(config))
                         actual_config_name = config
                         current_loaded_config = config
                         break

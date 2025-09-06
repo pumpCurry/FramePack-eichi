@@ -1405,4 +1405,17 @@
   "🗑️ Delete": "🗑️ 刪除",
   "🗑️ Removed file: {0}": "🗑️ 已移除檔案：{0}",
   "🛑 Stopping queue processing...": "🛑 停止佇列處理中..."
+
+  ,"{0} : Starting....": "{0} : 開始啟動...."
+  ,"{0} : version {1} Starting....": "{0} : 版本 {1} 啟動中...."
+  ,"Batch index is not specified.": "未指定批次索引。"
+  ,"No valid lines in prompt file.": "提示文件中沒有有效的行。"
+  ,"Using normal decode: history frame.": "使用一般解碼：歷史幀。"
+  ,"An error occurred: {0}": "發生錯誤: {0}"
+  ,"Another error occurred during error handling: {0}": "處理錯誤時又發生錯誤: {0}"
+  ,"Error occurred during cleanup: {0}": "清理過程中發生錯誤: {0}"
+  ,"Error occurred during stream finalization: {0}": "串流結束處理時發生錯誤: {0}"
+  ,"Enabled LoRA usage because a LoRA was selected in the directory.": "因目錄中選擇了 LoRA，已啟用 LoRA 使用。"
+  ,"Checkbox is off; keeping current prompt value.": "核取方塊為關閉狀態，維持目前的提示值。"
+  ,"No valid prompts in prompt queue file.": "提示佇列文件中沒有有效的提示。"
 }

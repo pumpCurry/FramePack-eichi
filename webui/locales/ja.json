@@ -1405,4 +1405,17 @@
   "🗑️ Delete": "🗑️ 削除",
   "🗑️ Removed file: {0}": "🗑️ ファイル削除: {0}",
   "🛑 Stopping queue processing...": "🛑 キュー処理停止中..."
+
+  ,"{0} : Starting....": "{0} : 起動開始...."
+  ,"{0} : version {1} Starting....": "{0} : バージョン {1} 起動開始...."
+  ,"Batch index is not specified.": "バッチインデックスが未指定です"
+  ,"No valid lines in prompt file.": "プロンプトファイルに有効な行がありません"
+  ,"Using normal decode: history frame.": "通常デコード使用: 履歴フレーム"
+  ,"An error occurred: {0}": "エラーが発生しました: {0}"
+  ,"Another error occurred during error handling: {0}": "エラー処理中にさらにエラーが発生: {0}"
+  ,"Error occurred during cleanup: {0}": "クリーンアップ中にエラーが発生: {0}"
+  ,"Error occurred during stream finalization: {0}": "ストリーム終了処理でエラーが発生: {0}"
+  ,"Enabled LoRA usage because a LoRA was selected in the directory.": "ディレクトリでLoRAが選択されているため、LoRA使用を有効にしました"
+  ,"Checkbox is off; keeping current prompt value.": "チェックボックスがオフのため、現在のプロンプト値を維持します"
+  ,"No valid prompts in prompt queue file.": "プロンプトキューファイルに有効なプロンプトがありません"
 }
