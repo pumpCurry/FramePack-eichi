@@ -439,8 +439,9 @@ def _stream_job_to_ui(ctx: JobContext):
                 break
             flag, data = item
             if flag == 'file':
-                output_filename = data
-                last_output_filename = data
+                if data is not None:
+                    output_filename = data
+                    last_output_filename = data
                 end_enabled = is_generation_running() and (ctx.stop_mode is None)
                 yield (
                     output_filename if output_filename is not None else gr.skip(),
