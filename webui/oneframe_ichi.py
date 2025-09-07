@@ -52,8 +52,8 @@ args = parser.parse_args()
 set_lang, translate = spinner_while_running(
     "Load: i18n",
     lambda: (
-        importlib.import_module("webui.locales.i18n_extended").set_lang,
-        importlib.import_module("webui.locales.i18n_extended").translate,
+        importlib.import_module("locales.i18n_extended").set_lang,
+        importlib.import_module("locales.i18n_extended").translate,
     ),
 )
 set_lang(args.lang)
@@ -269,6 +269,7 @@ generation_active = False
 
 # Transformer再利用フラグ（生成中の設定を保持）
 current_reuse_optimized_dict = False
+
 
 def _preview_update(image):
     """画面更新ヘルパー: イメージがNoneの場合、生成済みイメージを見られるようにを維持"""
@@ -1737,19 +1738,19 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 else:
                     # 通常の共通プロンプトの場合
                     print(translate("共通プロンプトをエンコードしています..."))
-                
+
                 # プロンプトの内容とソースを表示
                 print(translate("プロンプトソース: {0}").format(prompt_source))
                 print(translate("プロンプト全文: {0}").format(full_prompt))
                 print(translate("プロンプトをエンコードしています..."))
                 llama_vec, clip_l_pooler = encode_prompt_conds(full_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
-                
+
                 if cfg == 1:
                     llama_vec_n, clip_l_pooler_n = torch.zeros_like(llama_vec), torch.zeros_like(clip_l_pooler)
                 else:
                     print(translate("ネガティブプロンプトをエンコードしています..."))
                     llama_vec_n, clip_l_pooler_n = encode_prompt_conds(n_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
-                
+
                 # ローVRAMモードでは使用後すぐにCPUに戻す
                 if not high_vram:
                     if text_encoder is not None and hasattr(text_encoder, 'to'):
