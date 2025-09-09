@@ -2756,6 +2756,16 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             log_enabled=None, log_folder=None, reuse_optimized_dict=False):
     """画像生成のプロセス"""
 
+    global stream
+    global batch_stopped, stop_after_current, stop_after_step, stop_mode, last_stop_mode, user_abort, user_abort_notified
+    global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
+    global progress_ref_idx, progress_ref_total, progress_ref_name
+    global progress_img_idx, progress_img_total, progress_img_name
+    global last_output_filename
+    global generation_active
+    global last_progress_desc, last_progress_bar, last_preview_image
+    global cur_job, current_seed
+
     # --- 既存ジョブが走っているなら追随（再同期）して終了 ---
     with ctx_lock:
         running_ctx = cur_job
@@ -2780,17 +2790,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     if isinstance(reference_image, str):
         opts["reference_image_path"] = reference_image
     last_start_options = opts
-
-    global stream
-    global batch_stopped, stop_after_current, stop_after_step, stop_mode, last_stop_mode, user_abort, user_abort_notified
-    global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
-    global progress_ref_idx, progress_ref_total, progress_ref_name
-    global progress_img_idx, progress_img_total, progress_img_name
-    global last_output_filename
-    global generation_active
-    global last_progress_desc, last_progress_bar, last_preview_image
-    global cur_job, current_seed
-
 
     with ctx_lock:
         running_ctx = cur_job
