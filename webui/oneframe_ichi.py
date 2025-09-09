@@ -270,6 +270,49 @@ generation_active = False
 # Transformer再利用フラグ（生成中の設定を保持）
 current_reuse_optimized_dict = False
 
+# --- Resync用スナップショット保持と一時キャッシュ ---
+# 生成開始時のUIオプション一式（画像以外中心。画像は別にパスで持つ）
+last_start_options = {}
+# 画像の一時保存先（プロセスを跨いだ再同期に備える）
+temp_cache_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "temp_cache")
+os.makedirs(temp_cache_dir, exist_ok=True)
+
+def _cache_image_for_resync(img_obj, basename):
+    """
+    Gradio Image（ndarray / PIL / dict{ 'path': ... }）を temp_cache に保存し、保存パスを返す。
+    保存できなければ None。
+    """
+    try:
+        from PIL import Image as _PILImage
+        # パスだけ来るケース
+        if isinstance(img_obj, dict) and img_obj.get("path"):
+            src = img_obj["path"]
+            ext = os.path.splitext(src)[1] or ".png"
+            dst = os.path.join(temp_cache_dir, f"{basename}{ext}")
+            try:
+                import shutil as _sh
+                _sh.copy(src, dst)
+                return dst
+            except Exception:
+                pass
+        # PIL
+        if hasattr(img_obj, "save"):
+            dst = os.path.join(temp_cache_dir, f"{basename}.png")
+            img_obj.save(dst)
+            return dst
+        # ndarray
+        try:
+            import numpy as _np
+            if isinstance(img_obj, _np.ndarray):
+                dst = os.path.join(temp_cache_dir, f"{basename}.png")
+                _PILImage.fromarray(img_obj).save(dst)
+                return dst
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return None
+
 
 def _preview_update(image):
     """画面更新ヘルパー: イメージがNoneの場合、生成済みイメージを見られるようにを維持"""
@@ -376,6 +419,33 @@ def progress_resync():
                 break
     finally:
         ctx.bus.unsubscribe(q)
+
+
+def get_state_snapshot():
+    """
+    再同期用の状態スナップショットをJSONで返す。
+    - running: 実行中フラグ
+    - last_progress_desc / last_progress_bar
+    - last_output_filename
+    - options: 生成開始時に記録したUIオプション（画像以外）
+    - temp_images: 入力/参照画像（temp_cache内）のパス（あれば）
+    """
+    snap = {
+        "running": bool(generation_active),
+        "last_progress_desc": last_progress_desc,
+        "last_progress_bar": last_progress_bar,
+        "last_output_filename": last_output_filename,
+        "options": dict(last_start_options) if isinstance(last_start_options, dict) else {},
+        "temp_images": {
+            "input_image_path": last_start_options.get("input_image_path"),
+            "reference_image_path": last_start_options.get("reference_image_path"),
+        },
+        "queue": {
+            "enabled": bool(queue_enabled),
+            "type": queue_type,
+        }
+    }
+    return snap
 
 
 def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
@@ -2684,6 +2754,32 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             reference_batch_count=1, use_reference_queue=False,
             save_settings_on_start=False, alarm_on_completion=True,
             log_enabled=None, log_folder=None, reuse_optimized_dict=False):
+    """画像生成のプロセス"""
+
+    # --- 既存ジョブが走っているなら追随（再同期）して終了 ---
+    with ctx_lock:
+        running_ctx = cur_job
+    if running_ctx and not running_ctx.done.is_set():
+        print(translate("既存ジョブに追随します(再同期)"))
+        # 既存 JobContext のイベントバスから現在値→以後のストリームを受け直す
+        yield from _stream_job_to_ui(running_ctx)
+        return
+
+    # --- ここから新規ジョブ開始 ---
+    # 開始時点のUI値をスナップショットしておく（再同期で復元用）
+    global last_start_options, last_job_id
+    try:
+        # 既存の UI→辞書化ヘルパがある場合はそれを使う
+        opts = get_current_start_options()  # なければ UI 値を個々に詰める
+    except Exception:
+        # フォールバック：最低限のキーだけでも残す
+        opts = {}
+    # 入力/参照画像のパスも記録（temp キャッシュを使う構成ならそのパス）
+    if isinstance(input_image, str):
+        opts["input_image_path"] = input_image
+    if isinstance(reference_image, str):
+        opts["reference_image_path"] = reference_image
+    last_start_options = opts
 
     global stream
     global batch_stopped, stop_after_current, stop_after_step, stop_mode, last_stop_mode, user_abort, user_abort_notified
@@ -5440,7 +5536,8 @@ with block:
             settings_status       #25
         ]
     )
-    
+
+    # 生成開始ボタン
     start_button.click(
         fn=process,
         inputs=ips,
@@ -5455,21 +5552,33 @@ with block:
             stop_step_button,
             seed,
         ],
+        concurrency_id="oichi_gen",  # 再接続・再同期で同一ジョブとして認識させるキー
     )
-    end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button], queue=False)
-    # 押下直後にラベルを“処理中”へ。再クリックでキャンセル可（未確定時）
+
+    # 生成終了ボタン
+    end_button.click(
+        fn=end_process,
+        outputs=[end_button, stop_after_button, stop_step_button],
+        queue=False
+    )
+
+    # 「このバッチで停止」トグル
     stop_after_button.click(
         fn=toggle_stop_after_current,
         inputs=[],
         outputs=[stop_after_button, end_button],
         queue=False
     )
+
+    # 「このステップで停止」トグル
     stop_step_button.click(
         fn=toggle_stop_after_step,
         inputs=[],
         outputs=[stop_step_button, end_button],
         queue=False
     )
+
+    # 再同期（追随）ボタン：ストリーミング再開＆UI同期
     resync_status_btn.click(
         fn=on_resync_button_clicked,
         inputs=[],
@@ -5484,9 +5593,23 @@ with block:
             stop_step_button,
             seed,
         ],
-        queue=False,
+        concurrency_id="oichi_gen",  # start と同じIDにすること
+        queue=True,                  # 再同期もキュー経由でストリーミング
+        show_progress="hidden",
+        api_name="/resync_progress",
     )
-    
+
+    # 状態スナップショット（API専用 / JSON で返す）
+    with gr.Row(visible=False):
+        state_snapshot_btn = gr.Button("state", visible=False)
+        state_snapshot_json = gr.JSON(visible=False)
+    state_snapshot_btn.click(
+        get_state_snapshot,
+        inputs=[],
+        outputs=[state_snapshot_json],
+        api_name="/state_snapshot",
+    )
+
     gr.HTML(
         f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")} version {__version__}</div>'
     )
