@@ -478,7 +478,7 @@ def _stream_job_to_ui(ctx: JobContext):
     end_enabled = running and (ctx.stop_mode is None)
     yield (
         last_output_filename if last_output_filename is not None else gr.skip(),
-        gr.update(visible=last_preview_image is not None, value=last_preview_image),
+        _preview_update(last_preview_image),
         last_progress_desc,
         last_progress_bar,
         gr.update(interactive=not running, value=translate("Start Generation")),
@@ -5591,9 +5591,8 @@ with block:
             stop_after_button,
             stop_step_button,
             seed,
-        ],
-        concurrency_id="oichi_gen",  # start と同じIDにすること
-        queue=True,                  # 再同期もキュー経由でストリーミング
+        ],                           # concurrency_idは指定しない(再同期ハンドラを即時に起動させるため)
+        queue=False,                 # キューに載せず即時実行（進捗に追随）
         show_progress="hidden",
         api_name="/resync_progress",
     )
