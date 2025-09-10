@@ -94,7 +94,8 @@ from eichi_utils.notification_utils import play_completion_sound
 
 import queue
 import threading
-from typing import Any  # 型注釈用（_start_job_for_single_taskでAnyを使用）
+from typing import Any, Optional  # 型注釈用（_start_job_for_single_taskでAnyを使用）
+from PIL import Image             # 型注釈用（Image.Image）と実処理の両方で使用
 from collections import deque
 import weakref
 
@@ -132,6 +133,7 @@ class FanoutQueue:
                     except Exception:
                         pass
 
+
     def subscribe(self) -> queue.Queue:
         """キューに購読し既存の履歴を即座に受け取る"""
         q: queue.Queue = queue.Queue(maxsize=self._maxsize)
@@ -142,7 +144,14 @@ class FanoutQueue:
                 except queue.Full:
                     break
             self._subs.add(q)
+            if self._closed:
+                try:
+                    q.put_nowait(BUS_END_SENTINEL)
+                except queue.Full:
+                    _ = q.get_nowait()
+                    q.put_nowait(BUS_END_SENTINEL)
         return q
+
 
     def unsubscribe(self, q: queue.Queue) -> None:
         with self._lock:
@@ -314,11 +323,70 @@ def _cache_image_for_resync(img_obj, basename):
     return None
 
 
-def _preview_update(image):
-    """画面更新ヘルパー: イメージがNoneの場合、生成済みイメージを見られるようにを維持"""
-    if image is None:
-        return gr.update()
-    return gr.update(value=image)
+def _preview_update(
+    img: Optional[Image.Image] | str | None,
+    *,
+    force_visible: bool = False
+):
+    """
+    プレビュー画像をUIに反映するためのユーティリティ。
+    - 画像が None の場合でも、force_visible=True ならコンポーネントを可視化する。
+    - 画像がある場合は必ず visible=True で表示を確実に切り替える。
+    """
+    if img is None:
+        return gr.update(visible=True) if force_visible else gr.update()
+    return gr.update(visible=True, value=img)
+
+
+def _result_update(val, *, force_visible: bool = False):
+    """
+    結果画像（gr.Image出力）用のアップデートヘルパ。
+    - None: gr.update(visible=True) or gr.update() を返す
+    - 文字列パス: 存在すればそのまま返す（gr.Image はパス/URL/PIL/ndarray可）
+    - PIL.Image / numpy.ndarray: そのまま返す
+    - その他: gr.update() を返す
+    """
+    try:
+        import os
+        from PIL import Image  # 既にimport済なら再importでも問題なし（no-op）
+        try:
+            import numpy as np  # 有ればndarray判定に利用
+        except Exception:
+            np = None
+    except Exception:
+        pass
+
+    # None → 可視だけ先に立てる or 変更なし
+    if val is None:
+        return gr.update(visible=True) if force_visible else gr.update()
+
+    # 文字列パス
+    if isinstance(val, str):
+        try:
+            if os.path.exists(val):
+                return val
+        except Exception:
+            pass
+        # パスが存在しなくてもURL等で表示できるケースがあるのでそのまま返す
+        return val
+
+    # PIL.Image / ndarray
+    try:
+        from PIL import Image as _PILImage
+        if isinstance(val, _PILImage.Image):
+            return val
+    except Exception:
+        pass
+    try:
+        import numpy as _np
+        if isinstance(val, _np.ndarray):
+            return val
+    except Exception:
+        pass
+
+    # 想定外型 → 変更なし
+    return gr.update()
+
 
 def _cleanup_models(force: bool = False):
     global transformer, vae, text_encoder, text_encoder_2, image_encoder
@@ -468,31 +536,77 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
 
 
 def _stream_job_to_ui(ctx: JobContext):
-    """バスからGradio UIへ進捗を送信する"""
+    """
+    バスからGradio UIへ進捗を送信する（9出力固定）。
+    出力: (result_image, preview_image, progress_desc, progress_bar, start_btn, end_btn, stop_after_btn, stop_step_btn, seed)
+      - 初期フレームで preview を必ず可視化（画像Noneでも visible=True を立てる）
+      - イベントがしばらく来ない場合も keep-alive フレームを定期的に yield してストリームを生かす
+      - progress で preview=None のときも preview を visible=True に保つ（次のプレビュー到着で即表示）
+    """
     global last_progress_desc, last_progress_bar, last_preview_image
     global last_output_filename, current_seed, batch_stopped
     global stop_after_current, stop_after_step, last_stop_mode
 
+    # ==== 初期状態の反映 ====
     running = is_generation_running()
     # 停止トグルが有効な間は誤操作防止のためEndボタンを無効化
     end_enabled = running and (ctx.stop_mode is None)
+
+    # プレビュー初期可視化:
+    #  - 画像がNoneでも、ここで visible=True を立てておくと、後続フレームで画像が来た瞬間に表示される
+    init_preview = (
+        _preview_update(last_preview_image)
+        if (last_preview_image is not None)
+        else gr.update(visible=True)   # ← 可視設定で器だけ用意
+    )
+
+    # 初回フレーム（現状スナップショット）
     yield (
         last_output_filename if last_output_filename is not None else gr.skip(),
-        _preview_update(last_preview_image),
-        last_progress_desc,
-        last_progress_bar,
+        init_preview,
+        last_progress_desc if last_progress_desc is not None else gr.update(),
+        last_progress_bar if last_progress_bar is not None else gr.update(),
         gr.update(interactive=not running, value=translate("Start Generation")),
         gr.update(interactive=end_enabled, value=translate("End Generation")),
-        gr.update(interactive=running),
-        gr.update(interactive=running),
+        gr.update(interactive=running),  # stop_after
+        gr.update(interactive=running),  # stop_step
         gr.update(value=current_seed) if current_seed is not None else gr.skip(),
     )
 
-    output_filename = None
+    # ==== ライブ購読開始 ====
+    output_filename = last_output_filename
     q = ctx.bus.subscribe()
+
     try:
+        # queue.get() をブロッキングにせず、タイムアウトで回して keep-alive を打つ
+        #  - Gradio側はジェネレータからの逐次yieldを配信できるため、
+        #    無変更フレームでも「ストリーム存続のHeartBeat」として機能する
+        # 参考: Streaming（generatorで逐次yield）ガイド
+        # https://www.gradio.app/guides/streaming-outputs
         while True:
-            item = q.get()
+            try:
+                item = q.get(timeout=0.3)  # ← 適度なHeartBeat間隔（必要なら調整）
+            except queue.Empty:
+                # イベント未到着でも、実行中なら "無変更フレーム" でストリームを維持
+                if is_generation_running() and not ctx.done.is_set():
+                    end_enabled = True and (ctx.stop_mode is None)
+                    yield (
+                        gr.skip(),                     # result_image: 変更なし
+                        gr.update(visible=True),       # preview: 可視のままキープ
+                        gr.update(),                   # desc: 変更なし
+                        gr.update(),                   # bar : 変更なし
+                        gr.update(interactive=False),  # start: 無効（実行中）
+                        gr.update(interactive=end_enabled, value=translate("End Generation")),
+                        gr.update(interactive=True),   # stop_after: 操作可
+                        gr.update(interactive=True),   # stop_step : 操作可
+                        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                    )
+                    continue
+                else:
+                    # 実行完了/未実行ならループ離脱（finalを下でまとめて返す）
+                    break
+
+            # ==== センチネル（全終端） ====
             if item == BUS_END_SENTINEL:
                 last_stop_mode = ctx.stop_mode
                 stop_after_current = False
@@ -509,7 +623,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 globals()['last_progress_bar'] = ''
                 yield (
                     final_output if final_output is not None else gr.skip(),
-                    _preview_update(last_preview_image),
+                    _preview_update(last_preview_image) if last_preview_image is not None else gr.update(visible=True),
                     completion_message,
                     '',
                     gr.update(interactive=True, value=translate("Start Generation")),
@@ -519,31 +633,50 @@ def _stream_job_to_ui(ctx: JobContext):
                     gr.update(value=current_seed) if current_seed is not None else gr.skip(),
                 )
                 break
+
+            # ==== 通常イベント ====
             flag, data = item
+
             if flag == 'file':
+                # 途中/最終生成ファイルの通知（結果画像に反映）
                 if data is not None:
                     output_filename = data
                     last_output_filename = data
                 end_enabled = is_generation_running() and (ctx.stop_mode is None)
                 yield (
                     output_filename if output_filename is not None else gr.skip(),
-                    gr.update(),
-                    gr.update(),
-                    gr.update(),
+                    gr.update(visible=True),  # ← 可視維持（値は変更なし）
+                    gr.update(),              # 進捗テキスト変更なし
+                    gr.update(),              # 進捗バー変更なし
                     gr.update(interactive=False),
-                    gr.update(interactive=end_enabled),
+                    gr.update(interactive=end_enabled, value=translate("End Generation")),
                     gr.update(interactive=True),
                     gr.update(interactive=True),
                     gr.update(value=current_seed) if current_seed is not None else gr.skip(),
                 )
+
             elif flag == 'progress':
+                # data = (preview, desc, html)
                 preview, desc, html = data
                 last_preview_image = preview
                 last_progress_desc = desc
                 last_progress_bar = html
                 end_enabled = is_generation_running() and (ctx.stop_mode is None)
-                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=end_enabled), gr.update(interactive=True), gr.update(interactive=True), gr.update()
+                yield (
+                    gr.skip(),  # result_imageは変えない
+                    # プレビューがNoneでも visible=True を維持（次の到着で即表示）
+                    (gr.update(visible=True, value=preview) if preview is not None else gr.update(visible=True)),
+                    desc,
+                    html,
+                    gr.update(interactive=False),
+                    gr.update(interactive=end_enabled, value=translate("End Generation")),
+                    gr.update(interactive=True),
+                    gr.update(interactive=True),
+                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                )
+
             elif flag == 'end':
+                # モデル側からの自然終了
                 last_stop_mode = ctx.stop_mode
                 stop_after_current = False
                 stop_after_step = False
@@ -558,7 +691,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 last_progress_bar = ''
                 yield (
                     last_output_filename if last_output_filename is not None else gr.skip(),
-                    _preview_update(last_preview_image),
+                    _preview_update(last_preview_image) if last_preview_image is not None else gr.update(visible=True),
                     completion_message,
                     '',
                     gr.update(interactive=True, value=translate("Start Generation")),
@@ -569,6 +702,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 )
                 break
 
+            # ==== 非同期側からの強制停止検知 ====
             stream_obj = getattr(ctx, "stream", None)
             if stream_obj is not None and (
                 stream_obj.input_queue.top() == STREAM_END_SENTINEL or (batch_stopped and ctx.stop_mode is None)
@@ -580,7 +714,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
                 yield (
                     output_filename if output_filename is not None else gr.skip(),
-                    _preview_update(last_preview_image),
+                    _preview_update(last_preview_image) if last_preview_image is not None else gr.update(visible=True),
                     translate("バッチ処理が中断されました") + f" - {progress_summary}",
                     '',
                     gr.update(interactive=True),
@@ -591,6 +725,7 @@ def _stream_job_to_ui(ctx: JobContext):
                 )
                 generation_active = False
                 return
+
     finally:
         ctx.bus.unsubscribe(q)
 
@@ -1769,7 +1904,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         else:
             # キャッシュなし - 新規エンコード
             try:
-                # 常にtext_encoder_managerから最新のテキストエンコーダーを取得する
+                # 常にtext_encoder_managerから最新のテキストエンコーダを取得する
                 print(translate("テキストエンコーダを初期化します..."))
                 try:
                     # text_encoder_managerを使用して初期化
@@ -1780,6 +1915,105 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                             raise Exception(translate("テキストエンコーダとtext_encoder_2の初期化に複数回失敗しました"))
                     text_encoder, text_encoder_2 = text_encoder_manager.get_text_encoders()
                     print(translate("テキストエンコーダの初期化が完了しました"))
+
+                    # --- SAFETY PATCH: forward で必ず hidden_states/ModelOutput を返させる（再帰対応） ---
+                    def _wrap_forward_returning_hidden_states_recursive(model_obj, _seen=None, _depth=0, _max_depth=3):
+                        if model_obj is None:
+                            return
+                        if _seen is None:
+                            _seen = set()
+                        if id(model_obj) in _seen or _depth > _max_depth:
+                            return
+                        _seen.add(id(model_obj))
+                    
+                        # 1) forward をラップ（多重ラップ防止フラグ付き）
+                        if hasattr(model_obj, "forward") and not getattr(model_obj, "_wrapped_for_hidden_states", False):
+                            orig_fwd = model_obj.forward
+                            def _fwd(*args, **kwargs):
+                                # 既定注入（未指定なら立てる）
+                                kwargs.setdefault("output_hidden_states", True)
+                                kwargs.setdefault("return_dict", True)
+                                try:
+                                    return orig_fwd(*args, **kwargs)
+                                except TypeError:
+                                    # 一部の実装で forward が kwargs を受けない場合の保険：config 側を可能な範囲で立ててから再呼出し
+                                    cfg = getattr(model_obj, "config", None)
+                                    try:
+                                        if cfg is not None and hasattr(cfg, "output_hidden_states"):
+                                            setattr(cfg, "output_hidden_states", True)
+                                        if cfg is not None and hasattr(cfg, "return_dict"):
+                                            setattr(cfg, "return_dict", True)
+                                    except Exception:
+                                        pass
+                                    kwargs.pop("output_hidden_states", None)
+                                    kwargs.pop("return_dict", None)
+                                    return orig_fwd(*args, **kwargs)
+                            model_obj.forward = _fwd
+                            setattr(model_obj, "_wrapped_for_hidden_states", True)
+                    
+                        # 2) よくある内側の実体にも再帰的に適用
+                        for inner_attr in ("text_model", "model", "base_model", "encoder"):
+                            inner = getattr(model_obj, inner_attr, None)
+                            if inner is not None:
+                                _wrap_forward_returning_hidden_states_recursive(inner, _seen, _depth + 1, _max_depth)
+                    
+                    # 初期化後に必ず適用
+                    _wrap_forward_returning_hidden_states_recursive(text_encoder)
+                    _wrap_forward_returning_hidden_states_recursive(text_encoder_2)
+                    # ---------------------------------------------------------------------------
+
+                    # --- forward 既定で hidden_states / ModelOutput を返させる -----------------
+                    def _wrap_forward_returning_hidden_states(model_obj):
+                        if model_obj is None or not hasattr(model_obj, "forward"):
+                            return
+                        # 多重ラップ回避
+                        if getattr(model_obj, "_wrapped_for_hidden_states", False):
+                            return
+                        orig_fwd = model_obj.forward
+                        def _fwd(*args, **kwargs):
+                            kwargs.setdefault("output_hidden_states", True)
+                            kwargs.setdefault("return_dict", True)
+                            return orig_fwd(*args, **kwargs)
+                        model_obj.forward = _fwd
+                        setattr(model_obj, "_wrapped_for_hidden_states", True)
+                    
+                    _wrap_forward_returning_hidden_states(text_encoder)
+                    _wrap_forward_returning_hidden_states(text_encoder_2)
+                    # ---------------------------------------------------------------------------
+
+
+                    # forward に既定値を差し込む ------------------------------------------------
+                    try:
+                        if hasattr(text_encoder_2, "forward"):
+                            _orig_fwd = text_encoder_2.forward
+                            def _fwd_with_hidden_states(*args, **kwargs):
+                                kwargs.setdefault("output_hidden_states", True)
+                                kwargs.setdefault("return_dict", True)
+                                return _orig_fwd(*args, **kwargs)
+                            text_encoder_2.forward = _fwd_with_hidden_states
+                    except Exception as e:
+                        print(translate("テキストエンコーダのforward差し替えに失敗しました: {0}").format(e))
+                        
+                    # できる範囲だけ config を“穏当に”立てる -----------------------------------
+                    def _try_enable_config_flags(model_obj):
+                        for inner_attr in (None, "text_model", "model"):
+                            target = getattr(model_obj, inner_attr, model_obj) if inner_attr else model_obj
+                            cfg = getattr(target, "config", None)
+                            if cfg is None: 
+                                continue
+                            try:
+                                if hasattr(cfg, "output_hidden_states"):
+                                    setattr(cfg, "output_hidden_states", True)
+                                if hasattr(cfg, "return_dict"):
+                                    setattr(cfg, "return_dict", True)
+                            except Exception:
+                                pass  # 書込不可や未対応は無視
+
+                    _try_enable_config_flags(text_encoder)
+                    _try_enable_config_flags(text_encoder_2)
+                    # ----------------------------------------------------------------------------
+
+
                 except Exception as e:
                     print(translate("テキストエンコーダのロードに失敗しました: {0}").format(e))
                     traceback.print_exc()
@@ -3621,28 +3855,53 @@ def toggle_stop_after_step():
     )
 
 def on_resync_button_clicked():
-    """UIからの手動再同期要求を処理する"""
-    global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed, stop_mode
+    """
+    再同期（追随）ボタン押下時のハンドラ。
+    - 実行中ジョブがあれば、バス履歴を再生→以後ライブで追随する
+      - 進行中ジョブがあればそのストリームに追随
+      - 進行中ジョブが無ければ(生成前・中止・打切り・完了後)、最後の開始時オプション/状態を反映
+        - (最後のスナップショットを返す)
+    """
+    global last_output_filename, last_preview_image
+    global last_progress_desc, last_progress_bar, current_seed
+    global stop_after_current, stop_after_step
 
-    with ctx_lock:
-        ctx = cur_job
+    # 生成中コンテキストが取れれば、ストリーミングに切替
+    try:
+        ctx = get_running_job_context()
+    except Exception:
+        ctx = None
 
-    if ctx and is_generation_running():
+    # --- ライブ追随（生成中） ---
+    if ctx is not None and is_generation_running():
+        # 以降は _stream_job_to_ui 側が 9 出力を逐次yieldが配信してくれる
+        # "return _stream_job_to_ui(...)" ではなく "yield from" が必須 (returnは戻り値引数が1個になるため)
         yield from _stream_job_to_ui(ctx)
-    else:
-        running = is_generation_running()
-        end_enabled = running and ((ctx.stop_mode is None) if ctx else True)
-        yield (
-            last_output_filename if last_output_filename is not None else gr.skip(),
-            _preview_update(last_preview_image),
-            last_progress_desc,
-            last_progress_bar,
-            gr.update(interactive=not running, value=translate("Start Generation")),
-            gr.update(interactive=end_enabled, value=translate("End Generation")),
-            gr.update(interactive=running),
-            gr.update(interactive=running),
-            gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-        )
+        return  # 明示終了
+
+    # ---- ここから非生成中（スナップショット反映）----
+    # result_image は「ファイルパス or 画像 or 変更なし」更新
+    # last_output_filename が None の場合は変更なし（前の見た目を崩さない）
+    result_update = (
+        _result_update(last_output_filename) if last_output_filename is not None else gr.update()
+    )
+    # preview は "見える器" を立てておく（後続開始に備えて visible=True）
+    preview_update = (
+        _preview_update(last_preview_image) if last_preview_image is not None else gr.update(visible=True)
+    )
+
+    return (
+        result_update,                                                               # result_image
+        preview_update,                                                              # preview_image
+        (last_progress_desc or gr.update()),                                         # progress_desc (Markdown)
+        (last_progress_bar or gr.update()),                                          # progress_bar (HTML)
+        gr.update(interactive=True, value=translate("Start Generation")),            #  start_button
+        gr.update(interactive=False, value=translate("End Generation")),             # end_button
+        gr.update(interactive=False),                                                # stop_after_button
+        gr.update(interactive=False),                                                # stop_step_button
+        (gr.update(value=current_seed) if current_seed is not None else gr.skip()),  # seed
+    )
+
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
@@ -4762,13 +5021,18 @@ with block:
                 elem_id="result_image",
                 elem_classes="modal-image",
             )
+
             preview_image = gr.Image(
                 label=translate("処理中のプレビュー"),
-                height=200,
-                visible=False,
+                visible=True,  # ← 初期から可視化しておく（空でも枠を出して後続のupdateで差し替える）
                 elem_id="preview_image",
                 elem_classes="modal-image",
+                show_label=True,
+                container=True,
+                interactive=False,
+                height=200,
             )
+
             progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
             progress_bar = gr.HTML('', elem_classes='no-generating-animation')
             
@@ -5536,7 +5800,7 @@ with block:
         ]
     )
 
-    # 生成開始ボタン
+    # 生成開始ボタン（出力束は resync と完全一致）
     start_button.click(
         fn=process,
         inputs=ips,
@@ -5577,7 +5841,17 @@ with block:
         queue=False
     )
 
+    def get_running_job_context() -> Optional["JobContext"]:
+        """
+        現在実行中の JobContext を返す。未実行なら None。
+        """
+        global cur_job
+        with ctx_lock:
+            return cur_job
+
+
     # 再同期（追随）ボタン：ストリーミング再開＆UI同期
+    # 生成ジョブと同じ concurrency_id を付けない（別レーンで即時起動させる）
     resync_status_btn.click(
         fn=on_resync_button_clicked,
         inputs=[],
@@ -5591,10 +5865,12 @@ with block:
             stop_after_button,
             stop_step_button,
             seed,
-        ],                           # concurrency_idは指定しない(再同期ハンドラを即時に起動させるため)
-        queue=False,                 # キューに載せず即時実行（進捗に追随）
+        ],
+        queue=True,                 # ストリーミング有効
+        concurrency_limit=None,     # 無制限
         show_progress="hidden",
         api_name="/resync_progress",
+        # 再掲)concurrency_id を付けない（start と同じ ID にしない）
     )
 
     # 状態スナップショット（API専用 / JSON で返す）
