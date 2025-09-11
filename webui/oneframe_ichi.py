@@ -99,6 +99,236 @@ from PIL import Image             # 型注釈用（Image.Image）と実処理の
 from collections import deque
 import weakref
 
+# ===== LoRA 事前アンロード / malloc_trim / torch.load パッチャ =====
+def _malloc_trim_best_effort():
+    """
+    glibcの malloc_trim(0) を可能なら呼び出して、PythonプロセスのヒープからOSへメモリを返す。
+    - 断片化でOSに返っていない領域が多い環境で効果がある場合がある（non-deterministic）
+    - 失敗しても無視（安全側）
+    """
+    try:
+        import ctypes, ctypes.util
+        libc_path = ctypes.util.find_library("c")
+        if not libc_path:
+            return
+        libc = ctypes.CDLL(libc_path)
+        # int malloc_trim(size_t pad);
+        libc.malloc_trim(0)
+    except Exception:
+        pass
+
+# ===== メモリ情報のスナップショット取得ユーティリティ =====
+def _bytes_to_gb(x: int | float | None) -> float | None:
+    try:
+        return float(x) / (1024.0 ** 3) if x is not None else None
+    except Exception:
+        return None
+
+def _cuda_mem_info():
+    """
+    内容: CUDAメモリ情報の取得(可能な環境のみ)
+    返り値: dict(free_bytes, total_bytes, allocated_bytes, reserved_bytes)
+    """
+    info = {"free_bytes": None, "total_bytes": None, "allocated_bytes": None, "reserved_bytes": None}
+    try:
+        import torch
+        if torch.cuda.is_available():
+            try:
+                free_b, total_b = torch.cuda.mem_get_info()
+                info["free_bytes"], info["total_bytes"] = int(free_b), int(total_b)
+            except Exception:
+                pass
+            try:
+                dev = torch.cuda.current_device()
+            except Exception:
+                dev = 0
+            try:
+                info["allocated_bytes"] = int(torch.cuda.memory_allocated(device=dev))
+            except Exception:
+                pass
+            try:
+                info["reserved_bytes"] = int(torch.cuda.memory_reserved(device=dev))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return info
+
+def _get_mem_snapshot():
+    """
+    内容: ホストRAMとCUDAのメモリ状況スナップショットを取得する
+    返り値:
+      {
+        "host_avail_gb": float|None,
+        "host_total_gb": float|None,
+        "cuda": {"free_gb": float|None, "total_gb": float|None, "allocated_gb": float|None, "reserved_gb": float|None}
+      }
+    """
+    host_avail_gb, host_total_gb = None, None
+    try:
+        with open("/proc/meminfo", "r") as f:
+            kv = {}
+            for line in f:
+                if ":" in line:
+                    k, rest = line.split(":", 1)
+                    val = rest.strip().split()[0]
+                    kv[k.strip()] = int(val) * 1024  # kB->B
+        if "MemAvailable" in kv:
+            host_avail_gb = _bytes_to_gb(kv["MemAvailable"])
+        if "MemTotal" in kv:
+            host_total_gb = _bytes_to_gb(kv["MemTotal"])
+    except Exception:
+        pass
+
+    c = _cuda_mem_info()
+    cuda = {
+        "free_gb": _bytes_to_gb(c.get("free_bytes")),
+        "total_gb": _bytes_to_gb(c.get("total_bytes")),
+        "allocated_gb": _bytes_to_gb(c.get("allocated_bytes")),
+        "reserved_gb": _bytes_to_gb(c.get("reserved_bytes")),
+    }
+    return {"host_avail_gb": host_avail_gb, "host_total_gb": host_total_gb, "cuda": cuda}
+
+def _format_mem_snapshot(snap, prefix=""):
+    """
+    内容: _get_mem_snapshot() の結果を読みやすく整形して返す
+    """
+    if not isinstance(snap, dict):
+        return prefix + "n/a"
+    h_a = snap.get("host_avail_gb")
+    h_t = snap.get("host_total_gb")
+    c = snap.get("cuda", {}) or {}
+    ca, cr, cf, ct = c.get("allocated_gb"), c.get("reserved_gb"), c.get("free_gb"), c.get("total_gb")
+    host_txt = f"HostRAM: avail={h_a:.1f}GB/{h_t:.1f}GB; " if (h_a is not None and h_t is not None) else ""
+    vram_txt = (f"VRAM: alloc={ca:.1f}GB, reserved={cr:.1f}GB, free={cf:.1f}GB/{ct:.1f}GB"
+                if (ca is not None and cr is not None and cf is not None and ct is not None) else "")
+    return prefix + host_txt + vram_txt
+def _pre_unload_lora_caches():
+    """
+    内容: これから新しいLoRAキャッシュ(.pt)を読み込む前に、
+    既存のオンメモリLoRAキャッシュや巨大テンソル参照をできるだけ切ってホストRAMを空ける。
+      - eichi_utils.lora_state_cache._inmem_clear() があれば呼ぶ
+      - 本ファイル内のテキストエンコード結果キャッシュを None に
+      - その後、gc.collect() と _malloc_trim_best_effort() を呼ぶ
+    """
+    # 1) lora_state_cache のオンメモリを解放
+    try:
+        from eichi_utils import lora_state_cache as _lsc
+        if hasattr(_lsc, "_inmem_clear"):
+            _lsc._inmem_clear()
+            try:
+                print(translate("LoRAオンメモリキャッシュを解放しました"))
+            except Exception:
+                print("[LoRA cache] cleared in-memory state")
+    except Exception:
+        pass
+
+    # 2) 本ファイルのCPU側キャッシュをクリア（存在するものだけ）
+    try:
+        globals_to_nuke = [
+            "cached_prompt", "cached_n_prompt",
+            "cached_llama_vec", "cached_llama_vec_n",
+            "cached_clip_l_pooler", "cached_clip_l_pooler_n",
+            "cached_llama_attention_mask", "cached_llama_attention_mask_n",
+        ]
+        g = globals()
+        for name in globals_to_nuke:
+            if name in g:
+                g[name] = None
+    except Exception:
+        pass
+
+    # 3) Python/torch 側のGC + CUDAキャッシュ解放 + malloc_trim
+    try:
+        _cleanup_cuda("LoRA切替前(事前アンロード)")
+    except Exception:
+        pass
+    _malloc_trim_best_effort()
+
+
+class _PatchTorchLoadForLoRA:
+    """
+    内容: LoRAキャッシュ(.pt)のロードに限り、torch.load を mmap=True / weights_only=True / map_location='cpu' に
+    デフォルト付与する一時的パッチャ。既存の torch.load 仕様は尊重し、既に指定済みなら上書きしない。
+    - グローバルパッチになるため、同時に他スレッドが torch.load を呼ぶ設計では注意。
+      （本アプリは single_task_guard 前提で、並列ロードは想定外）
+    """
+    def __enter__(self):
+        import torch as _torch
+        self._torch = _torch
+        self._orig = _torch.load
+        def _patched(*args, **kwargs):
+            try:
+                path = args[0] if args else kwargs.get("f", None)
+                if isinstance(path, (str, bytes, os.PathLike)) and str(path).endswith(".pt"):
+                    kwargs.setdefault("mmap", True)          # ファイルをメモリマップして即時常駐を避ける
+                    kwargs.setdefault("weights_only", True)  # 任意オブジェクトの復元を禁止しテンソル主体に限定
+                    kwargs.setdefault("map_location", "cpu") # まずCPUで受けてから必要に応じて移動
+            except Exception:
+                pass
+            return self._orig(*args, **kwargs)
+        _torch.load = _patched
+        return self
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self._torch.load = self._orig
+        except Exception:
+            pass
+
+
+def _ram_guard_maybe_disable_lora_cache(predicted_cache_path: "str|None") -> "tuple[bool,str]":
+    """
+    内容: 先行GC後でも MemAvailable が不足している場合、
+    一時的に lora_state_cache を無効化して巨大 .pt 経路を避ける（フォールバック）。
+    戻り値: (disabled, reason)
+    """
+    try:
+        avail_gb = _host_mem_available_gb()
+        need_gb = None
+        if predicted_cache_path and os.path.exists(predicted_cache_path):
+            try:
+                need_bytes = os.path.getsize(predicted_cache_path)
+                # 係数は pre_gc と同様の環境変数を使う（既定1.2）
+                ratio = float(os.getenv("EICHI_PRE_GC_SAFETY_RATIO", "1.2"))
+                need_gb = (need_bytes / (1024.0**3)) * ratio
+            except Exception:
+                pass
+        hard_gb = float(os.getenv("EICHI_PRE_GC_HARD_THRESHOLD_GB", "8"))
+        # トリガ条件: (need_gb があり avail < need_gb) or (avail < hard_gb)
+        trigger = False
+        if avail_gb is not None:
+            if need_gb is not None and avail_gb < need_gb:
+                trigger = True
+                reason = f"RAM不足予兆: 空き {avail_gb:.1f}GB < 想定必要 {need_gb:.1f}GB"
+            elif avail_gb < hard_gb:
+                trigger = True
+                reason = f"RAMが閾値未満: 空き {avail_gb:.1f}GB < {hard_gb:.1f}GB"
+            else:
+                reason = ""
+        else:
+            # 取得不可時は安全側（明示的にONにした場合のみ）
+            if os.getenv("EICHI_PRE_GC_ASSUME_LOW_RAM", "off").lower() == "on":
+                trigger = True
+                reason = "RAM情報が取得できないため安全側でキャッシュ無効化"
+            else:
+                reason = ""
+        if not trigger:
+            return (False, "")
+        # lora_state_cache を一時的に無効化
+        try:
+            from eichi_utils import lora_state_cache as _lsc
+            # 可能なら状態を返せるAPIから取得する / 無ければTrue前提で復元
+            prev = getattr(_lsc, "is_cache_enabled", lambda: True)()
+            _lsc.set_cache_enabled(False)
+            # 復元情報を globals に一時保存
+            globals()["_PREV_LORA_CACHE_ENABLED"] = bool(prev)
+            print(translate("メモリ予兆によりLoRAキャッシュを一時無効化します: {0}").format(reason))
+        except Exception:
+            pass
+        return (True, reason)
+    except Exception:
+        return (False, "")
+
 
 # サンプリングをステップ境界で安全に中断するための内部例外
 class _UserStop(Exception):
@@ -286,6 +516,114 @@ last_start_options = {}
 temp_cache_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "temp_cache")
 os.makedirs(temp_cache_dir, exist_ok=True)
 
+# ===== 先行GC/メモリ安全化ユーティリティ =====
+def _cleanup_cuda(reason):
+    """
+    内容: GPU/CPUメモリのクリーンアップを強制的に行う(詳細ログ付き)
+    - 実行前と実行後のRAM/VRAMスナップショットを表示
+    - GPU側: 未使用キャッシュを解放し、必要に応じてIPC共有メモリも回収
+    - CPU側: PythonのGCで参照切れオブジェクトを回収
+    注意: empty_cache は未使用キャッシュの解放（断片化緩和）であり、PyTorch自体が使用可能な
+          メモリ総量が直接増えるわけではありません。
+    """
+    try:
+        before = _get_mem_snapshot()
+        import gc, torch
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+            try:
+                if hasattr(torch.cuda, "memory") and hasattr(torch.cuda.memory, "empty_cache"):
+                    torch.cuda.memory.empty_cache()
+                else:
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+        try:
+            gc.collect()
+        except Exception:
+            pass
+        try:
+            _malloc_trim_best_effort()
+        except Exception:
+            pass
+        after = _get_mem_snapshot()
+        try:
+            print(translate("メモリクリーンアップを実行しました: {0}").format(reason))
+        except Exception:
+            print("[MEM] cleanup executed:", reason)
+        try:
+            print(translate("  - クリーニング前: {0}").format(_format_mem_snapshot(before)))
+            print(translate("  - クリーニング後: {0}").format(_format_mem_snapshot(after)))
+        except Exception:
+            pass
+    except Exception as e:
+        print(translate("メモリクリーンアップで例外が発生しました: {0}").format(e))
+def _host_mem_available_gb():
+    """ホストRAMの空き容量(GB)を /proc/meminfo から概算。取れなければ None。"""
+    try:
+        with open("/proc/meminfo", "r") as f:
+            kv = {}
+            for line in f:
+                if ":" in line:
+                    k, rest = line.split(":", 1)
+                    kv[k.strip()] = int(rest.strip().split()[0])  # kB
+        if "MemAvailable" in kv:
+            return kv["MemAvailable"] / (1024.0 * 1024.0)
+    except Exception:
+        pass
+    return None
+
+def _pre_gc_before_next_lora(next_cache_path: "str|None"):
+    """
+    次のLoRA設定（および .pt キャッシュ）へ移る直前に、状況に応じて先行GCを行う。
+    - EICHI_PRE_GC=off で無効化（既定 on）
+    - next_cache_path があればそのサイズ×安全係数と MemAvailable を比較して判断
+    """
+    import os
+    if os.getenv("EICHI_PRE_GC", "on").lower() == "off":
+        return
+    try: safety_ratio = float(os.getenv("EICHI_PRE_GC_SAFETY_RATIO", "1.2"))
+    except Exception: safety_ratio = 1.2
+    try: hard_threshold_gb = float(os.getenv("EICHI_PRE_GC_HARD_THRESHOLD_GB", "8"))
+    except Exception: hard_threshold_gb = 8.0
+
+    need_bytes = 0
+    try:
+        if next_cache_path and os.path.exists(next_cache_path):
+            need_bytes = os.path.getsize(next_cache_path)
+    except Exception:
+        pass
+
+    avail_gb = _host_mem_available_gb()
+    trigger, reason = False, ""
+    if avail_gb is not None:
+        if need_bytes > 0:
+            need_gb = (need_bytes / (1024.0**3)) * safety_ratio
+            if avail_gb < need_gb:
+                trigger = True
+                reason = f"RAM不足予兆: 空き {avail_gb:.1f}GB < 想定必要 {need_gb:.1f}GB（キャッシュ×{safety_ratio}）"
+        if not trigger and avail_gb < hard_threshold_gb:
+            trigger = True
+            reason = f"RAMが閾値未満: 空き {avail_gb:.1f}GB < {hard_threshold_gb:.1f}GB"
+    else:
+        if os.getenv("EICHI_PRE_GC_ASSUME_LOW_RAM", "off").lower() == "on":
+            trigger = True
+            reason = "RAM情報が取得できないため安全側で先行GC"
+
+    if trigger:
+        _cleanup_cuda("LoRA切替前")
+
+
+# ===== 
+
+
 def _cache_image_for_resync(img_obj, basename):
     """
     Gradio Image（ndarray / PIL / dict{ 'path': ... }）を temp_cache に保存し、保存パスを返す。
@@ -323,6 +661,22 @@ def _cache_image_for_resync(img_obj, basename):
     return None
 
 
+def _result_update(img_or_path):
+    """result_image 用の update ヘルパ（パス or PIL.Image or None）"""
+    if img_or_path is None:
+        return gr.update()
+    try:
+        if isinstance(img_or_path, str):
+            if os.path.exists(img_or_path):
+                # Gradio Image は PIL or パスどちらも受けられる
+                return Image.open(img_or_path)
+            return gr.update()
+        # PIL.Image 等
+        return gr.update(value=img_or_path)
+    except Exception:
+        return gr.update()
+
+
 def _preview_update(
     img: Optional[Image.Image] | str | None,
     *,
@@ -336,56 +690,6 @@ def _preview_update(
     if img is None:
         return gr.update(visible=True) if force_visible else gr.update()
     return gr.update(visible=True, value=img)
-
-
-def _result_update(val, *, force_visible: bool = False):
-    """
-    結果画像（gr.Image出力）用のアップデートヘルパ。
-    - None: gr.update(visible=True) or gr.update() を返す
-    - 文字列パス: 存在すればそのまま返す（gr.Image はパス/URL/PIL/ndarray可）
-    - PIL.Image / numpy.ndarray: そのまま返す
-    - その他: gr.update() を返す
-    """
-    try:
-        import os
-        from PIL import Image  # 既にimport済なら再importでも問題なし（no-op）
-        try:
-            import numpy as np  # 有ればndarray判定に利用
-        except Exception:
-            np = None
-    except Exception:
-        pass
-
-    # None → 可視だけ先に立てる or 変更なし
-    if val is None:
-        return gr.update(visible=True) if force_visible else gr.update()
-
-    # 文字列パス
-    if isinstance(val, str):
-        try:
-            if os.path.exists(val):
-                return val
-        except Exception:
-            pass
-        # パスが存在しなくてもURL等で表示できるケースがあるのでそのまま返す
-        return val
-
-    # PIL.Image / ndarray
-    try:
-        from PIL import Image as _PILImage
-        if isinstance(val, _PILImage.Image):
-            return val
-    except Exception:
-        pass
-    try:
-        import numpy as _np
-        if isinstance(val, _np.ndarray):
-            return val
-    except Exception:
-        pass
-
-    # 想定外型 → 変更なし
-    return gr.update()
 
 
 def _cleanup_models(force: bool = False):
@@ -474,7 +778,12 @@ def progress_resync():
         while True:
             item = q.get()
             # バス終了用センチネルとして名前付き定数を使用
-            if item is None or item == BUS_END_SENTINEL:
+            if item is None:
+                break
+            if item == BUS_END_SENTINEL:
+                # 生成が続いている間はセンチネルを無視して継続
+                if is_generation_running():
+                    continue
                 break
             kind, payload = item
             if kind == 'progress':
@@ -535,79 +844,33 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
     return ctx
 
 
-def _stream_job_to_ui(ctx: JobContext):
+def _stream_job_to_ui(ctx: "JobContext"):
     """
-    バスからGradio UIへ進捗を送信する（9出力固定）。
-    出力: (result_image, preview_image, progress_desc, progress_bar, start_btn, end_btn, stop_after_btn, stop_step_btn, seed)
-      - 初期フレームで preview を必ず可視化（画像Noneでも visible=True を立てる）
-      - イベントがしばらく来ない場合も keep-alive フレームを定期的に yield してストリームを生かす
-      - progress で preview=None のときも preview を visible=True に保つ（次のプレビュー到着で即表示）
+    進行中ジョブ ctx のイベントバスを購読し、UI 9項目を逐次更新するジェネレータ。
+    出力順:
+      0: result_image
+      1: preview_image
+      2: progress_desc (Markdown)
+      3: progress_bar (HTML)
+      4: start_button (update)
+      5: end_button   (update)
+      6: stop_after_button (update)
+      7: stop_step_button  (update)
+      8: seed
     """
     global last_progress_desc, last_progress_bar, last_preview_image
     global last_output_filename, current_seed, batch_stopped
     global stop_after_current, stop_after_step, last_stop_mode
-
-    # ==== 初期状態の反映 ====
-    running = is_generation_running()
-    # 停止トグルが有効な間は誤操作防止のためEndボタンを無効化
-    end_enabled = running and (ctx.stop_mode is None)
-
-    # プレビュー初期可視化:
-    #  - 画像がNoneでも、ここで visible=True を立てておくと、後続フレームで画像が来た瞬間に表示される
-    init_preview = (
-        _preview_update(last_preview_image)
-        if (last_preview_image is not None)
-        else gr.update(visible=True)   # ← 可視設定で器だけ用意
-    )
-
-    # 初回フレーム（現状スナップショット）
-    yield (
-        last_output_filename if last_output_filename is not None else gr.skip(),
-        init_preview,
-        last_progress_desc if last_progress_desc is not None else gr.update(),
-        last_progress_bar if last_progress_bar is not None else gr.update(),
-        gr.update(interactive=not running, value=translate("Start Generation")),
-        gr.update(interactive=end_enabled, value=translate("End Generation")),
-        gr.update(interactive=running),  # stop_after
-        gr.update(interactive=running),  # stop_step
-        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-    )
+    global progress_ref_idx, progress_ref_total, progress_img_idx, progress_img_total
 
     # ==== ライブ購読開始 ====
-    output_filename = last_output_filename
     q = ctx.bus.subscribe()
-
     try:
-        # queue.get() をブロッキングにせず、タイムアウトで回して keep-alive を打つ
-        #  - Gradio側はジェネレータからの逐次yieldを配信できるため、
-        #    無変更フレームでも「ストリーム存続のHeartBeat」として機能する
-        # 参考: Streaming（generatorで逐次yield）ガイド
-        # https://www.gradio.app/guides/streaming-outputs
+        # イベントループ
         while True:
-            try:
-                item = q.get(timeout=0.3)  # ← 適度なHeartBeat間隔（必要なら調整）
-            except queue.Empty:
-                # イベント未到着でも、実行中なら "無変更フレーム" でストリームを維持
-                if is_generation_running() and not ctx.done.is_set():
-                    end_enabled = True and (ctx.stop_mode is None)
-                    yield (
-                        gr.skip(),                     # result_image: 変更なし
-                        gr.update(visible=True),       # preview: 可視のままキープ
-                        gr.update(),                   # desc: 変更なし
-                        gr.update(),                   # bar : 変更なし
-                        gr.update(interactive=False),  # start: 無効（実行中）
-                        gr.update(interactive=end_enabled, value=translate("End Generation")),
-                        gr.update(interactive=True),   # stop_after: 操作可
-                        gr.update(interactive=True),   # stop_step : 操作可
-                        gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-                    )
-                    continue
-                else:
-                    # 実行完了/未実行ならループ離脱（finalを下でまとめて返す）
-                    break
-
-            # ==== センチネル（全終端） ====
+            item = q.get()
             if item == BUS_END_SENTINEL:
+                # 完了（まとめの最終フレーム）
                 last_stop_mode = ctx.stop_mode
                 stop_after_current = False
                 stop_after_step = False
@@ -617,66 +880,73 @@ def _stream_job_to_ui(ctx: JobContext):
                 else:
                     completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(progress_img_total, progress_img_total)
                 completion_message = f"{completion_message} - {progress_summary}"
-                final_output = output_filename or last_output_filename
-                globals()['last_output_filename'] = final_output
-                globals()['last_progress_desc'] = completion_message
-                globals()['last_progress_bar'] = ''
+                last_progress_desc = completion_message
+                last_progress_bar  = ''
+
                 yield (
-                    final_output if final_output is not None else gr.skip(),
-                    _preview_update(last_preview_image) if last_preview_image is not None else gr.update(visible=True),
+                    _result_update(last_output_filename),
+                    _preview_update(last_preview_image),
                     completion_message,
                     '',
-                    gr.update(interactive=True, value=translate("Start Generation")),
+                    gr.update(interactive=True,  value=translate("Start Generation")),
                     gr.update(interactive=False, value=translate("End Generation")),
                     gr.update(interactive=False, value=translate("この生成で打ち切り")),
                     gr.update(interactive=False, value=translate("このステップで打ち切り")),
-                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                    (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
                 )
                 break
 
             # ==== 通常イベント ====
-            flag, data = item
+            etype, payload = item
 
-            if flag == 'file':
-                # 途中/最終生成ファイルの通知（結果画像に反映）
-                if data is not None:
-                    output_filename = data
-                    last_output_filename = data
+            if etype == "file":
+                # 生成途中/完了ファイル通知
+                file_path = payload
+                if file_path:
+                    last_output_filename = file_path
                 end_enabled = is_generation_running() and (ctx.stop_mode is None)
                 yield (
-                    output_filename if output_filename is not None else gr.skip(),
-                    gr.update(visible=True),  # ← 可視維持（値は変更なし）
-                    gr.update(),              # 進捗テキスト変更なし
-                    gr.update(),              # 進捗バー変更なし
-                    gr.update(interactive=False),
+                    _result_update(last_output_filename),
+                    gr.update(), gr.update(), gr.update(),
+                    gr.update(interactive=False, value=translate("Start Generation")),
                     gr.update(interactive=end_enabled, value=translate("End Generation")),
                     gr.update(interactive=True),
                     gr.update(interactive=True),
-                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                    (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
                 )
 
-            elif flag == 'progress':
-                # data = (preview, desc, html)
-                preview, desc, html = data
-                last_preview_image = preview
-                last_progress_desc = desc
-                last_progress_bar = html
+            elif etype == "progress":
+                preview, desc_md, bar_html = payload
+                if preview is not None:
+                    last_preview_image = preview
+                last_progress_desc = desc_md
+                last_progress_bar  = bar_html
                 end_enabled = is_generation_running() and (ctx.stop_mode is None)
                 yield (
-                    gr.skip(),  # result_imageは変えない
-                    # プレビューがNoneでも visible=True を維持（次の到着で即表示）
-                    (gr.update(visible=True, value=preview) if preview is not None else gr.update(visible=True)),
-                    desc,
-                    html,
-                    gr.update(interactive=False),
+                    gr.update(),  # result_image は差分無し
+                    _preview_update(last_preview_image, force_visible=True),
+                    last_progress_desc,
+                    last_progress_bar,
+                    gr.update(interactive=False, value=translate("Start Generation")),
                     gr.update(interactive=end_enabled, value=translate("End Generation")),
                     gr.update(interactive=True),
                     gr.update(interactive=True),
-                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                    (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
                 )
 
-            elif flag == 'end':
-                # モデル側からの自然終了
+            elif etype == "seed":
+                current_seed = payload
+                yield (
+                    gr.update(), gr.update(), gr.update(), gr.update(),
+                    gr.update(interactive=False, value=translate("Start Generation")),
+                    gr.update(interactive=True,  value=translate("End Generation")),
+                    gr.update(interactive=True),
+                    gr.update(interactive=True),
+                    gr.update(value=current_seed),
+                )
+
+            elif etype == "end":
+                # ドライバ側から明示完了
                 last_stop_mode = ctx.stop_mode
                 stop_after_current = False
                 stop_after_step = False
@@ -686,48 +956,30 @@ def _stream_job_to_ui(ctx: JobContext):
                 else:
                     completion_message = translate("バッチ処理が完了しました（{0}/{1}）").format(progress_img_total, progress_img_total)
                 completion_message = f"{completion_message} - {progress_summary}"
-                last_output_filename = output_filename or last_output_filename
                 last_progress_desc = completion_message
-                last_progress_bar = ''
+                last_progress_bar  = ''
                 yield (
-                    last_output_filename if last_output_filename is not None else gr.skip(),
-                    _preview_update(last_preview_image) if last_preview_image is not None else gr.update(visible=True),
+                    _result_update(last_output_filename),
+                    _preview_update(last_preview_image),
                     completion_message,
                     '',
-                    gr.update(interactive=True, value=translate("Start Generation")),
+                    gr.update(interactive=True,  value=translate("Start Generation")),
                     gr.update(interactive=False, value=translate("End Generation")),
                     gr.update(interactive=False, value=translate("この生成で打ち切り")),
                     gr.update(interactive=False, value=translate("このステップで打ち切り")),
-                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
+                    (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
                 )
                 break
 
-            # ==== 非同期側からの強制停止検知 ====
-            stream_obj = getattr(ctx, "stream", None)
-            if stream_obj is not None and (
-                stream_obj.input_queue.top() == STREAM_END_SENTINEL or (batch_stopped and ctx.stop_mode is None)
-            ):
-                batch_stopped = True
-                last_stop_mode = ctx.stop_mode
-                stop_after_current = False
-                stop_after_step = False
-                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
-                yield (
-                    output_filename if output_filename is not None else gr.skip(),
-                    _preview_update(last_preview_image) if last_preview_image is not None else gr.update(visible=True),
-                    translate("バッチ処理が中断されました") + f" - {progress_summary}",
-                    '',
-                    gr.update(interactive=True),
-                    gr.update(interactive=False, value=translate("End Generation")),
-                    gr.update(interactive=False, value=translate("この生成で打ち切り")),
-                    gr.update(interactive=False, value=translate("このステップで打ち切り")),
-                    gr.update(value=current_seed) if current_seed is not None else gr.skip(),
-                )
-                generation_active = False
-                return
+            else:
+                # 未知イベントはスキップ（keepalive 等）
+                pass
 
     finally:
-        ctx.bus.unsubscribe(q)
+        try:
+            ctx.bus.unsubscribe(q)
+        except Exception:
+            pass
 
 # 進捗表示用グローバル変数
 progress_ref_idx = 0
@@ -958,6 +1210,52 @@ LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer = spinner_while_run
     ),
 )
 
+# --- DEFAULT_PROMPT_TEMPLATE import & fallback ---
+try:
+    # diffusers 実装がある場合はこちらが最優先
+    from diffusers.pipelines.hunyuan_video.pipeline_hunyuan_video import DEFAULT_PROMPT_TEMPLATE
+except Exception:
+    # フェイルセーフ定義（diffusers公式の __call__ 既定と同等）
+    # 参考: ドキュメントに表示される既定 prompt_template（crop_start=95）。 :contentReference[oaicite:2]{index=2}
+    DEFAULT_PROMPT_TEMPLATE = {
+        "template": (
+            "<|start_header_id|>system<|end_header_id|>\n\n"
+            "Describe the video by detailing the following aspects: 1.\n"
+            "The main content and theme of the video."
+            "2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects."
+            "3. Actions, events, behaviors temporal relationships, physical movement changes of the objects."
+            "4. background environment, light, style and atmosphere."
+            "5. camera angles, movements, and transitions used in the video:"
+            "<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n"
+            "{}<|eot_id|>"
+        ),
+        "crop_start": 95,
+    }
+# -------------------------------------------------------------------------
+
+
+def _wrap_llama_class_forward_for_hidden_states(LlamaCls):
+    """LLaMA の forward をクラス単位で強化（hidden_states/ModelOutput を常時返す）"""
+
+    # 多重ラップ防止
+    if getattr(LlamaCls, "_wrapped_return_hidden_states", False):
+        return
+    _orig_forward = LlamaCls.forward
+
+    def _fwd(self, *args, **kwargs):
+        # 未指定なら既定で要求する（Transformers 仕様：未要求の属性は None になる）
+        kwargs["output_hidden_states"] = True
+        kwargs["return_dict"] = True
+        return _orig_forward(self, *args, **kwargs)
+    LlamaCls.forward = _fwd
+    setattr(LlamaCls, "_wrapped_return_hidden_states", True)
+
+
+# LlamaModel に適用（encode_prompt_conds 内部で .model 直叩きでも効く）
+_wrap_llama_class_forward_for_hidden_states(LlamaModel)
+# ---------------------------------------------------------------------------
+
+
 encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake = spinner_while_running(
     translate("Load_diffusers_helper.hunyuan"),
     lambda: (
@@ -967,6 +1265,250 @@ encode_prompt_conds, vae_decode, vae_encode, vae_decode_fake = spinner_while_run
         importlib.import_module("diffusers_helper.hunyuan").vae_decode_fake,
     ),
 )
+
+
+# --- Optional: encode_prompt_conds の薄いラッパ（config が書ける環境なら補助的に立てる） ---
+_orig_encode_prompt_conds = encode_prompt_conds
+
+def encode_prompt_conds(
+    prompt: str,
+    text_encoder,      # 期待：LLaMA 系 (例: LlamaModel) ※後段で自動判定→必要なら入替
+    text_encoder_2,    # 期待：CLIP 系 (例: CLIPTextModel)
+    tokenizer,         # 期待：LLaMA 用トークナイザ
+    tokenizer_2,       # 期待：CLIP 用トークナイザ
+    max_length: int = 256,  # LLaMA シーケンス長（テンプレートの crop_start を含めて後で調整）
+):
+    """
+    目的:
+      - Hunyuan 系パイプラインで用いる 2 種のテキスト条件をエンコードし、変換器に渡すテンソルを返す。
+        1) LLaMA 側:  中間層 hidden_states[-3] を、テンプレートに基づき先頭を crop して使用
+        2) CLIP 側:   pooler_output を使用
+      - 呼び出し元やロード経路の違いで「順序が逆」「hidden_states が返らない」などが起きても落ちないよう保護。
+
+    返り値:
+      - llama_vec:        形状 [B, T_llama, D] のテンソル（hidden_states[-3] の一部）
+      - clip_l_pooler:    形状 [B, D_clip] のテンソル（CLIP の pooler_output）
+    """
+
+    assert isinstance(prompt, str), "prompt は str である必要があります"
+    prompt_list = [prompt]  # 下流の API 都合でリスト化
+
+    # ------------------------------------------------------------
+    # 0) LLaMA / CLIP の“想定順序”を自動判定し、逆なら tokenizer ごと入れ替える
+    #    - upstream 実装は「第1引数=LLaMA / 第2引数=CLIP」という前提で hidden_states[-3] を使用
+    # ------------------------------------------------------------
+    def _model_type(m):
+        return getattr(getattr(m, "config", None), "model_type", None)
+
+    def _is_llama(m):
+        mt = _model_type(m)
+        name = type(m).__name__.lower()
+        return (mt in {"llama", "llava", "mllama"}) or ("llama" in name)
+
+    def _is_clip(m):
+        mt = _model_type(m)
+        name = type(m).__name__.lower()
+        return (mt == "clip") or ("clip" in name)
+
+    # 想定：text_encoder が LLaMA、text_encoder_2 が CLIP。逆なら入替（tokenizer もペアで交換）
+    if _is_clip(text_encoder) and _is_llama(text_encoder_2):
+        text_encoder, text_encoder_2 = text_encoder_2, text_encoder
+        tok1, tok2 = tok2, tok1
+
+    # ------------------------------------------------------------
+    # 1) どの呼び出し経路でも hidden_states / ModelOutput を返すよう“要求”を徹底
+    #    - 一部モデルは kwargs を受け取らない実装があるため、その場合は config 側を可能な範囲で補助
+    # ------------------------------------------------------------
+    def _force_cfg(obj):
+        cfg = getattr(obj, "config", None)
+        if cfg is None:
+            return
+        for k in ("output_hidden_states", "return_dict", "use_return_dict"):
+            if hasattr(cfg, k):
+                try:
+                    setattr(cfg, k, True)
+                except Exception:
+                    pass
+
+    for enc in (text_encoder, text_encoder_2):
+        # 自身と内側（.model / .text_model）を両方ケア
+        for x in (enc, getattr(enc, "model", None), getattr(enc, "text_model", None)):
+            if x is not None:
+                _force_cfg(x)
+
+    # ------------------------------------------------------------
+    # 2) LLaMA 側：テンプレートに基づく入力整形 → forward（hidden_states を必ず得る）
+    #    - upstream と同じく DEFAULT_PROMPT_TEMPLATE を使用し、crop_start 分を除外
+    #    - hidden_states が None の場合は内側実体（.model / .text_model）を直叩きして再試行
+    # ------------------------------------------------------------
+    # プロンプトテンプレート適用（例："<|im_start|>system ... {prompt} ..." のような形）
+    prompt_llama = [DEFAULT_PROMPT_TEMPLATE["template"].format(p) for p in prompt_list]
+    crop_start = int(DEFAULT_PROMPT_TEMPLATE["crop_start"])
+
+    # トークナイズ（LLaMA 側）。crop_start 分を見込んで長めに確保
+    llama_inputs = tokenizer(
+        prompt_llama,
+        padding="max_length",
+        max_length=max_length + crop_start,
+        truncation=True,
+        return_tensors="pt",
+        return_length=False,
+        return_overflowing_tokens=False,
+        return_attention_mask=True,
+        padding_side="left",  # 左詰め（テンプレに合わせる）
+    )
+
+    # デバイス揃え
+    llama_device = next(text_encoder.parameters()).device
+    llama_input_ids = llama_inputs.input_ids.to(llama_device)
+    llama_attention_mask = llama_inputs.attention_mask.to(llama_device)
+
+    # forward（まずは表層の encoder）
+    try:
+        llama_outputs = text_encoder(
+            input_ids=llama_input_ids,
+            attention_mask=llama_attention_mask,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+    except TypeError:
+        # 一部実装で kwargs を受けない場合 → config を立て直して再実行
+        _force_cfg(text_encoder)
+        llama_outputs = text_encoder(
+            input_ids=llama_input_ids,
+            attention_mask=llama_attention_mask,
+        )
+
+    hs = getattr(llama_outputs, "hidden_states", None)
+
+    # hidden_states がまだ None なら、内側を直接叩いて再試行
+    if hs is None:
+        inner = getattr(text_encoder, "model", getattr(text_encoder, "text_model", None))
+        if inner is not None:
+            try:
+                llama_outputs = inner(
+                    input_ids=llama_input_ids,
+                    attention_mask=llama_attention_mask,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+            except TypeError:
+                _force_cfg(inner)
+                llama_outputs = inner(
+                    input_ids=llama_input_ids,
+                    attention_mask=llama_attention_mask,
+                )
+            
+    # hidden_states 取得（ModelOutput/tuple の両対応）
+    def _extract_hs(outputs):
+        hs_local = getattr(outputs, "hidden_states", None)
+        if hs_local is not None:
+            return hs_local
+        if isinstance(outputs, (tuple, list)):
+            for idx in (-1, -2, -3):
+                try:
+                    elem = outputs[idx]
+                except Exception:
+                    continue
+                if isinstance(elem, (tuple, list)) and len(elem) > 0 and all(hasattr(t, "shape") for t in elem):
+                    return elem
+            for elem in reversed(outputs):
+                if isinstance(elem, (tuple, list)) and len(elem) > 0 and all(hasattr(t, "shape") for t in elem):
+                    return elem
+        return None
+
+    hs = _extract_hs(llama_outputs)
+
+    if hs is None:
+        inner = getattr(text_encoder, "model", getattr(text_encoder, "text_model", None))
+        if inner is not None:
+            try:
+                llama_outputs = inner(
+                    input_ids=llama_input_ids,
+                    attention_mask=llama_attention_mask,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+            except TypeError:
+                _force_cfg(inner)
+                llama_outputs = inner(
+                    input_ids=llama_input_ids,
+                    attention_mask=llama_attention_mask,
+                )
+            hs = _extract_hs(llama_outputs)
+
+    last = None
+    if hs is None:
+        last = getattr(llama_outputs, "last_hidden_state", None)
+        if last is None and isinstance(llama_outputs, (tuple, list)) and len(llama_outputs) > 0:
+            try:
+                last = llama_outputs[0]
+            except Exception:
+                last = None
+
+    if hs is None and last is None:
+        raise RuntimeError("LLaMA 側の hidden_states/last_hidden_state を取得できませんでした（forward/return_dict 周辺を確認）")
+
+    # マスク合計から有効トークン長を算出し、テンプレの先頭 crop を除外して切り出し
+    llama_attention_length = int(llama_attention_mask.sum().item())
+    src_layer = (hs[-3] if hs is not None and len(hs) >= 3 else (hs[-1] if hs is not None else last))
+    llama_vec = src_layer[:, crop_start:llama_attention_length]  # upstream と同様に -3 層を使用
+    # （必要ならマスクも同様に crop 済みを使う。upstream では assert all(True) のみ）
+    # llama_attention_mask = llama_attention_mask[:, crop_start:llama_attention_length]
+    # assert torch.all(llama_attention_mask.bool())
+
+    # ------------------------------------------------------------
+    # 3) CLIP 側：標準の 77 トークンでトークナイズ → pooler_output を取得
+    #    - upstream と同様に pooler_output を使用（hidden_states は使わない）
+    # ------------------------------------------------------------
+    clip_inputs = tokenizer_2(
+        prompt_list,
+        padding="max_length",
+        max_length=77,
+        truncation=True,
+        return_overflowing_tokens=False,
+        return_length=False,
+        return_tensors="pt",
+    )
+    clip_device = next(text_encoder_2.parameters()).device
+    clip_input_ids = clip_inputs.input_ids.to(clip_device)
+
+    try:
+        clip_out = text_encoder_2(
+            clip_input_ids,
+            output_hidden_states=False,  # ここでは中間表現は不要
+            return_dict=True,
+        )
+    except TypeError:
+        _force_cfg(text_encoder_2)
+        clip_out = text_encoder_2(clip_input_ids)
+
+    clip_l_pooler = getattr(clip_out, "pooler_output", None)
+    if clip_l_pooler is None:
+        # 内側直叩きフォールバック（ラッパ実装によっては必要）
+        inner2 = getattr(text_encoder_2, "model", getattr(text_encoder_2, "text_model", None))
+        if inner2 is not None:
+            try:
+                clip_out = inner2(
+                    clip_input_ids,
+                    output_hidden_states=False,
+                    return_dict=True,
+                )
+            except TypeError:
+                _force_cfg(inner2)
+                clip_out = inner2(clip_input_ids)
+            clip_l_pooler = getattr(clip_out, "pooler_output", None)
+
+    if clip_l_pooler is None:
+        raise RuntimeError("CLIP 側の pooler_output を取得できませんでした")
+
+    # ------------------------------------------------------------
+    # 4) 返却：上流の transformer でそのまま使用できる形
+    # ------------------------------------------------------------
+    return llama_vec, clip_l_pooler
+
+# ---------------------------------------------------------------------------
+
 
 (
     save_bcthw_as_mp4,
@@ -1375,8 +1917,10 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
            use_reference_image=False, reference_image=None,
            target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None):
     
+    # ローカル参照で tokenizer を退避（swap時の UnboundLocalError を防止）
+    tok1, tok2 = tokenizer, tokenizer_2
     # モデル変数をグローバルとして宣言（遅延ロード用）
-    global vae, text_encoder, text_encoder_2, transformer, image_encoder
+    global vae, text_encoder, text_encoder_2, transformer, image_encoder, torch
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files, reference_queue_files
     # テキストエンコード結果をキャッシュするグローバル変数
     global cached_prompt, cached_n_prompt, cached_llama_vec, cached_llama_vec_n, cached_clip_l_pooler, cached_clip_l_pooler_n
@@ -1601,21 +2145,68 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         )
         # -------- LoRA 設定 END ---------
 
+        
+        # === LoRA切替前の先行GC（必要時のみ） ===
+        try:
+            predicted_cache_path = None
+            # lora_state_cache に予測APIがある場合のみ利用（安全に存在チェック）
+            try:
+                import eichi_utils.lora_state_cache as _lcache
+                if hasattr(_lcache, "peek_next_cache_path"):
+                    predicted_cache_path = _lcache.peek_next_cache_path(
+                        lora_paths=current_lora_paths,
+                        lora_scales=current_lora_scales,
+                        fp8_enabled=fp8_enabled_flag,
+                        force_dict_split=force_dict_split_flag
+                    )
+            except Exception:
+                predicted_cache_path = None
+            _pre_gc_before_next_lora(predicted_cache_path)
+        except Exception as _e:
+            print(translate("先行GCの事前判定で例外が発生しました: {0}").format(_e))
 
         # セクション処理開始前にtransformerの状態を確認
         print(translate("LoRA適用前のtransformer状態チェック..."))
+
+        # === 追加: LoRA切替直前の「事前アンロード」 + RAMガード ===
         try:
-            # transformerの状態を確認し、必要に応じてリロード
-            if not transformer_manager.ensure_transformer_state():
-                raise Exception(translate("transformer状態の確認に失敗しました"))
-                
-            # 最新のtransformerインスタンスを取得
-            transformer = transformer_manager.get_transformer()
-            print(translate("transformer状態チェック完了"))
-        except Exception as e:
-            print(translate("transformerのリロードに失敗しました: {0}").format(e))
-            traceback.print_exc()
-            raise Exception(translate("transformerのリロードに失敗しました"))
+            # 予想到達キャッシュパス（存在すれば使用）
+            predicted_cache_path = None
+            try:
+                from eichi_utils import lora_state_cache as _lcache2
+                if hasattr(_lcache2, "peek_next_cache_path"):
+                    predicted_cache_path = _lcache2.peek_next_cache_path(
+                        lora_paths=current_lora_paths,
+                        lora_scales=current_lora_scales,
+                        fp8_enabled=fp8_enabled_flag,
+                        force_dict_split=force_dict_split_flag
+                    )
+            except Exception:
+                predicted_cache_path = None
+        
+            # 1) いま保持している巨大LoRAオンメモリを先に解放
+            _pre_unload_lora_caches()
+        
+            # 2) それでも足りなければ、一時的にキャッシュ経路を無効化（.ptロードを避ける）
+            _ram_guard_maybe_disable_lora_cache(predicted_cache_path)
+        
+        except Exception as _e2:
+            print(translate("LoRA切替前のアンロード/ガードで例外が発生しました: {0}").format(_e2))
+        
+        # === 追加: この区間のみ torch.load を mmap & weights_only に補強 ===
+        with _PatchTorchLoadForLoRA():
+            try:
+                # transformerの状態を確認し、必要に応じてリロード
+                if not transformer_manager.ensure_transformer_state():
+                    raise Exception(translate("transformer状態の確認に失敗しました"))
+    
+                # 最新のtransformerインスタンスを取得
+                transformer = transformer_manager.get_transformer()
+                print(translate("transformer状態チェック完了"))
+            except Exception as e:
+                print(translate("transformerのリロードに失敗しました: {0}").format(e))
+                traceback.print_exc()
+                raise Exception(translate("transformerのリロードに失敗しました"))
         
         # 入力画像の処理
         push_progress(None, '', 0, 'Image processing ...')
@@ -1632,7 +2223,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             print(translate("入力画像がファイルパスのため、画像をロードします: {0}").format(input_image))
             try:
                 from PIL import Image
-                import numpy as np
+    # 関数内の numpy import は不要：グローバル np を使用
                 img = Image.open(input_image)
                 input_image = np.array(img)
                 if len(input_image.shape) == 2:  # グレースケール画像の場合
@@ -1645,7 +2236,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             except Exception as e:
                 print(translate("画像のロードに失敗しました: {0}").format(e))
                 # エラーが発生した場合はデフォルトの黒い画像を使用
-                import numpy as np
+    # 関数内の numpy import は不要：グローバル np を使用
                 height = width = resolution
                 input_image = np.zeros((height, width, 3), dtype=np.uint8)
                 input_image_np = input_image
@@ -1916,6 +2507,62 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     text_encoder, text_encoder_2 = text_encoder_manager.get_text_encoders()
                     print(translate("テキストエンコーダの初期化が完了しました"))
 
+                    # --- DEBUG: テキストエンコーダの型/順序チェック＆必要なら自動スワップ ---
+                    def _model_type(m):
+                        return getattr(getattr(m, "config", None), "model_type", None)
+                    
+                    def _is_llama(m):
+                        mt = _model_type(m)
+                        name = type(m).__name__.lower()
+                        return (mt in {"llama", "llava", "mllama"}) or ("llama" in name)
+                    
+                    def _is_clip(m):
+                        mt = _model_type(m)
+                        name = type(m).__name__.lower()
+                        return (mt == "clip") or ("clip" in name)
+                    
+                    def _te_debug(stage, te, name):
+                        try:
+                            dev = next(te.parameters()).device
+                        except Exception:
+                            dev = "n/a"
+                        print(f"[TE-DEBUG][{stage}] {name}: type={type(te).__name__}, model_type={_model_type(te)}, device={dev}")
+                    
+                    _te_debug("post-init", text_encoder, "text_encoder")
+                    _te_debug("post-init", text_encoder_2, "text_encoder_2")
+                    
+                    # HunyuanVideoは **第1=LLaMA, 第2=CLIP** 前提（公式シグネチャ）なので、逆ならスワップ
+                    # 参考: diffusers HunyuanVideoPipeline の引数（text_encoder=LlamaModel, text_encoder_2=CLIPTextModel）。 :contentReference[oaicite:0]{index=0}
+                    if _is_clip(text_encoder) and _is_llama(text_encoder_2):
+                        text_encoder, text_encoder_2 = text_encoder_2, text_encoder
+                        tok1, tok2 = tok2, tok1
+                        print("[TE-DEBUG] swap encoders -> (LLaMA first, CLIP second)")
+                        _te_debug("after-swap", text_encoder, "text_encoder")
+                        _te_debug("after-swap", text_encoder_2, "text_encoder_2")
+                    # -------------------------------------------------------------------------
+
+                    #--------------------------------------------------------------------------TEST
+
+                    # 例：スモークテスト（必要なときだけ有効化）
+                    try:
+                        import torch
+                        dev = next(text_encoder_2.parameters()).device
+                        toks = tok2("test", return_tensors="pt", padding="max_length", max_length=16, truncation=True)
+                        toks = {k: v.to(dev) for k, v in toks.items()}  # ★ input_ids も attention_mask も同じ dev へ
+                        out = getattr(getattr(text_encoder_2, "model", text_encoder_2), "forward")(
+                            input_ids=toks.get("input_ids"),
+                            attention_mask=toks.get("attention_mask"),
+                            output_hidden_states=True,
+                            return_dict=True,
+                        )
+                        assert getattr(out, "hidden_states", None) is not None, "hidden_states still None"
+                        print("DEBUG: hidden_states smoke test passed")
+                    except Exception as e:
+                        print(f"DEBUG: hidden_states smoke test failed: {e}")
+
+                    #--------------------------------------------------------------------------TEST
+
+
                     # --- SAFETY PATCH: forward で必ず hidden_states/ModelOutput を返させる（再帰対応） ---
                     def _wrap_forward_returning_hidden_states_recursive(model_obj, _seen=None, _depth=0, _max_depth=3):
                         if model_obj is None:
@@ -1930,17 +2577,21 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                         if hasattr(model_obj, "forward") and not getattr(model_obj, "_wrapped_for_hidden_states", False):
                             orig_fwd = model_obj.forward
                             def _fwd(*args, **kwargs):
-                                # 既定注入（未指定なら立てる）
-                                kwargs.setdefault("output_hidden_states", True)
-                                kwargs.setdefault("return_dict", True)
+                                # まず強制上書き
+                                kwargs["output_hidden_states"] = True
+                                kwargs["return_dict"] = True
+
                                 try:
                                     return orig_fwd(*args, **kwargs)
                                 except TypeError:
-                                    # 一部の実装で forward が kwargs を受けない場合の保険：config 側を可能な範囲で立ててから再呼出し
+                                    # forward が kwargs を受けない実装向けの保険
                                     cfg = getattr(model_obj, "config", None)
                                     try:
                                         if cfg is not None and hasattr(cfg, "output_hidden_states"):
                                             setattr(cfg, "output_hidden_states", True)
+                                        # ↓ 両方立てる（環境によって use_return_dict / return_dict が混在）
+                                        if cfg is not None and hasattr(cfg, "use_return_dict"):
+                                            setattr(cfg, "use_return_dict", True)
                                         if cfg is not None and hasattr(cfg, "return_dict"):
                                             setattr(cfg, "return_dict", True)
                                     except Exception:
@@ -1950,13 +2601,12 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                                     return orig_fwd(*args, **kwargs)
                             model_obj.forward = _fwd
                             setattr(model_obj, "_wrapped_for_hidden_states", True)
-                    
                         # 2) よくある内側の実体にも再帰的に適用
                         for inner_attr in ("text_model", "model", "base_model", "encoder"):
                             inner = getattr(model_obj, inner_attr, None)
                             if inner is not None:
                                 _wrap_forward_returning_hidden_states_recursive(inner, _seen, _depth + 1, _max_depth)
-                    
+
                     # 初期化後に必ず適用
                     _wrap_forward_returning_hidden_states_recursive(text_encoder)
                     _wrap_forward_returning_hidden_states_recursive(text_encoder_2)
@@ -1971,8 +2621,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                             return
                         orig_fwd = model_obj.forward
                         def _fwd(*args, **kwargs):
-                            kwargs.setdefault("output_hidden_states", True)
-                            kwargs.setdefault("return_dict", True)
+                            kwargs["output_hidden_states"] = True
+                            kwargs["return_dict"] = True
                             return orig_fwd(*args, **kwargs)
                         model_obj.forward = _fwd
                         setattr(model_obj, "_wrapped_for_hidden_states", True)
@@ -2047,13 +2697,13 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 print(translate("プロンプトソース: {0}").format(prompt_source))
                 print(translate("プロンプト全文: {0}").format(full_prompt))
                 print(translate("プロンプトをエンコードしています..."))
-                llama_vec, clip_l_pooler = encode_prompt_conds(full_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
+                llama_vec, clip_l_pooler = encode_prompt_conds(full_prompt, text_encoder, text_encoder_2, tok1, tok2)
 
                 if cfg == 1:
                     llama_vec_n, clip_l_pooler_n = torch.zeros_like(llama_vec), torch.zeros_like(clip_l_pooler)
                 else:
                     print(translate("ネガティブプロンプトをエンコードしています..."))
-                    llama_vec_n, clip_l_pooler_n = encode_prompt_conds(n_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
+                    llama_vec_n, clip_l_pooler_n = encode_prompt_conds(n_prompt, text_encoder, text_encoder_2, tok1, tok2)
 
                 # ローVRAMモードでは使用後すぐにCPUに戻す
                 if not high_vram:
@@ -2116,10 +2766,10 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         llama_attention_mask_n = llama_attention_mask_n.to(gpu)
         image_encoder_last_hidden_state = image_encoder_last_hidden_state.to(device=gpu, dtype=transformer.dtype)
         
-        # endframe_ichiと同様に、テキストエンコーダーのメモリを完全に解放
+        # endframe_ichiと同様に、テキストエンコーダのメモリを完全に解放
         if not high_vram:
             print(translate("テキストエンコーダを完全に解放します"))
-            # テキストエンコーダーを完全に解放（endframe_ichiと同様に）
+            # テキストエンコーダを完全に解放（endframe_ichiと同様に）
             text_encoder, text_encoder_2 = None, None
             text_encoder_manager.dispose_text_encoders()
             # 明示的なキャッシュクリア
@@ -2459,8 +3109,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     print(translate("kisekaeichi: マスクを適用します"))
                     try:
                         from PIL import Image
-                        import numpy as np
-                        
+    # 関数内の numpy import は不要：グローバル np を使用
                         # 潜在空間のサイズ
                         height_latent, width_latent = clean_latents.shape[-2:]
                         
@@ -3854,52 +4503,111 @@ def toggle_stop_after_step():
         gr.update(interactive=True),
     )
 
+def _preflight_start_guard():
+    """
+    生成開始の“事前検査（preflight）”。
+    - queue=False で即時実行され、生成中であれば gr.Info を出しつつ False を返す。
+    - 生成中でなければ True を返す。
+    - UIは一切変更しない（State出力のみ）。
+    """
+    import gradio as gr
+    if is_generation_running():
+        gr.Info(translate("現在、生成を実施中です。進行中のジョブを見届けるか、別タブでは『状況を再同期』を押してください。"))
+        return False
+    return True
+
+def _gate_start(ok: bool, *args):
+    """
+    preflightの結果に応じてstart_or_followを実行/スキップするゲート（ジェネレータ）。
+    - ok=False のときは 9出力の1タプルを yield（UIを一切変更しない）。
+    - ok=True のときだけ start_or_follow のストリームをそのまま yield する。
+    """
+    import gradio as gr
+    if not ok:
+        # 9出力: [image, image, markdown, html, button, button, button, button, number]
+        yield (gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(),
+               gr.skip(), gr.skip(), gr.skip(), gr.skip())
+        return
+    for chunk in start_or_follow(*args):
+        yield chunk
+
+
+def start_or_follow(*args):
+    """
+    Start 押下時の単体ハンドラ（queue=True でバインドする前提）。
+    - 生成中なら: 何も開始せず、UIを“現状維持フレーム”で1回だけ返して即終了
+                   （必要ならトースト通知を出す）
+    - 未生成なら: 既存の process(*args) に委譲してストリームを流す
+    """
+    import gradio as gr
+    global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed
+
+    if is_generation_running():
+        # 軽い通知（使える環境だけ）
+        try:
+            gr.Info(translate("現在、生成を実施中です。進行中のジョブに追随するには『状況を再同期』を押してください。"), duration=4)
+        except Exception:
+            pass
+
+        # “現状維持”の1フレームだけ返す（ここで新規ジョブは開始しない）
+        yield (
+            _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
+            _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
+            (last_progress_desc or gr.update()),
+            (last_progress_bar or gr.update()),
+            gr.update(interactive=False, value=translate("Start Generation")),   # start は無効のまま
+            gr.update(interactive=True,  value=translate("End Generation")),     # end   は有効
+            gr.update(interactive=True),                                         # stop_after
+            gr.update(interactive=True),                                         # stop_step
+            (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
+        )
+        return
+
+    # ---- ここから未生成：本処理に委譲（逐次 yield）----
+    # process は既存のストリーミング・ジェネレータ
+    for frame in process(*args):
+        yield frame
+
+
 def on_resync_button_clicked():
     """
-    再同期（追随）ボタン押下時のハンドラ。
-    - 実行中ジョブがあれば、バス履歴を再生→以後ライブで追随する
-      - 進行中ジョブがあればそのストリームに追随
-      - 進行中ジョブが無ければ(生成前・中止・打切り・完了後)、最後の開始時オプション/状態を反映
-        - (最後のスナップショットを返す)
+    再同期（追随）ボタン押下時のハンドラ（queue=True でバインドする前提）。
+    - 実行中: バス履歴 → ライブへそのまま追随（_stream_job_to_ui に委譲）
+    - 非実行: 最後のスナップショットを単発で返す
     """
-    global last_output_filename, last_preview_image
-    global last_progress_desc, last_progress_bar, current_seed
-    global stop_after_current, stop_after_step
+    import gradio as gr
+    global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed
 
-    # 生成中コンテキストが取れれば、ストリーミングに切替
-    try:
-        ctx = get_running_job_context()
-    except Exception:
-        ctx = None
-
-    # --- ライブ追随（生成中） ---
+    ctx = get_running_job_context()
     if ctx is not None and is_generation_running():
-        # 以降は _stream_job_to_ui 側が 9 出力を逐次yieldが配信してくれる
-        # "return _stream_job_to_ui(...)" ではなく "yield from" が必須 (returnは戻り値引数が1個になるため)
+        # 直近の状態を1フレーム返してから、履歴→ライブを逐次追随
+        yield (
+            _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
+            _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
+            (last_progress_desc or gr.update()),
+            (last_progress_bar or gr.update()),
+            gr.update(interactive=False, value=translate("Start Generation")),
+            gr.update(interactive=True,  value=translate("End Generation")),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
+            (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
+        )
+        # 以降はイベント到着毎に 9 出力を yield
         yield from _stream_job_to_ui(ctx)
-        return  # 明示終了
+        return
 
-    # ---- ここから非生成中（スナップショット反映）----
-    # result_image は「ファイルパス or 画像 or 変更なし」更新
-    # last_output_filename が None の場合は変更なし（前の見た目を崩さない）
-    result_update = (
-        _result_update(last_output_filename) if last_output_filename is not None else gr.update()
-    )
-    # preview は "見える器" を立てておく（後続開始に備えて visible=True）
-    preview_update = (
-        _preview_update(last_preview_image) if last_preview_image is not None else gr.update(visible=True)
-    )
-
-    return (
-        result_update,                                                               # result_image
-        preview_update,                                                              # preview_image
-        (last_progress_desc or gr.update()),                                         # progress_desc (Markdown)
-        (last_progress_bar or gr.update()),                                          # progress_bar (HTML)
-        gr.update(interactive=True, value=translate("Start Generation")),            #  start_button
-        gr.update(interactive=False, value=translate("End Generation")),             # end_button
-        gr.update(interactive=False),                                                # stop_after_button
-        gr.update(interactive=False),                                                # stop_step_button
-        (gr.update(value=current_seed) if current_seed is not None else gr.skip()),  # seed
+    # ---- 非実行：スナップショット適用（単発）----
+    snap = get_state_snapshot()
+    yield (
+        _result_update(snap.get("result_image")) if snap.get("result_image") else gr.update(),
+        _preview_update(snap.get("last_preview_image"), force_visible=True) if snap.get("last_preview_image") else gr.update(visible=True),
+        gr.update(value=snap.get("last_progress_desc", "")),
+        gr.update(value=snap.get("last_progress_bar", "")),
+        gr.update(interactive=True,  value=translate("Start Generation")),
+        gr.update(interactive=False, value=translate("End Generation")),
+        gr.update(interactive=False),   # stop_after
+        gr.update(interactive=False),   # stop_step
+        (gr.update(value=snap.get("seed")) if snap.get("seed") is not None else gr.skip()),
     )
 
 
@@ -5800,10 +6508,15 @@ with block:
         ]
     )
 
-    # 生成開始ボタン（出力束は resync と完全一致）
-    start_button.click(
-        fn=process,
-        inputs=ips,
+
+    # --- 生成開始ボタンイベント配線 -----------------------------------------
+    
+    # 生成開始ボタン：単体ハンドラ（start_or_follow）で一括制御
+    preflight_ok = gr.State(value=False)
+    evt = start_button.click(fn=_preflight_start_guard, inputs=[], outputs=[preflight_ok], queue=False)
+    evt.then(
+        fn=_gate_start,
+        inputs=[preflight_ok] + ips,
         outputs=[
             result_image,
             preview_image,
@@ -5815,17 +6528,22 @@ with block:
             stop_step_button,
             seed,
         ],
-        concurrency_id="oichi_gen",  # 再接続・再同期で同一ジョブとして認識させるキー
+        queue=True,
+        concurrency_id="oichi_gen",
     )
+
 
     # 生成終了ボタン
     end_button.click(
         fn=end_process,
         outputs=[end_button, stop_after_button, stop_step_button],
         queue=False
+    ,
+        api_name="end",
     )
 
-    # 「このバッチで停止」トグル
+
+    # 「このバッチで停止」
     stop_after_button.click(
         fn=toggle_stop_after_current,
         inputs=[],
@@ -5833,7 +6551,9 @@ with block:
         queue=False
     )
 
-    # 「このステップで停止」トグル
+
+
+    # 「このステップで停止」
     stop_step_button.click(
         fn=toggle_stop_after_step,
         inputs=[],
@@ -5841,17 +6561,15 @@ with block:
         queue=False
     )
 
+
+    # 実行中 JobContext を返す関数も“1つだけ”定義
     def get_running_job_context() -> Optional["JobContext"]:
-        """
-        現在実行中の JobContext を返す。未実行なら None。
-        """
         global cur_job
         with ctx_lock:
             return cur_job
 
 
-    # 再同期（追随）ボタン：ストリーミング再開＆UI同期
-    # 生成ジョブと同じ concurrency_id を付けない（別レーンで即時起動させる）
+    # 再同期（追随）：concurrency_id は付けない（生成本体と別レーンで即時起動させる）
     resync_status_btn.click(
         fn=on_resync_button_clicked,
         inputs=[],
@@ -5866,14 +6584,13 @@ with block:
             stop_step_button,
             seed,
         ],
-        queue=True,                 # ストリーミング有効
-        concurrency_limit=None,     # 無制限
+        queue=True,                 # 追随もストリーミング
         show_progress="hidden",
         api_name="/resync_progress",
-        # 再掲)concurrency_id を付けない（start と同じ ID にしない）
     )
 
-    # 状態スナップショット（API専用 / JSON で返す）
+
+    # 状態スナップショット（JSON）
     with gr.Row(visible=False):
         state_snapshot_btn = gr.Button("state", visible=False)
         state_snapshot_json = gr.JSON(visible=False)
@@ -5883,6 +6600,8 @@ with block:
         outputs=[state_snapshot_json],
         api_name="/state_snapshot",
     )
+    # -------------------------------------------------------------------------------
+
 
     gr.HTML(
         f'<div style="text-align:center; margin-top:20px;">{translate("FramePack 単一フレーム生成版")} version {__version__}</div>'
@@ -5893,3 +6612,25 @@ block.launch(
     server_port=args.port,
     share=args.share,
     inbrowser=args.inbrowser,)
+
+def _ensure_fresh_context():
+    """Start直後に停止系フラグや終了済みctxを掃除（UI出力なし, queue=False）"""
+    global batch_stopped, stop_after_current, stop_after_step
+    global stop_mode, last_stop_mode, user_abort, user_abort_notified, cur_job
+    batch_stopped = False
+    stop_after_current = False
+    stop_after_step = False
+    stop_mode = None
+    last_stop_mode = None
+    user_abort = False
+    user_abort_notified = False
+    try:
+        with ctx_lock:
+            _ctx = cur_job
+            if _ctx is not None:
+                done = getattr(_ctx, "done", None)
+                if done and hasattr(done, "is_set") and done.is_set():
+                    cur_job = None
+    except Exception:
+        pass
+    return None
