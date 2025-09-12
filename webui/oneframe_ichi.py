@@ -782,6 +782,24 @@ def progress_resync():
                 break
             if item == BUS_END_SENTINEL:
                 # 生成が続いている間はセンチネルを無視して継続
+                # 中間（画像単位）の完了か、全体（バッチ）の完了かを判断
+                if is_generation_running():
+                    # まだ次のジョブが続く（=バッチ進行中）。ここでは「完了」文言を出さず、軽い進捗のみ通知して抜ける
+                    _summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} , 実施予定数 {progress_img_idx}/{progress_img_total}"
+                    last_progress_desc = _summary
+                    last_progress_bar  = ''
+                    yield (
+                        _result_update(last_output_filename),
+                        _preview_update(last_preview_image),
+                        last_progress_desc,
+                        last_progress_bar,
+                        gr.update(interactive=False, value=translate("Start Generation")),
+                        gr.update(interactive=True,  value=translate("End Generation")),
+                        gr.update(interactive=True),
+                        gr.update(interactive=True),
+                        (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
+                    )
+                    break
                 if is_generation_running():
                     continue
                 break
@@ -874,7 +892,7 @@ def _stream_job_to_ui(ctx: "JobContext"):
                 last_stop_mode = ctx.stop_mode
                 stop_after_current = False
                 stop_after_step = False
-                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
+                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,実施予定数 {progress_img_idx}/{progress_img_total}"
                 if batch_stopped:
                     completion_message = translate("バッチ処理が中止されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
                 else:
@@ -947,10 +965,27 @@ def _stream_job_to_ui(ctx: "JobContext"):
 
             elif etype == "end":
                 # ドライバ側から明示完了
+                # ctx（画像）単位の終了イベント。バッチ継続中は「完了」表現を避ける
+                if is_generation_running():
+                    _summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} , 実施予定数 {progress_img_idx}/{progress_img_total}"
+                    last_progress_desc = _summary
+                    last_progress_bar  = ''
+                    yield (
+                        _result_update(last_output_filename),
+                        _preview_update(last_preview_image),
+                        last_progress_desc,
+                        last_progress_bar,
+                        gr.update(interactive=False, value=translate("Start Generation")),
+                        gr.update(interactive=True,  value=translate("End Generation")),
+                        gr.update(interactive=True),
+                        gr.update(interactive=True),
+                        (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
+                    )
+                    break
                 last_stop_mode = ctx.stop_mode
                 stop_after_current = False
                 stop_after_step = False
-                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,イメージ {progress_img_idx}/{progress_img_total}"
+                progress_summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} ,実施予定数 {progress_img_idx}/{progress_img_total}"
                 if batch_stopped:
                     completion_message = translate("バッチ処理が中断されました（{0}/{1}）").format(progress_img_idx, progress_img_total)
                 else:
@@ -1981,7 +2016,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             global progress_img_idx, progress_img_total, progress_img_name
             progress_html = (
                 f"<br/><strong>進捗:</strong> 《参考画像 {progress_ref_idx}/{progress_ref_total}》"
-                f"{progress_ref_name} / 《イメージ {progress_img_idx}/{progress_img_total}》{progress_img_name} <br/>"
+                f"{progress_ref_name} / 《実施予定数 {progress_img_idx}/{progress_img_total}》{progress_img_name} <br/>"
             )
         except Exception:
             progress_html = ''
@@ -4170,7 +4205,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         progress_img_name = os.path.basename(current_image) if isinstance(current_image, str) and current_image else translate("入力画像")
         last_progress_desc = (
             f"<br/><strong>進捗:</strong> 《参考画像 {progress_ref_idx}/{progress_ref_total}》"
-            f"{(progress_ref_name or translate('入力画像'))} / 《イメージ {progress_img_idx}/{progress_img_total}》"
+            f"{(progress_ref_name or translate('入力画像'))} / 《実施予定数 {progress_img_idx}/{progress_img_total}》"
             f"{(progress_img_name or translate('入力画像'))} <br/>"
         )
         last_progress_bar = make_progress_bar_html(0, '')
@@ -4503,18 +4538,18 @@ def toggle_stop_after_step():
         gr.update(interactive=True),
     )
 
+
 def _preflight_start_guard():
     """
     生成開始の“事前検査（preflight）”。
-    - queue=False で即時実行され、生成中であれば gr.Info を出しつつ False を返す。
-    - 生成中でなければ True を返す。
-    - UIは一切変更しない（State出力のみ）。
+    - queue=False で即時実行される。
+    - 生成中であれば gr.Error を raise して中断する（UIは不変で赤モーダルのみ）。
+    - 生成中でなければ None を返す（後段 .success へ進む）。
     """
     import gradio as gr
     if is_generation_running():
-        gr.Info(translate("現在、生成を実施中です。進行中のジョブを見届けるか、別タブでは『状況を再同期』を押してください。"))
-        return False
-    return True
+        raise gr.Error(translate("現在、生成を実施中です。進行中のジョブを見届けるか、別タブでは『状況を再同期』を押してください。"))
+    return None
 
 def _gate_start(ok: bool, *args):
     """
@@ -4592,12 +4627,55 @@ def on_resync_button_clicked():
             gr.update(interactive=True),
             (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
         )
-        # 以降はイベント到着毎に 9 出力を yield
+        # 以降はイベント到着毎に 9 出力を逐次ストリーム
         yield from _stream_job_to_ui(ctx)
+
+        # 以降：ctx が切り替わっても追随を継続（バッチ全体を最後まで）
+        # is_generation_running() の一時的な False（ジョブ切替の谷間）に耐性を持たせる。
+        import time, time as _tmod
+        _last_ctx = ctx
+        _linger_until = None  # type: float | None
+
+        while True:
+            _cur = get_running_job_context()
+            _running = is_generation_running()
+
+            if _cur is not None:
+                if _cur is _last_ctx:
+                    time.sleep(0.05)
+                    continue
+                # 新しい（または切り替わった）ctxに追随
+                try:
+                    for _frame in _stream_job_to_ui(_cur):
+                        yield _frame
+                finally:
+                    _last_ctx = _cur
+                    _linger_until = None
+                continue
+
+            # ctx は無い
+            if _running:
+                # 生成は続いている（ジョブ切替の谷間）→少し待って再試行
+                time.sleep(0.05)
+                continue
+
+            # running=False かつ ctx=None。
+            # ここから短いグレース期間だけ待機しておく（次ジョブがすぐ立ち上がるケースに耐える）
+            if _linger_until is None:
+                _linger_until = _tmod.monotonic() + 2.5  # 最大2.5秒だけ待つ
+            if _tmod.monotonic() < _linger_until:
+                time.sleep(0.05)
+                continue
+
+            # 本当に終わったと判断
+            break
+
         return
 
-    # ---- 非実行：スナップショット適用（単発）----
+
+    # ---- 非実行：最後のスナップショット適用（単発） ----
     snap = get_state_snapshot()
+
     yield (
         _result_update(snap.get("result_image")) if snap.get("result_image") else gr.update(),
         _preview_update(snap.get("last_preview_image"), force_visible=True) if snap.get("last_preview_image") else gr.update(visible=True),
@@ -4610,6 +4688,90 @@ def on_resync_button_clicked():
         (gr.update(value=snap.get("seed")) if snap.get("seed") is not None else gr.skip()),
     )
 
+def _as_int(x):
+    try:
+        return int(x) if x is not None and str(x).strip() != "" else None
+    except Exception:
+        return None
+
+def _pack_ui(result_upd, preview_upd, desc_upd, bar_upd,
+             start_btn_upd, end_btn_upd, stop_after_upd, stop_step_upd, seed_upd):
+    # seed は Number コンポーネントなので、ここで int に正規化してから update する
+    if isinstance(seed_upd, gr.components.Component):
+        seed_final = seed_upd  # 既に gr.update() などならそのまま
+    else:
+        seed_val = _as_int(seed_upd) if not isinstance(seed_upd, dict) else seed_upd.get("value", None)
+        seed_final = gr.update(value=seed_val) if seed_val is not None else gr.skip()
+    return (
+        result_upd,
+        preview_upd,
+        desc_upd,
+        bar_upd,
+        start_btn_upd,
+        end_btn_upd,
+        stop_after_upd,
+        stop_step_upd,
+        seed_final,
+    )
+
+
+    ctx = get_running_job_context()
+    if ctx is not None and is_generation_running():
+        # 実行中：1) 直近フレームを即返し
+        yield _pack_ui(
+            _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
+            _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
+            (last_progress_desc or gr.update()),
+            (last_progress_bar or gr.update()),
+            gr.update(interactive=False, value=translate("Start Generation")),
+            gr.update(interactive=True,  value=translate("End Generation")),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
+            current_seed,
+        )
+        # 2) バス追随（履歴→ライブ）
+        for preview, desc, bar_html in progress_resync():
+            yield _pack_ui(
+                gr.skip(),  # result_image は保存完了の別経路でのみ更新
+                (_preview_update(preview, force_visible=True) if preview is not None else gr.skip()),
+                (gr.update(value=desc) if isinstance(desc, str) else gr.skip()),
+                (gr.update(value=bar_html) if isinstance(bar_html, str) else gr.skip()),
+                gr.update(interactive=False, value=translate("Start Generation")),
+                gr.update(interactive=True,  value=translate("End Generation")),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+                gr.skip(),  # seed は通常固定
+            )
+        # 3) 完了時に UI を待機状態に整える
+        yield _pack_ui(
+            gr.skip(),
+            gr.skip(),
+            gr.update(value=translate("全てのバッチ処理が完了しました")),
+            gr.skip(),
+            gr.update(interactive=True,  value=translate("Start Generation")),
+            gr.update(interactive=False, value=translate("End Generation")),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+            gr.skip(),
+        )
+        return
+    
+    # 非実行：最後のスナップショットを単発返却
+    snap = get_state_snapshot()
+    yield _pack_ui(
+        _result_update(snap.get("result_image")) if snap.get("result_image") else gr.update(),
+        _preview_update(snap.get("last_preview_image"), force_visible=True) if snap.get("last_preview_image") else gr.update(visible=True),
+        gr.update(value=snap.get("last_progress_desc", "")),
+        gr.update(value=snap.get("last_progress_bar", "")),
+        gr.update(interactive=True,  value=translate("Start Generation")),
+        gr.update(interactive=False, value=translate("End Generation")),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        snap.get("seed"),
+        )
+
+
+#----------
 
 css = get_app_css()  # eichi_utilsのスタイルを使用
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
@@ -4675,8 +4837,8 @@ with block:
                 height=320,
                 elem_id="input_image",
                 elem_classes="modal-image",
-            )
-            
+)
+
             # 解像度設定（画像の直下に）
             resolution = gr.Dropdown(
                 label=translate("解像度"),
@@ -6510,13 +6672,17 @@ with block:
 
 
     # --- 生成開始ボタンイベント配線 -----------------------------------------
-    
-    # 生成開始ボタン：単体ハンドラ（start_or_follow）で一括制御
-    preflight_ok = gr.State(value=False)
-    evt = start_button.click(fn=_preflight_start_guard, inputs=[], outputs=[preflight_ok], queue=False)
-    evt.then(
-        fn=_gate_start,
-        inputs=[preflight_ok] + ips,
+
+    # 生成開始ボタン：preflight（queue=False）→ 成功時のみ本体（queue=True）
+    pre_evt = start_button.click(
+        fn=_preflight_start_guard,
+        inputs=[],
+        outputs=[],
+        queue=False,
+    )
+    pre_evt.success(
+        fn=start_or_follow,
+        inputs=ips,
         outputs=[
             result_image,
             preview_image,
@@ -6537,8 +6703,7 @@ with block:
     end_button.click(
         fn=end_process,
         outputs=[end_button, stop_after_button, stop_step_button],
-        queue=False
-    ,
+        queue=False,
         api_name="end",
     )
 
@@ -6548,7 +6713,8 @@ with block:
         fn=toggle_stop_after_current,
         inputs=[],
         outputs=[stop_after_button, end_button],
-        queue=False
+        queue=False,
+        api_name="/stop_after_this_batch",
     )
 
 
@@ -6558,7 +6724,8 @@ with block:
         fn=toggle_stop_after_step,
         inputs=[],
         outputs=[stop_step_button, end_button],
-        queue=False
+        queue=False,
+        api_name="/stop_after_this_step",
     )
 
 
@@ -6584,7 +6751,8 @@ with block:
             stop_step_button,
             seed,
         ],
-        queue=True,                 # 追随もストリーミング
+        queue=True,                  # 追随もストリーミング
+        concurrency_limit=32,
         show_progress="hidden",
         api_name="/resync_progress",
     )
