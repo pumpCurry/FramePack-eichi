@@ -2826,12 +2826,26 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         for latent_padding in latent_paddings:
             is_last_section = latent_padding == 0  # 常にTrue
             latent_padding_size = latent_padding * latent_window_size  # 常に0
-            
+
+            # 生成開始指示をしたブラウザを閉じてしまった等問題が起きた時
             if ctx.stream.input_queue.top() == STREAM_END_SENTINEL:
-                global batch_stopped
-                batch_stopped = True
-                return {'user_interrupt': True}
-            
+                # UI切断などによるストリーム終端は無視し、
+                # 明示停止（ユーザー操作）だけを尊重する。
+                # 明示停止の条件:
+                # - user_abort が True（停止ボタン等）
+                # - ctx._sent_end が True（ステップ停止など明示のend送信）
+                # - ctx.stop_mode が有効（"image"/"step"）
+                if user_abort or bool(getattr(ctx, "_sent_end", False)) or (ctx.stop_mode is not None):
+                    global batch_stopped
+                    batch_stopped = True
+                    return {'user_interrupt': True}
+                else:
+                    try:
+                        print(translate("UI切断由来のendシグナルを無視します（追随タブ/バックグラウンド継続）"))
+                    except Exception:
+                        pass
+
+
             # 1フレームモード用のindices設定
             # PR実装に合わせて、インデックスの範囲を明示的に設定
             # 元のPRでは 0から total_frames相当の値までのインデックスを作成
@@ -3917,8 +3931,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # 出力ディレクトリを設定
     output_dir = outputs_folder
     
-    # バッチ処理のパラメータチェック
-    batch_count = max(1, min(int(batch_count), 100))  # 1〜100の間に制限
+    # バッチ処理のパラメータチェック (この上限が、バッチとキューの合計数の最大値を許容できる必要がある)
+    batch_count = max(1, min(int(batch_count), 100000))  # 1〜100000の間に制限
     print(translate("バッチ処理回数: {0}回").format(batch_count))
     
     # 入力画像チェック - 厳格なチェックを避け、エラーを出力するだけに変更
