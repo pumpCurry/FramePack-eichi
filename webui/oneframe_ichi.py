@@ -877,6 +877,7 @@ def _stream_job_to_ui(ctx: "JobContext", owner: bool = False):
       7: stop_step_button  (update)
       8: seed
     """
+
     import time as _tmod
     # 起点タブの接続フラグ（生成開始タブがストリームを張っている間 True）
     if owner:
@@ -1661,6 +1662,225 @@ make_progress_bar_css, make_progress_bar_html = spinner_while_running(
     ),
 )
 
+
+# --- Themed progress bar wrapper (non-invasive but spinner-controllable) -----
+# 既存の make_progress_bar_html(percent, hint) をラップして、色/テーマ指定や
+# spinner の有無を制御する。タグが無くても spinner=True なら既定色で描画する。
+# 書式:
+#   [THEME=orange|red|cyan|green|yellow|blue]本文...
+#   [BAR fg=#rrggbb bg=#rrggbb spinner=true] 本文...
+#   [BAR fg=orange bg=#222 spinner=false]    本文...
+#
+# spinnerの既定は true:
+#   true  -> 100%で不可視（visibility:hidden）にしてスペースは維持
+#   false -> 常に無し（要素自体を出さない＝スペースも確保しない）
+def _make_simple_bar(
+    percent: int,
+    fg_color: str,
+    bg_color: str,
+    text: str,
+    spinner: bool = True,
+) -> str:
+
+
+    """
+    単純なインラインCSSの進捗バーを生成する。
+
+    Parameters
+    ----------
+    percent : int
+        0〜100 の進捗率。範囲外は丸める。
+    fg_color : str
+        バー前景色（#rrggbb など）。未指定/空文字は既定水色 (#4fc3f7)。
+    bg_color : str
+        バー背景色。未指定/空文字は既定灰色 (#eee)。
+    text : str
+        バー下に表示するテキスト。HTMLエスケープされる。
+    spinner : bool, default True
+        スピナー表示の有無。
+        - True: 0〜99% はスピナーを表示。100% は visibility:hidden で不可視化
+           -  進捗バーを「スピナー列（rowspan=2）＋右側に2行（バー行／テキスト行）」で返す。
+           - < 100%: スピナー表示（rowspan=2）
+           -   100%: スピナー要素は visibility:hidden で不可視（列幅は保持）
+        - False: スピナー要素を出さない（幅・高さも確保しない）。
+
+    戻り値は <tr>×2 のHTMLを連結した文字列。
+
+    """
+
+    # ---- 入力の安全化 ----
+    try:
+        pct = int(percent if percent is not None else 0)
+    except Exception:
+        pct = 0
+    pct = 0 if pct < 0 else (100 if pct > 100 else pct)
+
+    # 色のデフォルト
+    fg = fg_color or "#4fc3f7"   # 既定: 水色
+    bg = bg_color or "#eee"      # 既定: 灰色
+
+    # テキストはHTMLエスケープしておく（Noneもケア）
+    try:
+        import html as _html
+        text_esc = _html.escape(text or "")
+    except Exception:
+        text_esc = text or ""
+
+    # ---- スピナー列（rowspan=2） ----
+    # spinner=True の場合のみ、固定高さのラッパ + .loader を出す。
+    # 100% 到達時は visibility:hidden で不可視化し、幅は min-width で保持
+
+    spinner_td = ""
+    if spinner:
+        _vis = "hidden" if pct >= 100 else "visible"
+        # .loader は既存CSSを利用（無ければボーダースピナー等で代替可能）
+        spinner_td = (
+            '<td class="pc-spinner-cell" rowspan="2" '
+            'style="vertical-align:middle;text-align:center;">'
+            f'  <div class="loader" role="status" aria-live="polite" '
+            f'       aria-hidden="{"true" if pct >= 100 else "false"}" '
+            f'       style="visibility:{_vis};width:20px;min-width:20px;height:20px;"></div>'
+            '</td>'
+        )
+
+    # ---- 進捗バー（1行目：バー行） ----
+    progress_html = (
+        '<div class="pc-progress" role="progressbar" '
+        '     aria-label="進捗" aria-valuemin="0" aria-valuemax="100" '
+        f'     aria-valuenow="{pct}">'
+        '  <div class="pc-progress__track" '
+        '       style="position:relative;flex:1 1 auto;height:14px;'
+        '              border-radius:4px;background:' + bg + ';overflow:hidden;">'
+        '    <div class="pc-progress__bar" '
+        f'         style="position:absolute;inset:0 auto 0 0;width:{pct}%;'
+        f'                background:{fg};border-radius:4px;"></div>'
+        '  </div>'
+        f'  <div class="pc-progress__text" '
+        '       style="margin-left:8px;font-variant-numeric:tabular-nums;">'
+        f'    {pct}%'
+        '  </div>'
+        '</div>'
+    )
+
+    row1 = (
+        '<tr class="pc-progress-row">'
+        f'{spinner_td}'
+        f'<td class="pc-progress-cell" style="padding:4px 8px;">{progress_html}</td>'
+        '</tr>'
+    )
+
+    # ---- 2行目（テキスト／ETA 等） ----
+    meta_html = (
+        f'<div class="pc-progress__meta" style="font-size:12px;color:#6b7280;">{text_esc}</div>'
+    )
+
+    row2 = (
+        '<tr class="pc-progress-meta-row">'
+        f'<td class="pc-progress-meta-cell" style="padding:2px 8px 6px;">{meta_html}</td>'
+        '</tr>'
+    )
+
+    # ---- 連結して返す ----
+    return row1 + row2
+
+
+def _parse_bar_tag(hint: str):
+    """
+    [THEME=orange] / [BAR fg=#f80 bg=#eee spinner=true] のタグを解析。
+    戻り値: (theme:str|None, fg:str|None, bg:str|None, spinner:bool|None, text:str)
+    ※ spinner は指定が無ければ None（呼び出し側の既定に委ねる）
+    """
+    theme = None
+    fg = None
+    bg = None
+    spinner = None   # None=未指定, True/False=明示
+    text = hint or ""
+    try:
+        if isinstance(hint, str) and hint.startswith("[") and "]" in hint:
+            close = hint.find("]")
+            head = hint[1:close].strip()   # e.g. THEME=orange / BAR fg=#f80 bg=#eee spinner=true
+            text = hint[close+1:].strip()
+            if head.upper().startswith("THEME="):
+                theme = head.split("=", 1)[1].strip().lower() or None
+                # THEME=... の行に spinner=... を併記しても拾えるよう簡易対応
+                parts = head.split()
+                for p in parts[1:]:
+                    if "=" in p:
+                        k, v = p.split("=", 1)
+                        k = k.strip().lower()
+                        v = v.strip()
+                        if k == "spinner":
+                            spinner = (v.lower() in ("1", "true", "yes"))
+            elif head.upper().startswith("BAR"):
+                # 粗めのキー＝値抽出（順不同／省略可）
+                parts = head.split()
+                for p in parts[1:]:
+                    if "=" in p:
+                        k, v = p.split("=", 1)
+                        k = k.strip().lower()
+                        v = v.strip()
+                        if k == "fg":
+                            fg = v
+                        elif k == "bg":
+                            bg = v
+                        elif k == "spinner":
+                            spinner = (v.lower() in ("1", "true", "yes"))
+    except Exception:
+        pass
+    return theme, fg, bg, spinner, text
+
+
+def make_progress_bar_html2(percent, hint: str, spinner: bool = True):
+    """
+    テーマ/色/スピナーつきのバーHTMLを返す。
+    - hint のタグで theme/fg/bg/spinner を上書き可能
+      - spinner=True（既定）時は <tr>×2 構造（スピナー列は rowspan=2）
+      - spinner=False 時は従来どおり（スピナー列は出さず2行のみ）
+    - テーマ/色が無くても spinner=True なら既定色で自前バーを返す
+    - 例外時は make_progress_bar() にフォールバック（さらに失敗時は自前バー）
+    """
+    # 1) タグ解析（theme/fg/bg/spinner/text）
+    theme, fg, bg, spinner_tag, text = _parse_bar_tag(hint)
+
+    # 2) spinner の優先度: タグ指定 > 引数（既定 True）
+    resolved_spinner = spinner_tag if (spinner_tag is not None) else bool(spinner)
+
+    try:
+        # サポートするテーマ色（Material Design系近似）
+        theme_colors = {
+            "yellow": "#fbc02d",
+            "orange": "#ff9800",
+            "red":    "#f44336",
+            "cyan":   "#4fc3f7",
+            "green":  "#4caf50",
+            "blue":   "#2222ff",
+        }
+        # テーマ優先
+        if theme in theme_colors:
+            return _make_simple_bar(percent, theme_colors[theme], (bg or "#eee"), text, spinner=resolved_spinner)
+
+        # 明示色あり
+        if fg or bg:
+            return _make_simple_bar(percent, (fg or ""), (bg or ""), text, spinner=resolved_spinner)
+
+        # テーマ/色未指定
+        return _make_simple_bar(percent, None, None, text, spinner=resolved_spinner)
+
+    except Exception:
+        # 解析/描画失敗時は元のバーへフォールバック
+        pass
+
+    # 既存のバーをそのまま利用（spinner概念は無い）
+    # フォールバック（旧バーを使う）
+    try:
+        return make_progress_bar_html(percent, text)
+    except Exception:
+        # それすら失敗したら、最後の手段として簡易バー（既定色、spinner既定を尊重）
+        return _make_simple_bar(percent, None, None, text, spinner=resolved_spinner)
+
+
+# ---------
+
 # get_app_css は eichi_utils.ui_styles から先にインポート済み
 
 
@@ -2059,7 +2279,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         else:
             desc = f"{progress_html}{time_info}"
 
-        bar_html = make_progress_bar_html(percent, hint)
+        bar_html = make_progress_bar_html2(percent, hint)
         global last_progress_desc, last_progress_bar, last_preview_image
         last_progress_desc = desc
         last_progress_bar = bar_html
@@ -2082,6 +2302,16 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
     
     # プログレスバーの初期化
     push_progress(None, '', 0, 'Starting ...')
+
+    # --- 準備中（黄色）フック：最初に1枚だけ出す。失敗しても本体は続行 ---
+    try:
+        _prep_idx  = (progress_img_idx + 1) if isinstance(progress_img_idx, int) else 1
+        _prep_tot  = (progress_img_total   ) if isinstance(progress_img_total, int) else 1
+        _prep_text = translate("Preparing next job ({0}/{1})").format(_prep_idx, _prep_tot)
+        # spinner は既定 True。明示したい場合は hint に spinner=true/false を入れる
+        push_progress(None, _prep_text, 0, "[THEME=yellow spinner=true]"+_prep_text)
+    except Exception:
+        pass
     
     # モデルや中間ファイルなどのキャッシュ利用フラグ
     use_cached_files = use_prompt_cache
@@ -2100,26 +2330,120 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 lora_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lora')
                 print(translate("LoRAディレクトリ: {0}").format(lora_dir))
                 
-                # ドロップダウンの選択項目を処理
-                dropdown_paths = []
-                
-                # 各ドロップダウンからLoRAを追加
-                for dropdown_idx, dropdown_value in enumerate([lora_dropdown1, lora_dropdown2, lora_dropdown3]):
-                    dropdown_name = f"LoRA{dropdown_idx+1}"
-                    if dropdown_value and dropdown_value != translate("なし"):
-                        lora_path = safe_path_join(lora_dir, dropdown_value)
-                        print(translate("{name}のロード試行: パス={path}").format(name=dropdown_name, path=lora_path))
-                        if os.path.exists(lora_path):
-                            current_lora_paths.append(lora_path)
-                            print(translate("{name}を選択: {path}").format(name=dropdown_name, path=lora_path))
-                        else:
-                            lora_path_retry = safe_path_join(lora_dir, os.path.basename(str(dropdown_value)))
-                            print(translate("{name}を再試行: {path}").format(name=dropdown_name, path=lora_path_retry))
-                            if os.path.exists(lora_path_retry):
-                                current_lora_paths.append(lora_path_retry)
-                                print(translate("{name}を選択 (パス修正後): {path}").format(name=dropdown_name, path=lora_path_retry))
+
+                # --- フォールバック: ドロップダウンが未スキャン/未反映でも安全に進める ---
+                try:
+                    _dd_vals = [lora_dropdown1, lora_dropdown2, lora_dropdown3]
+                    _dd_vals = [ (v.value if hasattr(v, "value") else v) for v in _dd_vals ]
+                    _dd_vals = [ (str(v) if v is not None else "") for v in _dd_vals ]
+                    _choices = scan_lora_directory()
+                    _choices_set = set(_choices or [])
+                    _none_label = translate("なし")
+                    _patched = [False, False, False]
+                    for _i, _val in enumerate(_dd_vals):
+                        if (not _val) or (_val not in _choices_set):
+                            _base = os.path.basename(_val) if _val else ""
+                            _pick = None
+                            if _base and _base in _choices_set:
+                                _pick = _base
                             else:
-                                print(translate("選択された{name}が見つかりません: {file}").format(name=dropdown_name, file=dropdown_value))
+                                _pick = _none_label if _none_label in _choices_set else (_choices[0] if _choices else "")
+                            _dd_vals[_i] = _pick
+                            _patched[_i] = True
+                    lora_dropdown1, lora_dropdown2, lora_dropdown3 = _dd_vals
+                    if any(_patched):
+                        print(translate("LoRAディレクトリを自動スキャンし、選択値を補正しました: {0}").format(str(_dd_vals)))
+                except Exception as _e:
+                    try:
+                        print(translate("LoRAの再スキャン/補正に失敗: {0}").format(_e))
+                    except Exception:
+                        pass
+
+
+                # --- フォールバック: 未スキャン/未反映でも安全に進める + テキスト入力のLoRAファイル名を許容 ---
+                # ここでは UI のドロップダウン状態に依存せず、ローカル変数（lora_dropdown1..3）だけ正規化して使用する。
+                try:
+                    import gradio as gr
+                    _dd_vals = [lora_dropdown1, lora_dropdown2, lora_dropdown3]
+                    _dd_vals = [(v.value if hasattr(v, "value") else v) for v in _dd_vals]
+                    _dd_vals = [(str(v) if v is not None else "").strip() for v in _dd_vals]
+                    _choices = scan_lora_directory()
+                    _choices_set = set(_choices or [])
+                    _none_label = translate("なし")
+                    _patched = [False, False, False]
+                
+                    for _i, _val in enumerate(_dd_vals):
+                        _val = (_val or "").strip()
+                        # 空 or 「なし」はそのまま（LoRA無効）
+                        if (not _val) or (_val == _none_label):
+                            continue
+                
+                        if _val in _choices_set:
+                            # リストに存在 → そのまま採用
+                            continue
+                
+                        # リストに無い → テキスト入力されたファイル名とみなして存在チェック（フル/相対パスは考慮せず、ファイル名のみ）
+                        _fname = os.path.basename(_val)
+                        candidate_path = os.path.join(lora_dir, _fname)
+                
+                        if os.path.isfile(candidate_path):
+                            # 実在 → 値として受け入れる（ドロップダウンリスト外でもOK）
+                            _dd_vals[_i] = _fname
+                            _patched[_i] = True
+                            try:
+                                print(translate("LoRA{0}: テキスト入力のファイル名を受理しました: {1}").format(_i+1, _fname))
+                            except Exception:
+                                pass
+                        else:
+                            # 実在しない → 赤モーダルで即時中断
+                            msg = translate(
+                                "LoRA{0}に指定されたファイル {1} が見つかりません。LoRAフォルダを再スキャンし、設定を変更してください。保存された設定値の場合は、存在するファイルを選択しなおして上書き保存してください。"
+                            ).format(_i+1, _fname)
+                            raise gr.Error(msg)
+                
+                    lora_dropdown1, lora_dropdown2, lora_dropdown3 = _dd_vals
+                    if any(_patched):
+                        try:
+                            print(translate("LoRAディレクトリを自動スキャンし、選択値を補正しました: {0}").format(str(_dd_vals)))
+                        except Exception:
+                            pass
+                
+                except gr.Error:
+                    # そのまま上位へ（赤モーダル）
+                    raise
+                except Exception as _e:
+                    # 失敗しても生成は継続（ログのみ）
+                    try:
+                        print(translate("LoRAの再スキャン/補正に失敗: {0}").format(_e))
+                    except Exception:
+                        pass
+
+                # --- 正規化済みの値からパスを確定 ---
+                import gradio as gr
+                for idx, raw in enumerate([lora_dropdown1, lora_dropdown2, lora_dropdown3], start=1):
+                    val = raw.value if hasattr(raw, "value") else raw
+                    val = (str(val) if val is not None else "").strip()
+                    if not val or val == translate("なし"):
+                        continue
+                    fname = os.path.basename(val)
+                    lora_path = safe_path_join(lora_dir, fname)
+                    print(translate("{name}のロード試行: パス={path}" ).format(name=f"LoRA{idx}", path=lora_path))
+
+                    if os.path.isfile(lora_path):
+                        current_lora_paths.append(lora_path)
+                        print(translate("{name}を選択: {path}" ).format(name=f"LoRA{idx}", path=lora_path))
+                        continue
+                    lora_path_retry = safe_path_join(lora_dir, os.path.basename(fname))
+                    print(translate("{name}を再試行: {path}" ).format(name=f"LoRA{idx}", path=lora_path_retry))
+                    if os.path.isfile(lora_path_retry):
+                        current_lora_paths.append(lora_path_retry)
+                        print(translate("{name}を選択 (パス修正後): {path}" ).format(name=f"LoRA{idx}", path=lora_path_retry))
+                        continue
+                    msg = translate("LoRA{0}に指定されたファイル {1} が見つかりません。LoRAフォルダを再スキャンし、設定を変更してください。保存された設定値の場合は、存在するファイルを選択しなおして上書き保存してください。").format(idx, fname)
+                    raise gr.Error(msg)
+
+
+
             else:
                 # ファイルアップロードモードの場合
                 # 全LoRAファイルを収集
@@ -2203,6 +2527,32 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         print(translate("LoRA設定: lora_cache={0}, reuse={1}, fp8={2}, force_split={3}")
               .format(lora_cache_enabled, reuse_flag, fp8_enabled_flag, force_dict_split_flag))
 
+       # --- 進捗バー黄色:100% 準備中（yellow）をここで完了表示にしてクローズ ---
+        try:
+            _prep_idx  = (progress_img_idx + 1) if isinstance(progress_img_idx, int) else 1
+            _prep_tot  = (progress_img_total   ) if isinstance(progress_img_total, int) else 1
+            _prep_text = translate("Preparing next job ({0}/{1})").format(_prep_idx, _prep_tot)
+            # 100% で visibility:hidden（幅保持）に切り替わる
+            push_progress(None, _prep_text, 100, "[THEME=yellow spinner=true]"+_prep_text)
+        except Exception:
+            pass
+
+
+        # === LoRAロードの進捗表示（概算） ===
+        try:
+            _total = 0
+            _n = len(current_lora_paths) if isinstance(current_lora_paths, list) else 0
+            for _p in (current_lora_paths or []):
+                try:
+                    if os.path.isfile(_p):
+                        _total += os.path.getsize(_p)
+                except Exception:
+                    pass
+            _total_gb = _total / (1024**3) if _total else 0.0
+            push_progress(None, translate('LoRAキャッシュを読み込み中...'), 0, f'[BAR fg=#ff9800]LoRA Cache Loading: 0.00GB / {_total_gb:.2f}GB (0/{_n})')
+        except Exception:
+            pass
+
         transformer_manager.set_next_settings(
             lora_paths=current_lora_paths,
             lora_scales=current_lora_scales,
@@ -2210,6 +2560,44 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             fp8_enabled=fp8_enabled_flag,
             force_dict_split=force_dict_split_flag
         )
+
+        # ここまで戻ってきた＝LoRAキャッシュ/適用の準備が完了（失敗時は上で例外になる）。
+        # 正確なバイト数が取得できる環境ではそれを優先、無ければ 100% の完了表示だけ確実に出す。
+        try:
+            _n = len(current_lora_paths) if isinstance(current_lora_paths, list) else 0
+            _msg_done = translate("LoRAキャッシュの準備が完了しました")
+            # 将来: transformer_manager が統計を提供するならそれを使う
+            #   例） get_cache_stats() -> {"loaded": int, "total": int, "count": i, "n": n}
+            _stats = None
+            try:
+                if hasattr(transformer_manager, "get_cache_stats"):
+                    _stats = transformer_manager.get_cache_stats() or None
+            except Exception:
+                _stats = None
+            if _stats and "total" in _stats:
+                _loaded = int(_stats.get("loaded") or 0)
+                _total  = int(_stats.get("total")  or 0)
+                _i      = int(_stats.get("count")  or _n)
+                _n2     = int(_stats.get("n")      or _n)
+                # テキストだけ反映（単位計算は安全のため省略可能）
+                push_progress(
+                    None,
+                    _msg_done,
+                    100,
+                    f"[THEME=yellow spinner=true]{_msg_done} ({_i}/{_n2})"
+                )
+            else:
+                # 統計が無くても「終わった」ことは UI に知らせる（黄色100%）
+                push_progress(
+                    None,
+                    _msg_done,
+                    100,
+                    f"[THEME=yellow spinner=true]{_msg_done} ({_n}/{_n})"
+                )
+        except Exception:
+            pass
+
+
         # -------- LoRA 設定 END ---------
 
         
@@ -2528,8 +2916,19 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
         # 条件: 1) プロンプトキャッシュ機能が有効 2) まだメモリキャッシュが利用できない
         if use_prompt_cache and not use_cache:
+
+            try:
+                push_progress(None, translate('キャッシュを読み込み中...'), 0, '[BAR fg=#ff9800]Cache Loading: 0.00GB / ?.?GB')
+            except Exception:
+                pass
             disk_cache = prompt_cache.load_from_cache(prompt, n_prompt)
             if disk_cache:
+
+                try:
+                    # 読み込み完了（サイズ既知でないため100%表示）
+                    push_progress(None, translate('キャッシュの読み込みが完了しました'), 100, '[BAR fg=#ff9800]Cache Loading: 100%')
+                except Exception:
+                    pass
                 # 既存のディスクキャッシュを利用
                 print(translate("ファイルキャッシュからテキストエンコード結果を読み込みます"))
                 llama_vec = disk_cache['llama_vec']
@@ -2805,6 +3204,24 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
                 # ディスクキャッシュへの保存
                 if use_prompt_cache:
+
+                    try:
+                        # キャッシュ書き出し：サイズを概算し、赤100%バーで明示
+                        _sz = 0
+                        for _k, _t in {
+                            'llama_vec': llama_vec, 'llama_vec_n': llama_vec_n,
+                            'clip_l_pooler': clip_l_pooler, 'clip_l_pooler_n': clip_l_pooler_n,
+                            'llama_attention_mask': llama_attention_mask, 'llama_attention_mask_n': llama_attention_mask_n
+                        }.items():
+                            try:
+                                _sz += int(_t.element_size() * _t.nelement())
+                            except Exception:
+                                pass
+                        _gb = _sz / (1024**3)
+                        push_progress(None, translate('キャッシュを書き出しています...'), 100, f'[BAR fg=#f44336 bg=#eee]Cache Writing: {_gb:.2f}GB / {_gb:.2f}GB')
+                    except Exception:
+                        pass
+
                     prompt_cache.save_to_cache(prompt, n_prompt, {
                         'llama_vec': llama_vec.cpu(),
                         'llama_vec_n': llama_vec_n.cpu(),
@@ -2844,7 +3261,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         
         # 1フレームモード用の設定
         push_progress(None, '', 0, 'Start sampling ...')
-        
+
         rnd = torch.Generator("cpu").manual_seed(seed)
         
         # history_latentsを確実に新規作成（前回実行の影響を排除）
@@ -3078,9 +3495,18 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 # ハイVRAMモードでも正しくロードしてgpu_complete_modulesに追加
                 load_model_as_complete(transformer, target_device=gpu, unload=True)
 
+
+            # --- 初期サンプリング表示を追加 (0/N) ---
+            try:
+                push_progress(None, translate('1フレームモード: サンプリング中...'), 0, f'Sampling 0/{steps}')
+            except Exception:
+                pass
+
+
             # teacacheの設定
             if use_teacache:
                 transformer.initialize_teacache(enable_teacache=True, num_steps=steps)
+
             else:
                 transformer.initialize_teacache(enable_teacache=False)
             
@@ -3366,6 +3792,13 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 # 最も重要な問題：widthとheightが間違っている可能性
                 # エラーログから、widthが60、heightが104になっているのが問題
                 # これらはlatentサイズであり、実際の画像サイズではない
+
+                try:
+                    # LoRA読み込みフェーズ完了（概算）
+                    push_progress(None, translate('LoRAのロードが完了しました'), 100, '[BAR fg=#ff9800]LoRA Cache Loading: 100%')
+                except Exception:
+                    pass
+
                 print(translate("実際の画像サイズを再確認"))
                 print(translate("入力画像のサイズ: {0}").format(input_image_np.shape))
                 
@@ -3379,6 +3812,17 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 # 初回実行時の品質について説明
                 if not use_cache:
                     print(translate("【初回実行について】初回は Anti-drifting Sampling の履歴データがないため、ノイズが入る場合があります"))
+                
+                # --- 進捗:サンプリング直前に0/stepsを出す（青）---
+                try:
+                    push_progress(
+                        None,
+                        translate('1フレームモード: サンプリング中...'),
+                        0,
+                        f"[THEME=cyan spinner=true]Sampling 0/{steps}"
+                    )
+                except Exception:
+                    pass
                 
                 try:
                     generated_latents = sample_hunyuan(
@@ -3462,14 +3906,33 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             
             total_generated_latent_frames += int(generated_latents.shape[2])
             history_latents = torch.cat([generated_latents.to(history_latents), history_latents], dim=2)
-            
+
+
+            # 緑の進捗バー 1
+            try:
+                push_progress(None, translate("Transformer Checking..."), 0, "[THEME=green]Transformer Checking...")
+            except Exception:
+                pass
+
             # 生成完了後のメモリ最適化 - 軽量な処理に変更
             if not high_vram:
                 # transformerのメモリを軽量に解放（辞書リセットなし）
                 print(translate("生成完了 - transformerをアンロード中..."))
 
+                # 緑の進捗バー 2a
+                try:
+                    push_progress(None, translate("Transformer offloading..."), 0, "[THEME=green]Transformer offloading...")
+                except Exception:
+                    pass
+
                 # 元の方法に戻す - 軽量なオフロードで速度とメモリのバランスを取る
                 offload_model_from_device_for_memory_preservation(transformer, target_device=gpu, preserved_memory_gb=8)
+
+                # 緑の進捗バー 2b
+                try:
+                    push_progress(None, translate("Transformer offloading..."), 12, "[THEME=green]Transformer offloading...")
+                except Exception:
+                    pass
 
                 # アンロード後のメモリ状態をログ
                 free_mem_gb_after_unload = get_cuda_free_memory_gb(gpu)
@@ -3489,7 +3952,13 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                         time.sleep(5)
                         vae = AutoencoderKLHunyuanVideo.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='vae', torch_dtype=torch.float16).cpu()
                         setup_vae_if_loaded()  # VAEの設定を適用
-                
+
+                # 緑の進捗バー 2c
+                try:
+                    push_progress(None, translate("Transformer/VRAM offloading..."), 24, "[THEME=green]Transformer/VRAM offloading...")
+                except Exception:
+                    pass
+
                 print(translate("VAEをGPUにロード中..."))
                 load_model_as_complete(vae, target_device=gpu)
                 
@@ -3499,13 +3968,26 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 
                 # 追加のメモリクリーンアップ
                 torch.cuda.empty_cache()
-            
+
+            # 緑の進捗バー 3
+            try:
+                push_progress(None, translate("Extract latents..."), 36, "[THEME=green]Extract latents...")
+            except Exception:
+                pass
+
             # 実際に使用するラテントを抽出
             real_history_latents = history_latents[:, :, :total_generated_latent_frames, :, :]
             
             # 使用していないテンソルを早めに解放
             del history_latents
             torch.cuda.empty_cache()
+
+
+            # 緑の進捗バー 4
+            try:
+                push_progress(None, translate("Preparing to save image..."), 42, "[THEME=green]Preparing to save image...")
+            except Exception:
+                pass
             
             # 1フレームモードではVAEデコードを行い、画像を直接保存
             try:
@@ -3559,6 +4041,12 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     PROMPT_KEY: prompt,
                     SEED_KEY: seed  # intとして保存
                 }
+
+                # 緑の進捗バー 5
+                try:
+                    push_progress(None, translate("Saving image file..."), 42, "[THEME=green]Saving image file...")
+                except Exception:
+                    pass
                 
                 # 画像として保存（メタデータ埋め込み）
                 from PIL import Image
@@ -3602,6 +4090,13 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
     
     # 処理完了を通知（個別バッチの完了）
     print(translate("処理が完了しました"))
+
+    # 緑の進捗バー 6
+    try:
+        push_progress(None, translate("Saved the generated image successfully"), 100, "[THEME=green]Saved the generated image successfully")
+    except Exception:
+        pass
+
     
     # worker関数内では効果音を鳴らさない（バッチ処理全体の完了時のみ鳴らす）
     return
@@ -4256,7 +4751,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             f"{(progress_ref_name or translate('入力画像'))} / 《実施予定数 {progress_img_idx}/{progress_img_total}》"
             f"{(progress_img_name or translate('入力画像'))} <br/>"
         )
-        last_progress_bar = make_progress_bar_html(0, '')
+        last_progress_bar = make_progress_bar_html2(0, '')
         yield (
             last_output_filename if last_output_filename is not None else gr.skip(),
             _preview_update(last_preview_image),
@@ -4727,7 +5222,7 @@ def on_resync_button_clicked():
         import time, time as _tmod
         _last_ctx = ctx
         _linger_until = None  # 次ctx待ちの猶予時刻（monotonic 秒）。None は未設定を表す。
-        _linger_sec = globals().get("RESYNC_CTX_LINGER_SEC", 2.5)  # 既定は 2.5 秒
+        _linger_sec = globals().get("RESYNC_CTX_LINGER_SEC", 1.0)  # 既定は 1.0 秒
 
         while True:
             _cur = get_running_job_context()
@@ -5030,9 +5525,10 @@ with block:
                                     return gr.update(value=folder_name)
 
                                 # 入力フォルダを開く関数
-                                def open_input_folder():
+                                def open_input_folder(folder_name):
                                     """入力フォルダを開く処理（保存も実行）"""
                                     global input_folder_name_value
+                                    input_folder_name_value = (folder_name.value if hasattr(folder_name, 'value') else folder_name) or ''
 
                                     # 念のため設定を保存
                                     settings = load_settings()
@@ -5137,7 +5633,7 @@ with block:
                         # 入力フォルダを開くボタンにイベントを紐づけ
                         open_input_folder_btn.click(
                             fn=open_input_folder,
-                            inputs=[],
+                            inputs=[input_folder_name],
                             outputs=[gr.Textbox(visible=False)]  # 一時的なフィードバック表示用（非表示）
                         )
 
@@ -5300,10 +5796,18 @@ with block:
                     print(translate("参照フォルダ名をメモリに保存: {0}").format(folder_name))
                     return gr.update(value=folder_name)
 
-                def open_reference_folder():
+                def open_reference_folder(folder_name):
+                    # フォーム側の現在値を"そのまま"優先して使う（サーバ側の残存値に依存しない）
                     global reference_input_folder_name_value
+                    # 値の取り出し（GradioのComponent/純文字列どちらでもOK）
+                    _val = (folder_name.value if hasattr(folder_name, "value") else folder_name) or ""
+                    # フォルダ名として安全な文字に正規化（他の箇所の実装と同じ基準）
+                    _val = "".join(c for c in _val if c.isalnum() or c in ("_", "-"))
+                    reference_input_folder_name_value = _val
+
+                    # 永続化してから実フォルダを開く
                     settings = load_settings()
-                    settings['reference_folder'] = reference_input_folder_name_value
+                    settings["reference_folder"] = reference_input_folder_name_value
                     save_settings(settings)
                     print(translate("参照フォルダ設定を保存しました: {0}").format(reference_input_folder_name_value))
                     input_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), reference_input_folder_name_value)
@@ -5327,7 +5831,9 @@ with block:
                     outputs=[reference_input_folder_name],
                 )
                 open_reference_folder_btn.click(
-                    fn=open_reference_folder, inputs=[], outputs=[gr.Textbox(visible=False)]
+                    fn=open_reference_folder,
+                    inputs=[reference_input_folder_name],
+                    outputs=[gr.Textbox(visible=False)],
                 )
 
             # 参照画像の説明
