@@ -1,9 +1,40 @@
 import os
+import sys
 import hashlib
-import torch
+import threading
 
 # グローバルキャッシュ設定
 cache_enabled = False
+
+# ------------------------------------------------------------
+# オンメモリキャッシュ（プロセス内シングルトン）
+# ------------------------------------------------------------
+_INMEM_CACHE = {}
+_INMEM_LOCK = threading.Lock()
+
+
+def _inmem_get(cache_key):
+    """スレッド安全にオンメモリキャッシュを取得"""
+    with _INMEM_LOCK:
+        return _INMEM_CACHE.get(cache_key)
+
+
+def _inmem_set(cache_key, state_dict):
+    """スレッド安全にオンメモリキャッシュへ保存"""
+    with _INMEM_LOCK:
+        _INMEM_CACHE[cache_key] = state_dict
+
+
+def _inmem_pop(cache_key):
+    """特定キーをオンメモリキャッシュから削除"""
+    with _INMEM_LOCK:
+        return _INMEM_CACHE.pop(cache_key, None)
+
+
+def _inmem_clear():
+    """オンメモリキャッシュを全てクリア"""
+    with _INMEM_LOCK:
+        _INMEM_CACHE.clear()
 
 
 def set_cache_enabled(value: bool):
@@ -46,28 +77,160 @@ def generate_cache_key(model_files, lora_paths, lora_scales, fp8_enabled):
     key_str = '|'.join(items)
     return hashlib.sha256(key_str.encode('utf-8')).hexdigest()
 
-
 def load_from_cache(cache_key):
-    """Load cached state dict if available."""
-    cache_file = os.path.join(get_cache_dir(), cache_key + '.pt')
-    print(f"Looking for LoRA state cache: {cache_file}")
-    if os.path.exists(cache_file):
+    """キャッシュがあれば読み込み、なければ None を返す（オンメモリ優先）"""
+    import torch
+    from webui.locales.i18n_extended import translate
+
+    # ① まずオンメモリキャッシュを確認
+    mem = _inmem_get(cache_key)
+    if mem is not None:
+        print(translate("オンメモリのLoRA キャッシュを再利用します: {0}").format(cache_key))
+        return mem
+
+    cache_dir = get_cache_dir()
+    cache_fullpath = os.path.join(cache_dir, cache_key + '.pt')
+    cache_filename = cache_key + '.pt'
+
+    print(translate("出力済みLoRA キャッシュを読み込んでいます: {0}").format(cache_key + '.pt'))
+
+    if not os.path.exists(cache_fullpath):
+        print(translate("LoRA キャッシュ Miss"))
+        print(translate("キャッシュがみつからないか、初めて生成します: {0}").format(cache_filename))
+        return None
+
+    try:
+        size = os.path.getsize(cache_fullpath)
         try:
-            data = torch.load(cache_file)
-            print("LoRA state cache hit")
-            return data
-        except Exception as e:
-            print(f"Failed to load LoRA state cache: {e}")
-            return None
-    print("LoRA state cache miss")
-    return None
+            import sys
+            from tqdm import tqdm
+
+            class _TqdmReader:
+                """ファイルオブジェクトをラップし、読み取り操作時にtqdmの進行状況を更新"""
+
+                def __init__(self, f, total, desc):
+                    self._f = f
+                    self._t = tqdm(
+                        total=total,
+                        unit="B",
+                        unit_scale=True,
+                        unit_divisor=1024,
+                        desc=desc,
+                        mininterval=0.2,
+                        disable=not sys.stderr.isatty(),
+                    )
+
+                def read(self, *args, **kwargs):
+                    data = self._f.read(*args, **kwargs)
+                    self._t.update(len(data))
+                    return data
+
+                def readinto(self, b):
+                    n = self._f.readinto(b)
+                    self._t.update(n)
+                    return n
+
+                # 一部のZip/IOスタックではread1()を使用する場合があるので考慮にふくめる
+                def read1(self, n=-1):
+                    if hasattr(self._f, "read1"):
+                        data = self._f.read1(n)
+                        self._t.update(len(data))
+                        return data
+                    # Fallback to normal read
+                    data = self._f.read(n)
+                    self._t.update(len(data))
+                    return data
+
+
+                def finalize(self):
+                    if self._t.total is not None and self._t.n < self._t.total:
+                        self._t.update(self._t.total - self._t.n)
+
+                def close(self):
+                    self.finalize()
+                    self._t.close()
+                    self._f.close()
+
+                def __getattr__(self, name):
+                    return getattr(self._f, name)
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    self.close()
+
+            with open(cache_fullpath, "rb") as f, _TqdmReader(
+                f, size, translate("キャッシュ読み込み中")
+            ) as wrapped:
+                try:
+                    obj = torch.load(wrapped, map_location="cpu", mmap=False)
+                except TypeError:
+                    obj = torch.load(wrapped, map_location="cpu")
+        except Exception:
+            try:
+                _echo_fetching_cache(translate("キャッシュ読み込み中"))
+            except Exception:
+                pass
+            try:
+                obj = torch.load(cache_fullpath, map_location="cpu", mmap=False)
+            except TypeError:
+                obj = torch.load(cache_fullpath, map_location="cpu")
+
+        # ② 読み込んだデータをオンメモリに保存
+        _inmem_set(cache_key, obj)
+        print(translate("LoRA キャッシュ Hit"))
+        return obj
+
+    except Exception as e:
+        print(translate("LoRA キャッシュ が読み込めません: {0}").format(cache_filename))
+        print(translate("エラー内容: {0}").format(e))
+        print(translate("キャッシュが得られなかったので、最適化処理及び再生成します"))
+        return None
 
 
 def save_to_cache(cache_key, state_dict):
-    """Save state dict to cache."""
-    cache_file = os.path.join(get_cache_dir(), cache_key + '.pt')
-    print(f"Saving LoRA state cache: {cache_file}")
+    """現在の LoRA 状態をキャッシュに保存する（オンメモリ＋ディスク）"""
+    import torch
+    from webui.locales.i18n_extended import translate
+
+    # ① 先にオンメモリへ登録
+    _inmem_set(cache_key, state_dict)
+
+    cache_dir = get_cache_dir()
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_fullpath = os.path.join(cache_dir, cache_key + '.pt')
+    cache_filename = cache_key + '.pt'
+    
+    print(translate("メモリ上のLoRA キャッシュを書き出しています: {0}").format(cache_filename))
+
     try:
-        torch.save(state_dict, cache_file)
+        try:
+            from tqdm import tqdm
+            with open(cache_fullpath, "wb") as f:
+                with tqdm.wrapattr(
+                    f, "write",
+                    unit="B", unit_scale=True, unit_divisor=1024,
+                    desc=translate("キャッシュ書き出し中")
+                ) as wrapped:
+                    torch.save(state_dict, wrapped)
+        except Exception:
+            with open(cache_fullpath, "wb") as f:
+                torch.save(state_dict, f)
+
+        print(translate("メモリ上のLoRA キャッシュの書き出しに成功: {0}").format(cache_filename))
+
     except Exception as e:
-        print(f"Failed to save LoRA state cache: {e}")
+        print(translate("メモリ上のLoRA キャッシュの書き出しに失敗: {0}").format(cache_filename))
+        print(translate("エラー内容: {0}").format(e))
+
+def _echo_fetching_cache(title: str) -> None:
+    """tqdm が使えればミニ進捗（1/1）、無ければ簡易表示"""
+    try:
+        from tqdm import tqdm
+        for _ in tqdm(range(1), desc=title, unit="it"):
+            pass
+    except Exception:
+        print(f"{title} ...")
+        sys.stdout.flush()
+

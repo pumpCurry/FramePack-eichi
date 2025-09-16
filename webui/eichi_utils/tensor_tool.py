@@ -1304,7 +1304,7 @@ def worker(
         # この行は削除しても問題ありません
         # -------- FP8 設定 END ---------
 
-        print(translate("\ntransformer状態チェック..."))
+        print("\n" + translate("transformer状態チェック..."))
         try:
             # transformerの状態を確認し、必要に応じてリロード
             if not transformer_manager.ensure_transformer_state():
@@ -1857,7 +1857,7 @@ def worker(
 
         # 処理終了時に通知
         if not play_completion_sound():
-            print(translate("\n✓ 処理が完了しました！"))
+            print("\n" + translate("✓ 処理が完了しました！"))
 
         # メモリ解放を明示的に実行
         if torch.cuda.is_available():
@@ -2001,7 +2001,7 @@ def worker(
             time_str = translate("{0}分 {1}秒").format(int(minutes), f"{seconds:.1f}")
         else:
             time_str = translate("{0:.1f}秒").format(seconds)
-        print(translate("\n全体の処理時間: {0}").format(time_str))
+        print("\n" + translate("全体の処理時間: {0}").format(time_str))
 
         # 完了メッセージの設定
         # テンソル結合が成功した場合のメッセージ
@@ -2189,7 +2189,7 @@ def process(
     # 動画生成の設定情報をログに出力
     # 4.5の場合は5として計算するための特別処理
 
-    print(translate("\n==== 動画生成開始 ====="))
+    print("\n" + translate("==== 動画生成開始 ====="))
     print(translate("\u25c6 サンプリングステップ数: {0}").format(steps))
     print(translate("\u25c6 TeaCache使用: {0}").format(use_teacache))
     # TeaCache使用の直後にSEED値の情報を表示 - バッチ処理の初期値として表示
@@ -2380,8 +2380,9 @@ def process(
         seed = random.randint(0, 2**32 - 1)
         # ユーザーにわかりやすいメッセージを表示
         print(
-            translate(
-                "\n[INFO] ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。"
+            "\n[INFO] "
+            + translate(
+                "ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。"
             ).format(previous_seed, seed)
         )
         # UIのseed欄もランダム値で更新
@@ -2412,7 +2413,7 @@ def process(
 
     # stream作成後、バッチ処理前もう一度フラグを確認
     if batch_stopped:
-        print(translate("\nバッチ処理が中断されました（バッチ開始前）"))
+        print("\n" + translate("バッチ処理が中断されました（バッチ開始前）"))
         yield (
             None,
             gr.update(visible=False),
@@ -2428,7 +2429,7 @@ def process(
     for batch_index in range(batch_count):
         # 停止フラグが設定されている場合は全バッチ処理を中止
         if batch_stopped:
-            print(translate("\nバッチ処理がユーザーによって中止されました"))
+            print("\n" + translate("バッチ処理がユーザーによって中止されました"))
             yield (
                 None,
                 gr.update(visible=False),
@@ -2738,7 +2739,7 @@ def end_process():
 
     # 現在のバッチと次のバッチ処理を全て停止するフラグを設定
     batch_stopped = True
-    print(translate("\n停止ボタンが押されました。バッチ処理を停止します..."))
+    print("\n" + translate("停止ボタンが押されました。バッチ処理を停止します..."))
     # 現在実行中のバッチを停止
     stream.input_queue.push("end")
 
@@ -3055,11 +3056,11 @@ with block:
 
                         with gr.Row(variant="compact"):
                             use_random_seed = gr.Checkbox(
-                                label=translate("Use Random Seed"),
+                                label=translate("ランダムシードを使用"),
                                 value=use_random_seed_default,
                             )
                             seed = gr.Number(
-                                label=translate("Seed"), value=seed_default, precision=0
+                                label=translate("シード"), value=seed_default, precision=0
                             )
 
                         def set_random_seed(is_checked):
@@ -3893,7 +3894,7 @@ with block:
                     with gr.Row():
                         # 動画
                         result_video = gr.Video(
-                            label=translate("Finished Frames"),
+                            label=translate("処理済みフレーム"),
                             autoplay=True,
                             show_share_button=False,
                             height=512,
@@ -3915,7 +3916,7 @@ with block:
 
                     with gr.Row():
                         preview_image = gr.Image(
-                            label=translate("Next Latents"), height=200, visible=False
+                            label=translate("次の潜在"), height=200, visible=False
                         )
 
                     with gr.Row():
@@ -4076,10 +4077,10 @@ with block:
 
         with gr.Row():
             use_teacache = gr.Checkbox(
-                label=translate("Use TeaCache"),
+                label=translate("TeaCacheを使用"),
                 value=True,
                 info=translate(
-                    "Faster speed, but often makes hands and fingers slightly worse."
+                    "速度は速くなりますが、手や指の表現が若干劣化する可能性があります。"
                 ),
             )
 
@@ -5986,5 +5987,5 @@ except OSError as e:
         input(translate("続行するには何かキーを押してください..."))
     else:
         # その他のOSErrorの場合は元のエラーを表示
-        print(translate("\nエラーが発生しました: {e}").format(e=e))
+        print("\n" + translate("エラーが発生しました: {e}").format(e=e))
         input(translate("続行するには何かキーを押してください..."))

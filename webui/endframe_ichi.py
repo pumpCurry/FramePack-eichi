@@ -1,5 +1,6 @@
 import os
-print(f"{os.path.basename(__file__)} : 起動開始....")
+print(f"{os.path.basename(__file__)} : Starting....")
+from webui.eichi_utils.console import info
 
 import sys
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
@@ -356,26 +357,41 @@ def cleanup_generation_resources():
     global transformer_model, current_batch_data
     import torch
     import gc
-    
+
     # バッチデータクリア
     current_batch_data = None
-    
+
     # モデルメモリ解放（存在する場合）
     if transformer_model is not None:
-        try:
+        _reuse = os.environ.get('FRAMEPACK_REUSE_FP8', '0') in ('1', 'true', 'TRUE')
+        if not _reuse:
+            try:
+                from eichi_utils import settings_manager as _sm
+                _load = getattr(_sm, 'load_app_settings', None)
+                if _load:
+                    _reuse = bool(_load().get('reuse_optimized_dict', False))
+            except Exception:
+                _reuse = False
+        if _reuse:
+            info(translate("Transformer保持: 破棄スキップ（reuse_optimized_dict が有効）"))
+        else:
+            # オンメモリのLoRAキャッシュをクリア
+            try:
+                from eichi_utils import lora_state_cache as _lsc
+                _lsc._inmem_clear()
+            except Exception:
+                pass
             del transformer_model
             transformer_model = None
-        except:
-            pass
-    
+
     # CUDA メモリクリア
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
-    
+
     # Python ガベージコレクション
     gc.collect()
-    
+
     print(translate("生成リソースをクリーンアップしました"))
 
 def check_generation_interrupted():
@@ -468,11 +484,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                             # バッチインデックスが不正な場合やプロンプトが足りない場合は元のプロンプトを使用
                             current_prompt = prompt  # 元のプロンプトを使用
                             if batch_index is None:
-                                print("バッチインデックスが未指定です")
+                                print(translate("Batch index is not specified."))
                             elif batch_index < 0 or (prompt_lines and batch_index >= len(prompt_lines)):
                                 print(translate("バッチインデックスが範囲外です: {0}, プロンプト数: {1}").format(batch_index, len(prompt_lines) if prompt_lines else 0))
                             elif not prompt_lines:
-                                print("プロンプトファイルに有効な行がありません")
+                                print(translate("No valid lines in prompt file."))
 
                             print(translate("元のプロンプトを使用します: {0}...").format(prompt[:50]))
                     else:
@@ -1607,7 +1623,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     print(translate("VAEキャッシュを使用: 履歴フレーム"))
                     history_pixels = vae_decode_cache(real_history_latents, vae).cpu()
                 else:
-                    print("通常デコード使用: 履歴フレーム")
+                    print(translate("Using normal decode: history frame."))
                     history_pixels = vae_decode(real_history_latents, vae).cpu()
                 
                 # 最初のセクションで全フレーム画像を保存
@@ -2448,11 +2464,11 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 unload_complete_models()
     except Exception as e:
         try:
-            print(f"エラーが発生しました: {str(e)}")
+            print(translate("An error occurred: {0}").format(str(e)))
             import traceback
             traceback.print_exc()
         except Exception as inner_e:
-            print(f"エラー処理中にさらにエラーが発生: {str(inner_e)}")
+            print(translate("Another error occurred during error handling: {0}").format(str(inner_e)))
             
         try:
             if not high_vram:
@@ -2460,12 +2476,16 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                     text_encoder, text_encoder_2, image_encoder, vae, transformer
                 )
         except Exception as cleanup_e:
-            print(f"クリーンアップ中にエラーが発生: {str(cleanup_e)}")
+            print(translate("Error occurred during cleanup: {0}").format(str(cleanup_e)))
 
     try:
         stream.output_queue.push(('end', None))
     except Exception as stream_e:
-        print(f"ストリーム終了処理でエラーが発生: {str(stream_e)}")
+        print(translate("Error occurred during stream finalization: {0}").format(str(stream_e)))
+
+    # 生成処理終了後のクリーンアップを必ず実行
+    cleanup_generation_resources()
+
     return
 
 # 画像のバリデーション関数
@@ -2664,7 +2684,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # LoRA選択があれば強制的に有効にする
         if has_selected_lora:
             use_lora = True
-            print("ディレクトリでLoRAが選択されているため、LoRA使用を有効にしました")
+            print(translate("Enabled LoRA usage because a LoRA was selected in the directory."))
     
     if use_lora and has_lora_support:
         all_lora_files = []
@@ -3106,7 +3126,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (
                     batch_output_filename if batch_output_filename is not None else gr.skip(),
-                    gr.update(value=None, visible=False),
+                    gr.update(visible=False),
                     gr.update(),
                     gr.update(),
                     gr.update(interactive=False),
@@ -3167,7 +3187,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     last_preview_image = None
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
-                        gr.update(value=None, visible=False),
+                        gr.update(visible=False),
                         completion_message,
                         '',
                         gr.update(interactive=True),
@@ -3180,7 +3200,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     next_batch_message = translate("バッチ処理: {0}/{1} 完了、次のバッチに進みます...").format(batch_index + 1, batch_count)
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
-                        gr.update(value=None, visible=False),
+                        gr.update(visible=False),
                         next_batch_message,
                         '',
                         gr.update(interactive=False),
@@ -3199,7 +3219,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             last_output_filename = batch_output_filename
             yield (
                 batch_output_filename if batch_output_filename is not None else gr.skip(),
-                gr.update(value=None, visible=False),
+                gr.update(visible=False),
                 translate("バッチ処理が中断されました"),
                 '',
                 gr.update(interactive=True),
@@ -3235,7 +3255,7 @@ def end_after_current_process():
         stop_after_current = True
         if stream is not None and stream.input_queue.top() != 'end':
             stream.input_queue.push('end')
-        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+        print("\n" + translate("停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
 
     return gr.update(value=translate("打ち切り処理中..."), interactive=False)
 
@@ -3247,7 +3267,7 @@ def end_after_step_process():
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
-        print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
+        print("\n" + translate("停止ボタンが押されました。現在のステップ完了後に停止します..."))
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
 
@@ -3283,7 +3303,7 @@ def resync_status_handler():
             last_output_filename = data
             yield (
                 last_output_filename if last_output_filename is not None else gr.skip(),
-                gr.update(value=None, visible=False),
+                gr.update(visible=False),
                 gr.update(),
                 gr.update(),
                 gr.update(interactive=False),
@@ -3304,7 +3324,7 @@ def resync_status_handler():
             last_output_filename = last_output_filename or data
             yield (
                 last_output_filename if last_output_filename is not None else gr.skip(),
-                gr.update(value=None, visible=False),
+                gr.update(visible=False),
                 last_progress_desc,
                 last_progress_bar,
                 gr.update(interactive=True, value=translate("Start Generation")),
@@ -3321,7 +3341,7 @@ def resync_status_handler():
     # If we exit the loop without receiving an 'end' flag, ensure the state is reset
     yield (
         last_output_filename if last_output_filename is not None else gr.skip(),
-        gr.update(value=None, visible=False),
+        gr.update(visible=False),
         last_progress_desc,
         last_progress_bar,
         gr.update(interactive=True, value=translate("Start Generation")),
@@ -3342,7 +3362,7 @@ def end_after_step_process():
         batch_stopped = True
         stop_after_current = True
         stop_after_step = True
-        print(translate("\n停止ボタンが押されました。現在のステップ完了後に停止します..."))
+        print("\n" + translate("停止ボタンが押されました。現在のステップ完了後に停止します..."))
 
     return gr.update(value=translate("停止処理中..."), interactive=False)
 
@@ -3788,9 +3808,9 @@ with block:
             # LoRA設定キャッシュ
             with gr.Row():
                 lora_cache_checkbox = gr.Checkbox(
-                    label=translate("LoRAの設定を再起動時再利用する"),
+                    label=translate("FP8最適化辞書データをディスクにキャッシュする"),
                     value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
-                    info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
+                    info=translate("チェックをオンにすると、プロンプトやLoRA設定などを適用後して毎回生成するFP8最適化辞書データを再利用できるようにキャッシュとして保存します。プロンプトやLoRA設定の組み合わせごとに数十GBの大きなファイルが生成されますが、速度向上に寄与します。")
                 )
 
             def update_lora_cache(value):
@@ -4280,12 +4300,12 @@ with block:
                         
                         # Load/Save選択（ラベルなし、横並び）
                         with gr.Row(scale=1):
-                            load_btn = gr.Button(translate("Load"), variant="primary", scale=1)
-                            save_btn = gr.Button(translate("Save"), variant="secondary", scale=1)
+                            load_btn = gr.Button(translate("読み込み"), variant="primary", scale=1)
+                            save_btn = gr.Button(translate("保存"), variant="secondary", scale=1)
                         # 内部的に使うRadio（非表示）
                         lora_preset_mode = gr.Radio(
-                            choices=[translate("Load"), translate("Save")],
-                            value=translate("Load"),
+                            choices=[translate("読み込み"), translate("保存")],
+                            value=translate("読み込み"),
                             visible=False
                         )
                     
@@ -4528,7 +4548,7 @@ with block:
                 # LoRAプリセット機能のハンドラー関数
                 def handle_lora_preset_button(button_index, mode, lora1, lora2, lora3, scales):
                     """LoRAプリセットボタンのクリックを処理する"""
-                    if mode == translate("Load"):  # Load
+                    if mode == translate("読み込み"):  # Load
                         # ロードモード
                         loaded_values = load_lora_preset(button_index)
                         if loaded_values:
@@ -4555,14 +4575,14 @@ with block:
                 # Load/Saveボタンのイベントハンドラー
                 def set_load_mode():
                     return (
-                        gr.update(value=translate("Load")),
+                        gr.update(value=translate("読み込み")),
                         gr.update(variant="primary"),
                         gr.update(variant="secondary")
                     )
                 
                 def set_save_mode():
                     return (
-                        gr.update(value=translate("Save")),
+                        gr.update(value=translate("保存")),
                         gr.update(variant="secondary"),
                         gr.update(variant="primary")
                     )
@@ -4701,7 +4721,7 @@ with block:
                 queue=False  # 高速化のためキューをスキップ
             )
 
-            prompt = gr.Textbox(label=translate("Prompt"), value=get_default_startup_prompt(), lines=6)
+            prompt = gr.Textbox(label=translate("プロンプト"), value=get_default_startup_prompt(), lines=6)
 
             # プロンプト管理パネルの追加
             with gr.Group(visible=True) as prompt_management:
@@ -4747,7 +4767,7 @@ with block:
 
             # 互換性のためにQuick Listも残しておくが、非表示にする
             with gr.Row(visible=False):
-                example_quick_prompts = gr.Dataset(samples=quick_prompts, label=translate("Quick List"), samples_per_page=1000, components=[prompt])
+                example_quick_prompts = gr.Dataset(samples=quick_prompts, label=translate("クイックリスト"), samples_per_page=1000, components=[prompt])
                 example_quick_prompts.click(lambda x: x[0], inputs=[example_quick_prompts], outputs=prompt, show_progress=False, queue=False)
 
                 # section_settingsは入力欄の値をまとめてリスト化
@@ -5485,7 +5505,7 @@ with block:
 
         with gr.Column():
             result_video = gr.Video(
-                label=translate("Finished Frames"),
+                label=translate("処理済みフレーム"),
                 key="result_video",
                 autoplay=True,
                 show_share_button=False,
@@ -5497,7 +5517,7 @@ with block:
             progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
             progress_bar = gr.HTML('', elem_classes='no-generating-animation')
             preview_image = gr.Image(
-                label=translate("Next Latents"),
+                label=translate("次の潜在"),
                 height=200,
                 visible=False,
                 elem_id="preview_image",
@@ -5510,9 +5530,9 @@ with block:
             section_calc_display = gr.HTML("", label="")
 
             use_teacache = gr.Checkbox(
-                label=translate('Use TeaCache'), 
+                label=translate('TeaCacheを使用'), 
                 value=saved_app_settings.get("use_teacache", True) if saved_app_settings else True, 
-                info=translate('Faster speed, but often makes hands and fingers slightly worse.'),
+                info=translate('速度は速くなりますが、手や指の表現が若干劣化する可能性があります。'),
                 elem_classes="saveable-setting"
             )
             
@@ -5539,10 +5559,10 @@ with block:
             use_random_seed_default = True
             seed_default = random.randint(0, 2**32 - 1) if use_random_seed_default else 1
 
-            use_random_seed = gr.Checkbox(label=translate("Use Random Seed"), value=use_random_seed_default)
+            use_random_seed = gr.Checkbox(label=translate("ランダムシードを使用"), value=use_random_seed_default)
 
-            n_prompt = gr.Textbox(label=translate("Negative Prompt"), value="", visible=False)  # Not used
-            seed = gr.Number(label=translate("Seed"), value=seed_default, precision=0)
+            n_prompt = gr.Textbox(label=translate("ネガティブプロンプト"), value="", visible=False)  # Not used
+            seed = gr.Number(label=translate("シード"), value=seed_default, precision=0)
     
             # ここで、メタデータ取得処理の登録を移動する
             # ここでは、promptとseedの両方が定義済み
@@ -5600,7 +5620,7 @@ with block:
             def update_section_metadata_on_checkbox_change(copy_enabled, *section_images):
                 if not copy_enabled:
                     # チェックボックスがオフの場合は、何も変更せずに現在の値を維持する
-                    print("チェックボックスがオフのため、現在のプロンプト値を維持します")
+                    print(translate("Checkbox is off; keeping current prompt value."))
                     
                     # gr.updateの配列を返す - valueを指定しないとUI値が維持される
                     updates = []
@@ -5665,7 +5685,7 @@ with block:
                     return gr.update()
             use_random_seed.change(fn=set_random_seed, inputs=use_random_seed, outputs=seed)
 
-            total_second_length = gr.Slider(label=translate("Total Video Length (Seconds)"), minimum=1, maximum=120, value=1, step=1)
+            total_second_length = gr.Slider(label=translate("動画の長さ（秒）"), minimum=1, maximum=120, value=1, step=1)
             latent_window_size = gr.Slider(label=translate("Latent Window Size"), minimum=1, maximum=33, value=9, step=1, visible=False)  # Should not change
             steps = gr.Slider(
                 label=translate("Steps"), 
@@ -6049,6 +6069,7 @@ with block:
                 cfg_val,
                 use_teacache_val,
                 gpu_memory_preservation_val,
+                lora_cache_val,
                 gs_val,
                 use_all_padding_val,
                 all_padding_value_val,
@@ -6077,6 +6098,7 @@ with block:
                     # パフォーマンス設定
                     "use_teacache": use_teacache_val,
                     "gpu_memory_preservation": gpu_memory_preservation_val,
+                    "lora_cache": lora_cache_val,
                     "use_vae_cache": use_vae_cache_val,
                     # 詳細設定
                     "gs": gs_val,
@@ -6163,6 +6185,7 @@ with block:
                 # パフォーマンス設定
                 updates.append(gr.update(value=default_settings["use_teacache"]))
                 updates.append(gr.update(value=default_settings["gpu_memory_preservation"]))
+                updates.append(gr.update(value=default_settings.get("lora_cache", False)))
                 updates.append(gr.update(value=default_settings.get("use_vae_cache", False)))
                 
                 # 詳細設定
@@ -6221,6 +6244,7 @@ with block:
                     cfg,
                     use_teacache,
                     gpu_memory_preservation,
+                    lora_cache_checkbox,
                     gs,
                     use_all_padding,
                     all_padding_value,
@@ -6249,20 +6273,21 @@ with block:
                     cfg,                  # 4
                     use_teacache,         # 5
                     gpu_memory_preservation, # 6
-                    use_vae_cache,        # 7
-                    gs,                   # 8
-                    use_all_padding,      # 9
-                    all_padding_value,    # 10
-                    end_frame_strength,   # 11
-                    keep_section_videos,  # 12
-                    save_section_frames,  # 13
-                    save_tensor_data,     # 14
-                    frame_save_mode,      # 15
-                    save_settings_on_start, # 16
-                    alarm_on_completion,  # 17
-                    log_enabled,          # 18
-                    log_folder,           # 19
-                    settings_status       # 20
+                    lora_cache_checkbox,  # 7
+                    use_vae_cache,        # 8
+                    gs,                   # 9
+                    use_all_padding,      # 10
+                    all_padding_value,    # 11
+                    end_frame_strength,   # 12
+                    keep_section_videos,  # 13
+                    save_section_frames,  # 14
+                    save_tensor_data,     # 15
+                    frame_save_mode,      # 16
+                    save_settings_on_start, # 17
+                    alarm_on_completion,  # 18
+                    log_enabled,          # 19
+                    log_folder,           # 20
+                    settings_status       # 21
                 ]
             )
 
@@ -6535,7 +6560,7 @@ with block:
                                 print(translate("プロンプト数に合わせてバッチ数を自動調整: {0} → {1}").format(batch_count, queue_prompts_count))
                                 batch_count = queue_prompts_count
                         else:
-                            print("プロンプトキューファイルに有効なプロンプトがありません")
+                            print(translate("No valid prompts in prompt queue file."))
                 except Exception as e:
                     print(translate("プロンプトキューファイル読み込みエラー: {0}").format(str(e)))
             else:

@@ -232,7 +232,10 @@ def get_default_app_settings(current_lang="ja"):
         "save_settings_on_start": False,
         
         # アラーム設定
-        "alarm_on_completion": True
+        "alarm_on_completion": True,
+
+        # 生成終了時に Transformer を破棄しない機能
+        "reuse_optimized_dict": False,
     }
 
 def get_default_app_settings_f1(current_lang="ja"):
@@ -254,6 +257,7 @@ def get_default_app_settings_f1(current_lang="ja"):
         # パフォーマンス設定
         "use_teacache": True,
         "gpu_memory_preservation": 6,
+        "lora_cache": False,
         
         # 詳細設定
         "gs": 10,
@@ -271,8 +275,11 @@ def get_default_app_settings_f1(current_lang="ja"):
         "save_settings_on_start": False,
         "alarm_on_completion": True,
         
-        # CONFIG QUEUE設定 - NEW SECTION
-        "add_timestamp_to_config": True  # Default to True to maintain current behavior
+        # CONFIG QUEUE設定
+        "add_timestamp_to_config": True,  # Default to True to maintain current behavior
+
+        # 生成終了時に Transformer を破棄しない機能
+        "reuse_optimized_dict": False,
     }
 
 def get_default_app_settings_oichi():
@@ -327,7 +334,10 @@ def get_default_app_settings_oichi():
         "save_input_images": False,
         "save_before_input_images": False,
         "save_settings_on_start": False,
-        "alarm_on_completion": True
+        "alarm_on_completion": True,
+
+        # 生成終了時に Transformer を破棄しない機能
+        "reuse_optimized_dict": False,
     }
 
 def load_app_settings():

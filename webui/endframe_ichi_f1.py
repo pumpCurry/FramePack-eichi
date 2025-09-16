@@ -1,6 +1,5 @@
 
 import os
-# Show which script is launching for easier debugging
 print(f"{os.path.basename(__file__)} : Starting....")
 
 import sys
@@ -806,7 +805,7 @@ def perform_save_operation_v3(config_name_input, add_timestamp, input_image, pro
                 # Try case-insensitive search as fallback
                 for config in available_configs:
                     if config.lower() == actual_config_name.lower():
-                        print(f"   Found case-insensitive match: '{config}'")
+                        print(translate("   Found case-insensitive match: '{0}'").format(config))
                         actual_config_name = config
                         current_loaded_config = config
                         break
@@ -829,7 +828,7 @@ def perform_save_operation_v3(config_name_input, add_timestamp, input_image, pro
                 lora_files_list = lora_settings.get("lora_files", [])
                 if lora_files_list:
                     filenames = [os.path.basename(path) for path in lora_files_list]
-                    user_message += translate("\n📦 LoRA files configured: {0}").format(', '.join(filenames))
+                    user_message += "\n" + translate("📦 LoRAファイルが設定されました: {0}").format(', '.join(filenames))
             
             return (
                 user_message,
@@ -1099,7 +1098,7 @@ def end_after_current_process_enhanced():
         stop_after_current = True
         if stream is not None and stream.input_queue.top() != 'end':
             stream.input_queue.push('end')
-        print(translate("\n停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
+        print("\n" + translate("停止ボタンが押されました。開始前または現在の処理完了後に停止します..."))
 
     return (
         gr.update(value=translate("打ち切り処理中...")),
@@ -1129,7 +1128,7 @@ def create_enhanced_config_queue_ui():
                 default_add_timestamp = saved_settings.get("add_timestamp_to_config", True)
                 
                 add_timestamp_to_config = gr.Checkbox(
-                    label=translate("Add timestamp to config name"),
+                    label=translate("Config名にタイムスタンプを追加"),
                     value=default_add_timestamp,  # Use saved setting
                     info=translate("Uncheck to use exact input name (may overwrite existing)")
                 )
@@ -1793,7 +1792,7 @@ def start_queue_processing_with_current_ui_values(
                 
                 if current_config:
                     if batch_progress['total'] > 0:
-                        batch_info = translate("Batch {0}/{1}").format(batch_progress['current'], batch_progress['total'])
+                        batch_info = translate("バッチ {0}/{1}").format(batch_progress['current'], batch_progress['total'])
                         status_msg = translate("📋 Processing: {0} ({1}) - {2} videos remaining").format(current_config, batch_info, remaining_videos)
                         desc_msg = translate("Processing {0} - {1} - {2} videos remaining").format(current_config, batch_info, remaining_videos)
                     else:
@@ -4405,7 +4404,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 # より明確な更新方法を使用し、preview_imageを明示的にクリア
                 yield (
                     batch_output_filename if batch_output_filename is not None else gr.skip(),
-                    gr.update(value=None, visible=False),
+                    gr.update(visible=False),
                     gr.update(),
                     gr.update(),
                     gr.update(interactive=False),
@@ -4447,7 +4446,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
 
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
-                        gr.update(value=None, visible=False),
+                        gr.update(visible=False),
                         completion_message,
                         '',
                         gr.update(interactive=True),
@@ -4463,7 +4462,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     print(translate("バッチ {0}/{1} 完了 - 次のバッチに進みます").format(batch_index + 1, batch_count))
                     yield (
                         batch_output_filename if batch_output_filename is not None else gr.skip(),
-                        gr.update(value=None, visible=False),
+                        gr.update(visible=False),
                         next_batch_message,
                         '',
                         gr.update(interactive=False),
@@ -4851,9 +4850,9 @@ with block:
             # LoRA設定キャッシュ
             with gr.Row():
                 lora_cache_checkbox = gr.Checkbox(
-                    label=translate("LoRAの設定を再起動時再利用する"),
+                    label=translate("FP8最適化辞書データをディスクにキャッシュする"),
                     value=saved_app_settings.get("lora_cache", False) if saved_app_settings else False,
-                    info=translate("チェックをオンにすると、FP8最適化済みのLoRA重みをキャッシュして再利用します")
+                    info=translate("チェックをオンにすると、プロンプトやLoRA設定などを適用後して毎回生成するFP8最適化辞書データを再利用できるようにキャッシュとして保存します。プロンプトやLoRA設定の組み合わせごとに数十GBの大きなファイルが生成されますが、速度向上に寄与します。")
                 )
 
             def update_lora_cache(value):
@@ -5264,12 +5263,12 @@ with block:
                         
                         # Load/Save選択（ラベルなし、横並び）
                         with gr.Row(scale=1):
-                            load_btn = gr.Button(translate("Load"), variant="primary", scale=1)
-                            save_btn = gr.Button(translate("Save"), variant="secondary", scale=1)
+                            load_btn = gr.Button(translate("読み込み"), variant="primary", scale=1)
+                            save_btn = gr.Button(translate("保存"), variant="secondary", scale=1)
                         # 内部的に使うRadio（非表示）
                         lora_preset_mode = gr.Radio(
-                            choices=[translate("Load"), translate("Save")],
-                            value=translate("Load"),
+                            choices=[translate("読み込み"), translate("保存")],
+                            value=translate("読み込み"),
                             visible=False
                         )
                     
@@ -5290,7 +5289,7 @@ with block:
                 # LoRAプリセット機能のハンドラー関数
                 def handle_lora_preset_button(button_index, mode, lora1, lora2, lora3, scales):
                     """LoRAプリセットボタンのクリックを処理する"""
-                    if mode == translate("Load"):  # Load
+                    if mode == translate("読み込み"):  # Load
                         # ロードモード
                         loaded_values = load_lora_preset(button_index)
                         if loaded_values:
@@ -5317,14 +5316,14 @@ with block:
                 # Load/Saveボタンのイベントハンドラー
                 def set_load_mode():
                     return (
-                        gr.update(value=translate("Load")),
+                        gr.update(value=translate("読み込み")),
                         gr.update(variant="primary"),
                         gr.update(variant="secondary")
                     )
                 
                 def set_save_mode():
                     return (
-                        gr.update(value=translate("Save")),
+                        gr.update(value=translate("保存")),
                         gr.update(variant="secondary"),
                         gr.update(variant="primary")
                     )
@@ -5392,7 +5391,7 @@ with block:
             )
 
             # プロンプト入力
-            prompt = gr.Textbox(label=translate("Prompt"), value=get_default_startup_prompt(), lines=6)
+            prompt = gr.Textbox(label=translate("プロンプト"), value=get_default_startup_prompt(), lines=6)
 
             # プロンプト管理パネルの追加
             with gr.Group(visible=True) as prompt_management:
@@ -5445,7 +5444,7 @@ with block:
 
             # 互換性のためにQuick Listも残しておくが、非表示にする
             with gr.Row(visible=False):
-                example_quick_prompts = gr.Dataset(samples=quick_prompts, label=translate("Quick List"), samples_per_page=1000, components=[prompt])
+                example_quick_prompts = gr.Dataset(samples=quick_prompts, label=translate("クイックリスト"), samples_per_page=1000, components=[prompt])
                 example_quick_prompts.click(lambda x: x[0], inputs=[example_quick_prompts], outputs=prompt, show_progress=False, queue=False)
 
             # 以下の設定ブロックは右カラムに移動しました
@@ -5543,7 +5542,7 @@ with block:
 
         with gr.Column():
             result_video = gr.Video(
-                label=translate("Finished Frames"),
+                label=translate("処理済みフレーム"),
                 key="result_video",
                 autoplay=True,
                 show_share_button=False,
@@ -5555,7 +5554,7 @@ with block:
             progress_desc = gr.Markdown('', elem_classes='no-generating-animation')
             progress_bar = gr.HTML('', elem_classes='no-generating-animation')
             preview_image = gr.Image(
-                label="Next Latents",
+                label=translate("次の潜在"),
                 height=200,
                 visible=False,
                 elem_id="preview_image",
@@ -5568,9 +5567,9 @@ with block:
             section_calc_display = gr.HTML("", label="")
 
             use_teacache = gr.Checkbox(
-                label=translate('Use TeaCache'), 
+                label=translate('TeaCacheを使用'), 
                 value=saved_app_settings.get("use_teacache", True) if saved_app_settings else True, 
-                info=translate('Faster speed, but often makes hands and fingers slightly worse.'),
+                info=translate('速度は速くなりますが、手や指の表現が若干劣化する可能性があります。'),
                 elem_classes="saveable-setting"
             )
 
@@ -5578,10 +5577,10 @@ with block:
             use_random_seed_default = True
             seed_default = random.randint(0, 2**32 - 1) if use_random_seed_default else 1
 
-            use_random_seed = gr.Checkbox(label=translate("Use Random Seed"), value=use_random_seed_default)
+            use_random_seed = gr.Checkbox(label=translate("ランダムシードを使用"), value=use_random_seed_default)
 
-            n_prompt = gr.Textbox(label=translate("Negative Prompt"), value="", visible=False)  # Not used
-            seed = gr.Number(label=translate("Seed"), value=seed_default, precision=0)
+            n_prompt = gr.Textbox(label=translate("ネガティブプロンプト"), value="", visible=False)  # Not used
+            seed = gr.Number(label=translate("シード"), value=seed_default, precision=0)
 
             # ここで、メタデータ取得処理の登録を移動する
             # ここでは、promptとseedの両方が定義済み
@@ -5614,7 +5613,7 @@ with block:
                     return gr.update()
             use_random_seed.change(fn=set_random_seed, inputs=use_random_seed, outputs=seed)
 
-            total_second_length = gr.Slider(label=translate("Total Video Length (Seconds)"), minimum=1, maximum=120, value=1, step=1)
+            total_second_length = gr.Slider(label=translate("動画の長さ（秒）"), minimum=1, maximum=120, value=1, step=1)
             latent_window_size = gr.Slider(label=translate("Latent Window Size"), minimum=1, maximum=33, value=9, step=1, visible=False)  # Should not change
             steps = gr.Slider(
                 label=translate("Steps"), 
@@ -5856,6 +5855,7 @@ with block:
                 # Performance settings
                 use_teacache_val,
                 gpu_memory_preservation_val,
+                lora_cache_val,
                 # Detail settings
                 gs_val,
                 # F1 specific settings
@@ -5887,6 +5887,7 @@ with block:
                     # パフォーマンス設定
                     "use_teacache": use_teacache_val,
                     "gpu_memory_preservation": gpu_memory_preservation_val,
+                    "lora_cache": lora_cache_val,
                     # 詳細設定
                     "gs": gs_val,
                     # F1独自設定
@@ -5967,20 +5968,21 @@ with block:
                 updates.append(gr.update(value=default_settings.get("cfg", 1.0)))  # 4
                 updates.append(gr.update(value=default_settings.get("use_teacache", True)))  # 5
                 updates.append(gr.update(value=default_settings.get("gpu_memory_preservation", 6)))  # 6
-                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 7
+                updates.append(gr.update(value=default_settings.get("lora_cache", False)))  # 7
+                updates.append(gr.update(value=default_settings.get("gs", 10)))  # 8
                 # F1独自
-                updates.append(gr.update(value=default_settings.get("image_strength", 1.0)))  # 8
-                updates.append(gr.update(value=default_settings.get("keep_section_videos", False)))  # 9
-                updates.append(gr.update(value=default_settings.get("save_section_frames", False)))  # 10
-                updates.append(gr.update(value=default_settings.get("save_tensor_data", False)))  # 11
-                updates.append(gr.update(value=default_settings.get("frame_save_mode", translate("保存しない"))))  # 12
-                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 13
-                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 14
+                updates.append(gr.update(value=default_settings.get("image_strength", 1.0)))  # 9
+                updates.append(gr.update(value=default_settings.get("keep_section_videos", False)))  # 10
+                updates.append(gr.update(value=default_settings.get("save_section_frames", False)))  # 11
+                updates.append(gr.update(value=default_settings.get("save_tensor_data", False)))  # 12
+                updates.append(gr.update(value=default_settings.get("frame_save_mode", translate("保存しない"))))  # 13
+                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 14
+                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 15
                 
-                # ログ設定 (15番目め16番目の要素)
+                # ログ設定 (16番目,17番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
-                updates.append(gr.update(value=False))  # log_enabled (15)
-                updates.append(gr.update(value="logs"))  # log_folder (16)
+                updates.append(gr.update(value=False))  # log_enabled (16)
+                updates.append(gr.update(value="logs"))  # log_folder (17)
                 
                 # ログ設定をアプリケーションに適用
                 default_log_settings = {
@@ -5988,8 +5990,8 @@ with block:
                     "log_folder": "logs"
                 }
 
-                # CONFIG QUEUE設定 - NEW (17番目の要素)
-                updates.append(gr.update(value=default_settings.get("add_timestamp_to_config", True)))  # 17
+                # CONFIG QUEUE設定 (18番目の要素)
+                updates.append(gr.update(value=default_settings.get("add_timestamp_to_config", True)))  # 18
                 
                 # 設定ファイルを更新
                 all_settings = load_settings()
@@ -5999,8 +6001,8 @@ with block:
                 # ログ設定を適用 (既存のログファイルを閉じて、設定に従って再設定)
                 disable_logging()  # 既存のログを閉じる
                 
-                # 設定状態メッセージ (18番目の要素)
-                updates.append(translate("設定をデフォルトに戻しました"))
+                # 設定状態メッセージ (19番目の要素)
+                updates.append(translate("設定をデフォルトに戻しました"))  # 19
                 
                 return updates
 
@@ -6235,6 +6237,7 @@ with block:
             cfg,
             use_teacache,
             gpu_memory_preservation,
+            lora_cache_checkbox,
             gs,
             image_strength,
             keep_section_videos,
@@ -6263,18 +6266,19 @@ with block:
             cfg,                  # 4
             use_teacache,         # 5
             gpu_memory_preservation, # 6
-            gs,                   # 7
-            image_strength,       # 8
-            keep_section_videos,  # 9
-            save_section_frames,  # 10
-            save_tensor_data,     # 11
-            frame_save_mode,      # 12
-            save_settings_on_start, # 13
-            alarm_on_completion,  # 14
-            log_enabled,          # 15
-            log_folder,           # 16
-            config_queue_components['add_timestamp_to_config'], # 17 - NEW OUTPUT
-            settings_status       # 18
+            lora_cache_checkbox,  # 7
+            gs,                   # 8
+            image_strength,       # 9
+            keep_section_videos,  # 10
+            save_section_frames,  # 11
+            save_tensor_data,     # 12
+            frame_save_mode,      # 13
+            save_settings_on_start, # 14
+            alarm_on_completion,  # 15
+            log_enabled,          # 16
+            log_folder,           # 17
+            config_queue_components['add_timestamp_to_config'], # 18 - NEW OUTPUT
+            settings_status       # 19
         ]
     )
 
