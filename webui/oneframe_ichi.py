@@ -4,7 +4,7 @@ import traceback
 # 翻訳関連の初期読み込みに時間がかかるため、startingを表示してから翻訳関連の読み込みまで翻訳機能が使えません
 
 # version表記
-__version__ = "1.9.5.3"
+__version__ = "1.9.5.4"
 
 # 即座に起動しているファイル名をまずは出力して、画面に応答を表示する
 print(f"\n------------------------------------------------------------")
@@ -59,7 +59,7 @@ set_lang, translate = spinner_while_running(
 set_lang(args.lang)
 
 # これ以降transrate()が使えます
-# CUI各所のprint文や各GUIメッセージにはtransrate()を利用し各言語翻訳jsonに定義も行ってください
+# CUI各所のprint文や各GUIメッセージにはtranslate()を利用し各言語翻訳jsonに定義も行ってください
 
 (
     asyncio,
@@ -509,6 +509,9 @@ generation_active = False
 # Transformer再利用フラグ（生成中の設定を保持）
 current_reuse_optimized_dict = False
 
+# LoRA設定の前回シグネチャ（設定不変＋再利用時に事前アンロード等をスキップするために使用）
+_LAST_LORA_SIG = None
+
 # --- Resync用スナップショット保持と一時キャッシュ ---
 # 生成開始時のUIオプション一式（画像以外中心。画像は別にパスで持つ）
 last_start_options = {}
@@ -783,26 +786,18 @@ def progress_resync():
             if item == BUS_END_SENTINEL:
                 # 生成が続いている間はセンチネルを無視して継続
                 # 中間（画像単位）の完了か、全体（バッチ）の完了かを判断
+                # 画像完了/バッチ完了の切替点。ここでは「常に3要素のみ」を返す契約を厳守する。
                 if is_generation_running():
-                    # まだ次のジョブが続く（=バッチ進行中）。ここでは「完了」文言を出さず、軽い進捗のみ通知して抜ける
-                    _summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} , 実施予定数 {progress_img_idx}/{progress_img_total}"
-                    last_progress_desc = _summary
-                    last_progress_bar  = ''
-                    yield (
-                        _result_update(last_output_filename),
-                        _preview_update(last_preview_image),
-                        last_progress_desc,
-                        last_progress_bar,
-                        gr.update(interactive=False, value=translate("Start Generation")),
-                        gr.update(interactive=True,  value=translate("End Generation")),
-                        gr.update(interactive=True),
-                        gr.update(interactive=True),
-                        (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
+                    # 次ジョブへ移る“谷間”：軽いサマリだけ返して継続
+                    _summary = (
+                        f"参考画像 {progress_ref_idx}/{progress_ref_total} , "
+                        f"実施予定数 {progress_img_idx}/{progress_img_total}"
                     )
-                    break
-                if is_generation_running():
+                    yield None, _summary, ''
                     continue
+                # 全て完了
                 break
+
             kind, payload = item
             if kind == 'progress':
                 preview, desc, bar_html = payload
@@ -813,7 +808,11 @@ def progress_resync():
             elif kind == 'end':
                 break
     finally:
-        ctx.bus.unsubscribe(q)
+        # 購読解除は例外安全に
+        try:
+            ctx.bus.unsubscribe(q)
+        except Exception:
+            pass
 
 
 def get_state_snapshot():
@@ -2318,10 +2317,20 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
     
     try:
         # LoRA 設定 - ディレクトリ選択モードをサポート
-        current_lora_paths = []
-        current_lora_scales = []
-        
-        if use_lora and has_lora_support:
+        # （Gradio環境差で値/コンポーネントが来ることがあるため厳密にbool化）
+        current_lora_paths: list[str] = []
+        current_lora_scales: list[float] = []
+
+        try:
+            use_lora_flag = bool(getattr(use_lora, "value", use_lora))
+        except Exception:
+            use_lora_flag = False
+    
+        # 直前にLoRAが使われていたかの手掛かり（比較シグネチャ）
+        prev_sig = globals().get("_LAST_LORA_SIG", None)
+        prev_has_lora = bool(prev_sig and isinstance(prev_sig, tuple) and len(prev_sig) > 0 and prev_sig[0])
+
+        if use_lora_flag and has_lora_support:
             print(translate("LoRA情報: use_lora = {0}, has_lora_support = {1}").format(use_lora, has_lora_support))
             print(translate("LoRAモード: {0}").format(lora_mode))
             
@@ -2553,6 +2562,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         except Exception:
             pass
 
+        # 次ジョブに向けたTransformer側の設定通知
         transformer_manager.set_next_settings(
             lora_paths=current_lora_paths,
             lora_scales=current_lora_scales,
@@ -2560,6 +2570,24 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             fp8_enabled=fp8_enabled_flag,
             force_dict_split=force_dict_split_flag
         )
+
+        # --- LoRAを明示的に「使わない」ケースの確実な外し ---
+        if not use_lora_flag:
+            try:
+                # 1) オンメモリのLoRAキャッシュを優先的に解放
+                _pre_unload_lora_caches()
+            except Exception:
+                pass
+
+            # 2) 直前にLoRAが入っていた形跡があればTransformer自体を破棄して無印に戻す
+            if prev_has_lora:
+                _cleanup_models(force=True)
+
+            # 3) 変更検知用シグネチャを空で更新して、次回の比較を正しくする
+            try:
+                globals()["_LAST_LORA_SIG"] = (tuple(), tuple(), False, bool(force_dict_split_flag))
+            except Exception:
+                pass
 
         # ここまで戻ってきた＝LoRAキャッシュ/適用の準備が完了（失敗時は上で例外になる）。
         # 正確なバイト数が取得できる環境ではそれを優先、無ければ 100% の完了表示だけ確実に出す。
@@ -2623,30 +2651,78 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         # セクション処理開始前にtransformerの状態を確認
         print(translate("LoRA適用前のtransformer状態チェック..."))
 
-        # === 追加: LoRA切替直前の「事前アンロード」 + RAMガード ===
+        # === 追加: 設定不変＋再利用時は「事前アンロード」と「RAMガード」をスキップ ===
+        # - （1）LoRA設定が前回と同一（実務上）で、
+        # - （2）Transformer再利用(current_reuse_optimized_dict)もON のときは、
+        #        事前アンロードとRAMガードをスキップし、キャッシュを積極的に活用する
+        #     - 設定が変わるとき（LoRA差し替え・スケール変更・FP8切替など）は従来通り事前アンロード＋RAMガードを実行
+        #     - RAMガードが発火した場合は ensure_transformer_state() 後に復元（後述）し、無効状態の引きずりを防ぐ
+
         try:
-            # 予想到達キャッシュパス（存在すれば使用）
-            predicted_cache_path = None
+            global _LAST_LORA_SIG
+        except Exception:
+            pass
+        try:
+            # 浮動小数スケールは丸めて比較:
+            #   UI/コード上の丸め誤差や極微小変更で不要な再ロードが起きないよう、比較時のみ丸める
+            #   ※ 学習／推論本体では元の精度が使われるため、ここでの丸めは「比較のための寛容化」に限定される
+            _scales_sig = tuple(round(float(s), 6) for s in (current_lora_scales or []))
+        except Exception:
+            _scales_sig = tuple()
+
+        try:
+            # パス列は順序込みで比較:
+            #   異なる適用順は合成結果が変わりうるため、順序差は再ロード対象とみなす
+            _paths_sig  = tuple(str(p) for p in (current_lora_paths or []))
+        except Exception:
+            _paths_sig = tuple()
+
+        try:
+            _cur_sig = (_paths_sig, _scales_sig, bool(fp8_enabled_flag), bool(force_dict_split_flag))
+        except Exception:
+            _cur_sig = None
+        settings_unchanged = False
+
+        try:
+            settings_unchanged = (_LAST_LORA_SIG == _cur_sig)
+        except Exception:
+            settings_unchanged = False
+        reuse_flag = bool(current_reuse_optimized_dict)
+        _do_pre_unload_and_guard = True
+        if settings_unchanged and reuse_flag:
+            _do_pre_unload_and_guard = False
             try:
-                from eichi_utils import lora_state_cache as _lcache2
-                if hasattr(_lcache2, "peek_next_cache_path"):
-                    predicted_cache_path = _lcache2.peek_next_cache_path(
-                        lora_paths=current_lora_paths,
-                        lora_scales=current_lora_scales,
-                        fp8_enabled=fp8_enabled_flag,
-                        force_dict_split=force_dict_split_flag
-                    )
+                print(translate("LoRA設定に変更なし＋Transformer再利用のため、事前アンロードとRAMガードをスキップします"))
             except Exception:
+                pass
+        if _do_pre_unload_and_guard:
+            try:
                 predicted_cache_path = None
-        
-            # 1) いま保持している巨大LoRAオンメモリを先に解放
-            _pre_unload_lora_caches()
-        
-            # 2) それでも足りなければ、一時的にキャッシュ経路を無効化（.ptロードを避ける）
-            _ram_guard_maybe_disable_lora_cache(predicted_cache_path)
-        
-        except Exception as _e2:
-            print(translate("LoRA切替前のアンロード/ガードで例外が発生しました: {0}").format(_e2))
+                try:
+                    from eichi_utils import lora_state_cache as _lcache2
+                    if hasattr(_lcache2, "peek_next_cache_path"):
+                        predicted_cache_path = _lcache2.peek_next_cache_path(
+                            lora_paths=current_lora_paths,
+                            lora_scales=current_lora_scales,
+                            fp8_enabled=fp8_enabled_flag,
+                            force_dict_split=force_dict_split_flag
+                        )
+                except Exception:
+                    predicted_cache_path = None
+
+                # 1) 先にオンメモリLoRA（および付随キャッシュ）を解放
+                #    - 新規 .pt/.safetensors をロードする前提時のOOM低減・断片化抑制に有効
+                #    - 再利用ケースでは呼ばれない（上の条件でスキップ）ため、キャッシュは温存される
+                _pre_unload_lora_caches()
+
+                # 2) RAMガード: システム空きRAM（MemAvailable）が閾値未満等のとき、
+                #    LoRA state cache のディスクロード経路を一時的に無効化して、巨大ファイルIO/常駐を抑止。
+                #    ※ 発火した場合は ensure_transformer_state() 後に元の設定へ復元（下の復元処理参照）
+                _ram_guard_maybe_disable_lora_cache(predicted_cache_path)
+
+            except Exception as _e2:
+                print(translate("LoRA切替前のアンロード/ガードで例外が発生しました: {0}").format(_e2))
+
         
         # === 追加: この区間のみ torch.load を mmap & weights_only に補強 ===
         with _PatchTorchLoadForLoRA():
@@ -2654,10 +2730,36 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 # transformerの状態を確認し、必要に応じてリロード
                 if not transformer_manager.ensure_transformer_state():
                     raise Exception(translate("transformer状態の確認に失敗しました"))
-    
+
                 # 最新のtransformerインスタンスを取得
                 transformer = transformer_manager.get_transformer()
                 print(translate("transformer状態チェック完了"))
+
+                # === RAMガードで一時的に無効化した LoRA キャッシュの復元 ===
+                # - 前段で _ram_guard_maybe_disable_lora_cache() が発火した場合、LoRAキャッシュは「一時的に無効」になる
+                #   そのままだと後続ジョブでも無効状態を引きずり、毎回フルロードになってしまうので
+                #   ensure_transformer_state() 直後＝Transformerが有効な状態に戻ったタイミングで、前回有効だったかどうかを見て復元。
+                #   - _PREV_LORA_CACHE_ENABLED に退避しておいた真偽値を取り出して復元後、退避値はpop()で破棄
+                try:
+                    from eichi_utils import lora_state_cache as _lcache3
+                    _prev = globals().pop("_PREV_LORA_CACHE_ENABLED", None)
+                    if _prev is not None and hasattr(_lcache3, "set_cache_enabled"):
+                        _lcache3.set_cache_enabled(bool(_prev))
+                        try:
+                            print(translate("LoRAキャッシュ設定を復元しました: enabled={0}").format(bool(_prev)))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+                # === 今回のLoRA設定シグネチャを保存（次回の変更判定に使用） ===
+                #   ここで保存するのは「比較用の要約」。ジョブ完了後の状態を基準に、次回ジョブ開始時の変更有無を素早く判定のため
+                #   なお、厳密な変化（例: 重みファイルの中身の差異）はここでは検出しない（I/Oコスト増を避けるため）
+                try:
+                    _LAST_LORA_SIG = _cur_sig
+                except Exception:
+                    pass
+
             except Exception as e:
                 print(translate("transformerのリロードに失敗しました: {0}").format(e))
                 traceback.print_exc()
