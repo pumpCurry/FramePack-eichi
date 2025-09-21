@@ -519,6 +519,15 @@ last_start_options = {}
 temp_cache_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "temp_cache")
 os.makedirs(temp_cache_dir, exist_ok=True)
 
+# --- Resync/追随の調整値（秒） ---
+RESYNC_CTX_LINGER_SEC: float = 1.0  # ジョブ切替の「谷間」を完了と誤認しないための猶予
+
+# 追加設定: 再同期の最小間隔とアクティブ追随の管理
+RESYNC_MIN_INTERVAL_MS: int = 500
+_ACTIVE_RESYNCS: dict[str, float] = {}    # ui_session_id -> last_started_monotonic
+_LIVE_STREAMING: set[str] = set()         # 今まさにストリーム中の ui_session_id
+
+
 # ===== 先行GC/メモリ安全化ユーティリティ =====
 def _cleanup_cuda(reason):
     """
@@ -786,14 +795,15 @@ def progress_resync():
             if item == BUS_END_SENTINEL:
                 # 生成が続いている間はセンチネルを無視して継続
                 # 中間（画像単位）の完了か、全体（バッチ）の完了かを判断
-                # 画像完了/バッチ完了の切替点。ここでは「常に3要素のみ」を返す契約を厳守する。
+                # 画像完了/バッチ完了の切替点。ここでは「_gui_frame_progress_tiny(常に3要素のみ)」を返す契約を厳守する。
+                # 注意) _gui_frame_status_all(9要素)を返すと購読契約違反で即切断される
                 if is_generation_running():
                     # 次ジョブへ移る“谷間”：軽いサマリだけ返して継続
                     _summary = (
                         f"参考画像 {progress_ref_idx}/{progress_ref_total} , "
                         f"実施予定数 {progress_img_idx}/{progress_img_total}"
                     )
-                    yield None, _summary, ''
+                    yield _gui_frame_progress_tiny(None, _summary, '')
                     continue
                 # 全て完了
                 break
@@ -801,10 +811,10 @@ def progress_resync():
             kind, payload = item
             if kind == 'progress':
                 preview, desc, bar_html = payload
-                yield preview, desc, bar_html
+                yield _gui_frame_progress_tiny(preview, desc, bar_html)
             elif kind == 'file':
                 path = payload
-                yield None, f"保存済み: {path}", None
+                yield _gui_frame_progress_tiny(None, f"保存済み: {path}", None)
             elif kind == 'end':
                 break
     finally:
@@ -817,27 +827,71 @@ def progress_resync():
 
 def get_state_snapshot():
     """
-    再同期用の状態スナップショットをJSONで返す。
-    - running: 実行中フラグ
-    - last_progress_desc / last_progress_bar
-    - last_output_filename
-    - options: 生成開始時に記録したUIオプション（画像以外）
-    - temp_images: 入力/参照画像（temp_cache内）のパス（あれば）
+    状況再同期（Resync）で **UI に単発適用するためのスナップショット**を返す。
+    返却値は **固定スキーマの dict** であり、キーは欠落させない（値は None/"" 可）。
+
+    ## 呼び出し契約
+    1. 非実行時（= 生成ジョブが存在しない）
+       - 本関数の返すスナップショットを **1フレーム分としてそのまま UI に適用**する。
+       - このとき **追随ストリーム（ライブ購読）は開始してはならない**。
+    2. 実行中（= 生成ジョブが存在する）
+       - 本関数の返すスナップショットを **直ちに UI に適用**し、ボタン/表示の整合を回復する。
+       - その後の **ライブ追随は `_stream_job_to_ui(...)` が担う**。本関数はストリームを開始しない。
+    3. 本関数は **副作用を持たない**（I/O/グローバル変更/非同期起動を行わない）。
+    4. 返却スキーマは **後方互換を優先**し、キーは常に存在させる（値は None 許容）。
+       - 互換のため `result_image` と `last_output_filename` を併記するが、両者は **常に同一値** とする。
+
+    ## 返却スキーマ
+    {
+      "running":               bool,              # 生成中フラグ（True/False）
+      "last_progress_desc":    str,               # 最新の進捗テキスト。未設定時は ""。
+      "last_progress_bar":     str,               # 進捗バーHTML。未設定時は ""。
+      "last_output_filename":  Optional[str],     # 最終出力画像パス。なければ None。
+      "last_preview_image":    Optional[Any],     # 最新プレビューオブジェクト/パス。なければ None。
+      "seed":                  Optional[int],     # 生成シード。なければ None。
+      "options":               dict,              # 生成開始時に保持した UI オプション（画像以外）。空なら {}。
+      "temp_images":           {                  # 入力/参照画像（temp_cache 内）のパス
+          "input_image_path":      Optional[str], # 未設定は None
+          "reference_image_path":  Optional[str], # 未設定は None
+      },
+      "queue":                 {                  # キュー設定のスナップショット
+          "enabled":               bool,
+          "type":                  Any,           # 実装依存の種別（文字列/列挙/None）
+      },
+      "result_image":          Optional[str]      # 最終出力画像パス。`last_output_filename` と常に同一。
+    }
     """
+    # 既定値の安全取得
+    _opts = dict(last_start_options) if isinstance(last_start_options, dict) else {}
+    _in_path = _opts.get("input_image_path")
+    _ref_path = _opts.get("reference_image_path")
+    _running = bool(generation_active)
+    _desc = last_progress_desc if isinstance(last_progress_desc, str) else ""
+    _bar  = last_progress_bar  if isinstance(last_progress_bar,  str) else ""
+    _out  = last_output_filename if last_output_filename else None
+    _preview = last_preview_image if 'last_preview_image' in globals() else None
+    _seed = current_seed if 'current_seed' in globals() else None
+    _queue_enabled = bool(queue_enabled) if 'queue_enabled' in globals() else False
+    _queue_type    = queue_type if 'queue_type' in globals() else None
+
+    # 後方互換のため `result_image` と `last_output_filename` を併記し、同一値にそろえる
     snap = {
-        "running": bool(generation_active),
-        "last_progress_desc": last_progress_desc,
-        "last_progress_bar": last_progress_bar,
-        "last_output_filename": last_output_filename,
-        "options": dict(last_start_options) if isinstance(last_start_options, dict) else {},
+        "running": _running,
+        "last_progress_desc": _desc,
+        "last_progress_bar": _bar,
+        "last_output_filename": _out,
+        "last_preview_image": _preview,
+        "seed": _seed,
+        "options": _opts,
         "temp_images": {
-            "input_image_path": last_start_options.get("input_image_path"),
-            "reference_image_path": last_start_options.get("reference_image_path"),
+            "input_image_path": _in_path,
+            "reference_image_path": _ref_path,
         },
         "queue": {
-            "enabled": bool(queue_enabled),
-            "type": queue_type,
-        }
+            "enabled": _queue_enabled,
+            "type": _queue_type,
+        },
+        "result_image": _out,
     }
     return snap
 
@@ -846,6 +900,13 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
     """独立したコンテキストを持つ新しいジョブを生成・開始する"""
     global generation_active, cur_job
     ctx = JobContext()
+
+    try:
+        # owner(生成開始を押したタブ)のSIDを保存
+        ctx.owner_sid = globals().pop("_PENDING_OWNER_SID", None)
+    except Exception:
+        pass
+
     # ジョブ専用のstreamとフラグを持たせる
     ctx.stream = AsyncStream()
     ctx.stop_after_step_event = threading.Event()
@@ -913,7 +974,7 @@ def _stream_job_to_ui(ctx: "JobContext", owner: bool = False):
                 last_progress_desc = completion_message
                 last_progress_bar  = ''
 
-                yield (
+                yield _gui_frame_status_all(
                     _result_update(last_output_filename),
                     _preview_update(last_preview_image),
                     completion_message,
@@ -935,7 +996,7 @@ def _stream_job_to_ui(ctx: "JobContext", owner: bool = False):
                 if file_path:
                     last_output_filename = file_path
                 end_enabled = is_generation_running() and (ctx.stop_mode is None)
-                yield (
+                yield _gui_frame_status_all(
                     _result_update(last_output_filename),
                     gr.update(),
                     gr.update(),
@@ -954,7 +1015,7 @@ def _stream_job_to_ui(ctx: "JobContext", owner: bool = False):
                 last_progress_desc = desc_md
                 last_progress_bar  = bar_html
                 end_enabled = is_generation_running() and (ctx.stop_mode is None)
-                yield (
+                yield _gui_frame_status_all(
                     _result_update(last_output_filename),
                     _preview_update(last_preview_image, force_visible=True),
                     last_progress_desc,
@@ -968,7 +1029,7 @@ def _stream_job_to_ui(ctx: "JobContext", owner: bool = False):
 
             elif etype == "seed":
                 current_seed = payload
-                yield (
+                yield _gui_frame_status_all(
                     _result_update(last_output_filename),
                     _preview_update(last_preview_image, force_visible=True),
                     gr.update(),
@@ -987,7 +1048,7 @@ def _stream_job_to_ui(ctx: "JobContext", owner: bool = False):
                     _summary = f"参考画像 {progress_ref_idx}/{progress_ref_total} , 実施予定数 {progress_img_idx}/{progress_img_total}"
                     last_progress_desc = _summary
                     last_progress_bar  = ''
-                    yield (
+                    yield _gui_frame_status_all(
                         _result_update(last_output_filename),
                         _preview_update(last_preview_image, force_visible=True),
                         last_progress_desc,
@@ -1010,7 +1071,7 @@ def _stream_job_to_ui(ctx: "JobContext", owner: bool = False):
                 completion_message = f"{completion_message} - {progress_summary}"
                 last_progress_desc = completion_message
                 last_progress_bar  = ''
-                yield (
+                yield _gui_frame_status_all(
                     _result_update(last_output_filename),
                     _preview_update(last_preview_image),
                     completion_message,
@@ -4572,7 +4633,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # 空の入力画像を生成
         # ここではNoneのままとし、実際のworker関数内でNoneの場合に対応する
     
-    yield (
+    yield _gui_frame_status_all(
         last_output_filename if last_output_filename is not None else gr.skip(),
         gr.update(value=None, visible=False),
         '',
@@ -4609,7 +4670,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield (
+        yield _gui_frame_status_all(
             last_output_filename if last_output_filename is not None else gr.skip(),
             gr.update(value=None, visible=False),
             '',
@@ -4628,7 +4689,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             seed = 31337
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
         # UI更新（値は変更しない）
-        yield (
+        yield _gui_frame_status_all(
             last_output_filename if last_output_filename is not None else gr.skip(),
             gr.update(value=None, visible=False),
             '',
@@ -4752,7 +4813,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         # 停止フラグが設定されている場合は全バッチ処理を中止
         if batch_stopped:
             print(translate("バッチ処理がユーザーによって中止されました"))
-            yield (
+            yield _gui_frame_status_all(
                 last_output_filename if last_output_filename is not None else gr.skip(),
                 _preview_update(last_preview_image),
                 translate("バッチ処理が中止されました。"),
@@ -4770,7 +4831,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield (
+            yield _gui_frame_status_all(
                 last_output_filename if last_output_filename is not None else gr.skip(),
                 _preview_update(last_preview_image),
                 batch_info,
@@ -4854,7 +4915,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             f"{(progress_img_name or translate('入力画像'))} <br/>"
         )
         last_progress_bar = make_progress_bar_html2(0, '')
-        yield (
+        yield _gui_frame_status_all(
             last_output_filename if last_output_filename is not None else gr.skip(),
             _preview_update(last_preview_image),
             last_progress_desc,
@@ -4912,7 +4973,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 ctx = cur_job
         if ctx is None:
             print(translate("ジョブの初期化に失敗しました"))
-            yield (
+            yield _gui_frame_status_all(
                 last_output_filename if last_output_filename is not None else gr.skip(),
                 _preview_update(last_preview_image),
                 translate("エラーにより処理が中断されました"),
@@ -4936,7 +4997,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 gen = _stream_job_to_ui(ctx, owner=True)
             except TypeError as te:
                 if "unexpected keyword argument 'owner'" in str(te):
-                    gen = _stream_job_to_ui(ctx)  # 旧シグネチャにフォールバック
+                    gen = _stream_job_to_ui(ctx, owner=False)  # 旧シグネチャにフォールバック
                 else:
                     raise
 
@@ -4981,7 +5042,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 pass
 
             # UIをリセット
-            yield (
+            yield _gui_frame_status_all(
                 last_output_filename if last_output_filename is not None else gr.skip(),
                 _preview_update(last_preview_image),
                 translate("キーボード割り込みにより処理が中断されました"),
@@ -5000,7 +5061,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             traceback.print_exc()
 
             # UIをリセット
-            yield (
+            yield _gui_frame_status_all(
                 last_output_filename if last_output_filename is not None else gr.skip(),
                 _preview_update(last_preview_image),
                 translate("エラーにより処理が中断されました"),
@@ -5227,173 +5288,294 @@ def _gate_start(ok: bool, *args):
     import gradio as gr
     if not ok:
         # 9出力: [image, image, markdown, html, button, button, button, button, number]
-        yield (gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(),
-               gr.skip(), gr.skip(), gr.skip(), gr.skip())
+        yield _gui_frame_status_all(
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+        )
         return
     for chunk in start_or_follow(*args):
-        yield chunk
+        yield chunk # ※※バイナリ出力※※
 
 
-def start_or_follow(*args):
+def start_or_follow(ui_session_id, *args):
     """
     Start 押下時の単体ハンドラ（queue=True でバインドする前提）。
-    - 生成中なら: 何も開始せず、UIを“現状維持フレーム”で1回だけ返して即終了
-                   （必要ならトースト通知を出す）
-    - 未生成なら: 既存の process(*args) に委譲してストリームを流す
+
+    目的（＝"Start"に対する操作契約）:
+      - 実行中（= 既に生成ジョブが存在）:
+          * 新規ジョブは一切開始しない（＝多重開始を防ぐ）
+          * 代わりに **GUI を“現状維持フレーム”で 1 回だけ** 更新して即終了
+          * 利用者の理解を助けるトースト通知（gr.Info）は、通知層の失敗で本流が止まらないよう局所 try/except で囲む
+      - 未実行（= 生成ジョブなし）:
+          * 既存の process(*args) へ委譲し、逐次フレーム（yield）でストリーム
+
+    注意:
+      - Resync（状況を再同期）に対する「連打ガード/同UUID多重ストリーム抑止」は **本関数の対象外**。
+        これは Resync 側 (on_resync_button_clicked) が担う。
+      - owner タブの識別子 (ui_session_id) は、**これから開始されるジョブ**に伝播するため、
+        _PENDING_OWNER_SID に明示的に格納しておく (_start_job_for_single_task 側で pop され JobContext.owner_sid に入る)。
+
+    出力:
+      - 常に **GUI が期待する 9 要素**（_gui_frame_status_all）で返す。
     """
     import gradio as gr
     global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed
 
+    # （重要）この Start を押したタブが "owner" であることを **これから始めるジョブ** に伝える。
+    # 生成中かどうかに関係なく、ここでセットしておくと未生成パスで確実に拾われる。
+    globals()["_PENDING_OWNER_SID"] = ui_session_id
+
     if is_generation_running():
-        # 軽い通知（使える環境だけ）
+        # --- すでに生成実行中：新規開始は行わない ---
+        # UX のための軽い通知は “失敗しても処理は継続” させる（通知層は環境依存）。
         try:
             gr.Info(translate("現在、生成を実施中です。進行中のジョブに追随するには『状況を再同期』を押してください。"), duration=4)
         except Exception:
             pass
 
-        # “現状維持”の1フレームだけ返す（ここで新規ジョブは開始しない）
-        yield (
+        # “現状維持”の 1 フレームだけ返す（Start 無効 / End 有効 / 進捗はそのまま）
+        yield _gui_frame_status_all(
             _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
             _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
             (last_progress_desc or gr.update()),
             (last_progress_bar or gr.update()),
-            gr.update(interactive=False, value=translate("Start Generation")),   # start は無効のまま
-            gr.update(interactive=True,  value=translate("End Generation")),     # end   は有効
+            gr.update(interactive=False, value=translate("Start Generation")),   # 実行中：Start は無効
+            gr.update(interactive=True,  value=translate("End Generation")),     # 実行中：End   は有効
             gr.update(interactive=True),                                         # stop_after
             gr.update(interactive=True),                                         # stop_step
             (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
         )
         return
 
-    # ---- ここから未生成：本処理に委譲（逐次 yield）----
-    # process は既存のストリーミング・ジェネレータ
+    # ---- 未生成：本処理（process）に委譲してストリームを流す ----
+    # "このタブが owner" であることを再度明示（上でセット済みだが、将来の呼び出し順変更に対する保険）
+    try:
+        globals()["_PENDING_OWNER_SID"] = ui_session_id
+    except Exception:
+        pass
+
+    # process は既存のストリーミング・ジェネレータ。
+    # ここでは **上流が組み立てた GUI フレームをそのまま中継** する（= 構造を変えない）。
     for frame in process(*args):
-        yield frame
+        yield frame # ※※上流フレーム中継（9 要素）※※ (pack し直さない)
 
 
-def on_resync_button_clicked():
+
+def on_resync_button_clicked(ui_session_id=None):
     """
-    再同期（追随）ボタン押下時のハンドラ（queue=True でバインドする前提）。
-    目的:
-      - 実行中は「履歴→ライブ」へ追随（かつ画像間の“谷間”も跨いで最後まで追随）。
-      - ただし「生成開始タブ（起点）」がまだ追随中の間は、他タブの再同期を無視して UI を不変に保つ。
-      - 非実行時は、最後のスナップショットを単発で返す（ストリームは張らない）。
+    再同期（追随）ボタン押下時のハンドラ（queue=True 前提）。
 
-    出力（常に9要素の順序で返すことが重要。UI紐付け壊し防止のため）:
-      [result_image, preview_image, progress_desc, progress_bar,
-       start_button, end_button, stop_after_button, stop_step_button, seed]
+    目的（="Resync"に対する操作契約）:
+      1) 押下直後に **必ず「最新 1 フレーム」** を返して GUI の整合（ボタン状態／進捗表示）を即時回復する。
+      2) 実行中のとき:
+         - owner 本人（= Start を押したタブ）は **二重追跡しない**（1 フレーム返して即終了）
+         - 非 owner は **履歴→ライブ** で追随を開始し、ジョブ間の切替“谷間”にも **ロールオーバー**で追随継続
+         - **3-2（本関数の重要要件）**:
+             a. 連打ガード（同一 UI セッションに対し、最小間隔内の再同期要求は 1 フレームだけ返して終了）
+             b. 同 UUID の **同時多重ストリーム抑止**（既にストリーミング中なら 1 フレームだけ返して終了）
+      3) 非実行のとき:
+         - `get_state_snapshot()` の返却を素材に **単発 1 フレーム**だけ適用（ストリームは開始しない）
+
+    実装メモ:
+      - 連打ガードの最小間隔は RESYNC_MIN_INTERVAL_MS（既定 500ms）
+      - “谷間”判定の猶予は RESYNC_CTX_LINGER_SEC（既定 1.0s）
+      - 同 UUID 多重ストリーム抑止は `_LIVE_STREAMING` セットで実現。
+        この関数呼出しの **追随開始～ロールオーバー追随全体** を覆う try/finally で
+        add/discard することで「実処理中は常に"占有中"」を保証する。
+    返却は常に GUI が期待する 9 要素（_gui_frame_status_all）。
     """
+    import time as _tmod
     import gradio as gr
     global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed
 
-    ctx = get_running_job_context()
-    if ctx is not None and is_generation_running():
+    # --- 実行中判定 & 現 ctx 取得 ---
+    try:
+        ctx = get_running_job_context()
+    except Exception:
+        ctx = None
+    try:
+        running = bool(is_generation_running())
+    except Exception:
+        running = False
 
-        # --- 起点タブ（生成開始タブ）がまだ追随中なら、この再同期は無視して即座に戻る ---
-        # UI は一切変えず、キューにも積まず、ストリームも開始しない（gr.skip を9要素ぶん返す）。
+    # --- 実行中の分岐 ---
+    if ctx is not None and running:
+
+        # 0) 連打ガード：同一 UI セッションの最小間隔内の再同期は "最新 1 フレーム" だけ返して即終了。
         try:
-            if getattr(ctx, "owner_connected", False):
-                yield (
-                    gr.skip(), gr.skip(), gr.skip(), gr.skip(),
-                    gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
+            now = _tmod.monotonic()
+            last = _ACTIVE_RESYNCS.get(ui_session_id or "", 0.0)
+            if (now - last) * 1000.0 < float(globals().get("RESYNC_MIN_INTERVAL_MS", RESYNC_MIN_INTERVAL_MS)):
+                yield _gui_frame_status_all(
+                    _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
+                    _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
+                    (last_progress_desc or gr.update()),
+                    (last_progress_bar or gr.update()),
+                    gr.update(interactive=False, value=translate("Start Generation")),
+                    gr.update(interactive=True,  value=translate("End Generation")),
+                    gr.update(interactive=True), gr.update(interactive=True),
+                    (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
                 )
                 return
         except Exception:
-            # ここでの例外は握りつぶす（安全側）
+            # ガード自体の失敗は“緩め”に扱う：以降のフローでカバーされる
             pass
 
-        # --- 直近の状態をまず1フレーム返す（視覚上の“食いつき”改善） ---
-        yield (
-            _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
-            _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
-            (last_progress_desc or gr.update()),
-            (last_progress_bar or gr.update()),
-            gr.update(interactive=False, value=translate("Start Generation")),  # 実行中: Start は無効
-            gr.update(interactive=True,  value=translate("End Generation")),    # 実行中: End は有効
-            gr.update(interactive=True),   # stop_after
-            gr.update(interactive=True),   # stop_step
-            (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
-        )
+        # 1) 押下直後の "最新 1 フレーム" を必ず返す（GUI 整合の即時回復）
+        try:
+            yield _gui_frame_status_all(
+                _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
+                _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
+                (last_progress_desc or gr.update()),
+                (last_progress_bar or gr.update()),
+                gr.update(interactive=False, value=translate("Start Generation")),  # 実行中：Start 無効
+                gr.update(interactive=True,  value=translate("End Generation")),    # 実行中：End   有効
+                gr.update(interactive=True),   # stop_after
+                gr.update(interactive=True),   # stop_step
+                (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
+            )
+        except Exception:
+            # 値欠損などによる 1 フレーム構築失敗は握りつぶす（GUI 崩壊のほうが致命的）
+            pass
 
-        # --- 現在の ctx に対する「履歴→ライブ」追随を開始（画像1枚ぶん） ---
-        yield from _stream_job_to_ui(ctx)
+        # 2) owner 本人なら、ここで終了（すでに 1 フレームは返している）
+        try:
+            owner_sid = getattr(ctx, "owner_sid", None)
+            if (ui_session_id is not None) and (owner_sid is not None) and (ui_session_id == owner_sid):
+                return
+        except Exception:
+            # owner 判定に失敗しても、以降は“非 owner 扱い”で追随継続可
+            pass
 
-        # --- 画像間の“谷間”に耐えるロールオーバー追随（バッチ全体が終わるまで継続） ---
-        # is_generation_running() が一瞬 False を返す切替ギャップに耐えるため、
-        # 「ctx=None かつ running=False」の状態が一定時間連続したときだけ終了する。
-        import time, time as _tmod
-        _last_ctx = ctx
-        _linger_until = None  # 次ctx待ちの猶予時刻（monotonic 秒）。None は未設定を表す。
-        _linger_sec = globals().get("RESYNC_CTX_LINGER_SEC", 1.0)  # 既定は 1.0 秒
-
-        while True:
-            _cur = get_running_job_context()
-            _running = is_generation_running()
-
-            if _cur is not None:
-                if _cur is _last_ctx:
-                    # 同一 ctx を見ている間は軽く待って再試行（無用な busy loop 回避）
-                    time.sleep(0.05)
-                    continue
-
-                # 新しい（または切り替わった）ctx に追随。ここで再び「履歴→ライブ」へ。
-                try:
-                    for _frame in _stream_job_to_ui(_cur):
-                        yield _frame
-                finally:
-                    _last_ctx = _cur
-                    _linger_until = None  # 次のギャップに備えてリセット
-
-                continue
-
-            # ここに来た時点で ctx は無い
-            if _running:
-                # 生成は続いている（ちょうどジョブ切替の谷間）→ 少し待って再試行
-                time.sleep(0.05)
-                continue
-
-            # running=False かつ ctx=None。ここから短いグレース期間だけ待機しておく。
-            if _linger_until is None:
-                # 「完了」チラ見え対策として、最初の一回だけ“準備中”フレームを返す（任意のUI上書き）。
-                try:
-                    yield (
+        # 3) 非 owner：履歴→ライブで追随を開始。
+        #    この呼び出しの **追随～ロールオーバー追随** の全体期間、
+        #    `_LIVE_STREAMING` に自セッション ID を登録し、同時多重ストリームを抑止する。
+        live_registered = False
+        try:
+            if ui_session_id:
+                if ui_session_id in _LIVE_STREAMING:
+                    # 既にこのタブ ID のストリームが生きている → 最新 1 フレームだけ返して終了
+                    yield _gui_frame_status_all(
                         _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
                         _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
-                        translate("次ジョブ準備中…"),
-                        "",
+                        (last_progress_desc or gr.update()),
+                        (last_progress_bar or gr.update()),
                         gr.update(interactive=False, value=translate("Start Generation")),
                         gr.update(interactive=True,  value=translate("End Generation")),
-                        gr.update(interactive=True),   # stop_after
-                        gr.update(interactive=True),   # stop_step
+                        gr.update(interactive=True), gr.update(interactive=True),
                         (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
                     )
+                    return
+                _LIVE_STREAMING.add(ui_session_id)
+                live_registered = True
+                _ACTIVE_RESYNCS[ui_session_id] = _tmod.monotonic()
+
+            # --- 現在 ctx の履歴→ライブ追随（画像 1 枚ぶん） ---
+            for _frame in _stream_job_to_ui(ctx, owner=False):
+                yield _frame  # ※※追随ストリームのフレーム中継（9 要素）※※ (pack し直さない)
+
+            # 4) ctx ロールオーバー追随（ジョブ切替の"谷間"に耐える）
+            _linger_sec = float(globals().get("RESYNC_CTX_LINGER_SEC", 1.0))
+            _linger_until = None
+            _last_ctx = ctx
+
+            while True:
+                try:
+                    _cur_ctx = get_running_job_context()
                 except Exception:
-                    pass
+                    _cur_ctx = None
+                try:
+                    _cur_running = bool(is_generation_running())
+                except Exception:
+                    _cur_running = False
 
-                _linger_until = _tmod.monotonic() + _linger_sec
+                if _cur_ctx is not None:
+                    if _cur_ctx is _last_ctx:
+                        # 同一 ctx → 少し待って再試行（busy loop 回避）
+                        _tmod.sleep(0.05)
+                        continue
 
-            if _tmod.monotonic() < _linger_until:
-                time.sleep(0.05)
-                continue
+                    # 新しい ctx が現れた → 再アタッチして追随を再開
+                    try:
+                        for _frame in _stream_job_to_ui(_cur_ctx, owner=False):
+                            yield _frame  # ※※追随ストリームのフレーム中継（9 要素）※※ (pack し直さない)
+                    finally:
+                        _last_ctx = _cur_ctx
+                        _linger_until = None  # 次のギャップに備える
+                    continue
 
-            # 猶予を過ぎても ctx が現れず running も False → 本当に終わったと判断
-            break
+                # ここに来た時点で ctx は None
+                if _cur_running:
+                    # 生成は続いている（ちょうどジョブ切替の谷間）
+                    _tmod.sleep(0.05)
+                    continue
 
+                # running=False / ctx=None → 「本当に終了」か「切替の一瞬」かを猶予で判断
+                if _linger_until is None:
+                    # 「完了」チラ見え対策として、"準備中"フレームを返す（任意の UI 上書き）
+                    try:
+                        yield _gui_frame_status_all(
+                            _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
+                            _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
+                            translate("次ジョブ準備中…"),
+                            "",
+                            gr.update(interactive=False, value=translate("Start Generation")),
+                            gr.update(interactive=True,  value=translate("End Generation")),
+                            gr.update(interactive=True),   # stop_after
+                            gr.update(interactive=True),   # stop_step
+                            (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
+                        )
+                    except Exception:
+                        pass
+                    _linger_until = _tmod.monotonic() + _linger_sec
+
+                if _tmod.monotonic() < _linger_until:
+                    _tmod.sleep(0.05)
+                    continue
+
+                # 猶予を過ぎても ctx が現れず running も False → 本当に終わったと判断
+                break
+
+            return
+
+        except Exception:
+            # 追随中の一時例外は上層のロールオーバーで吸収を試みるため握りつぶす
+            # （致命的エラーであれば上位がストリームを終了させる）
+            pass
+        finally:
+            # 同 UUID の多重ストリーム抑止の解除（呼び出し全体の終端で必ず解放）
+            if live_registered and ui_session_id:
+                _LIVE_STREAMING.discard(ui_session_id)
+
+        # ここまで到達するのは通常 “return” 済みだが、念のため
         return
 
-    # ---- 非実行：最後のスナップショット適用（単発。ストリーム開始はしない） ----
-    snap = get_state_snapshot()
-    yield (
+    # --- 非実行：スナップショット 1 フレームで UI 復旧（単発。ストリーム開始はしない） ---
+    try:
+        snap = get_state_snapshot()
+    except Exception:
+        snap = {}
+
+    yield _gui_frame_status_all(
         _result_update(snap.get("result_image") or last_output_filename) if (snap.get("result_image") or last_output_filename) else gr.update(),
         _preview_update(snap.get("last_preview_image"), force_visible=True) if snap.get("last_preview_image") else gr.update(visible=True),
         gr.update(value=snap.get("last_progress_desc", "")),
         gr.update(value=snap.get("last_progress_bar", "")),
-        gr.update(interactive=True,  value=translate("Start Generation")),
-        gr.update(interactive=False, value=translate("End Generation")),
-        gr.update(interactive=False),   # stop_after
-        gr.update(interactive=False),   # stop_step
+        gr.update(interactive=True,  value=translate("Start Generation")),   # 非実行：Start 有効
+        gr.update(interactive=False, value=translate("End Generation")),     # 非実行：End   無効
+        gr.update(interactive=False),                                        # stop_after 無効
+        gr.update(interactive=False),                                        # stop_step  無効
         (gr.update(value=snap.get("seed")) if snap.get("seed") is not None else gr.skip()),
     )
+
+
 
 def _as_int(x):
     try:
@@ -5401,8 +5583,9 @@ def _as_int(x):
     except Exception:
         return None
 
-def _pack_ui(result_upd, preview_upd, desc_upd, bar_upd,
+def _gui_frame_status_all(result_upd, preview_upd, desc_upd, bar_upd,
              start_btn_upd, end_btn_upd, stop_after_upd, stop_step_upd, seed_upd):
+    """GUI ステータス・フレーム全て（従来の 9 要素）を返す。"""
     # seed は Number コンポーネントなので、ここで int に正規化してから update する
     if isinstance(seed_upd, gr.components.Component):
         seed_final = seed_upd  # 既に gr.update() などならそのまま
@@ -5422,10 +5605,15 @@ def _pack_ui(result_upd, preview_upd, desc_upd, bar_upd,
     )
 
 
+def _gui_frame_progress_tiny(preview, desc, bar_html):
+    """GUI 進捗フレーム（従来の 3 要素）を返す。"""
+    return (preview, desc, bar_html)
+
+
     ctx = get_running_job_context()
     if ctx is not None and is_generation_running():
         # 実行中：1) 直近フレームを即返し
-        yield _pack_ui(
+        yield _gui_frame_status_all(
             _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
             _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
             (last_progress_desc or gr.update()),
@@ -5438,7 +5626,7 @@ def _pack_ui(result_upd, preview_upd, desc_upd, bar_upd,
         )
         # 2) バス追随（履歴→ライブ）
         for preview, desc, bar_html in progress_resync():
-            yield _pack_ui(
+            yield _gui_frame_status_all(
                 gr.skip(),  # result_image は保存完了の別経路でのみ更新
                 (_preview_update(preview, force_visible=True) if preview is not None else gr.skip()),
                 (gr.update(value=desc) if isinstance(desc, str) else gr.skip()),
@@ -5450,7 +5638,7 @@ def _pack_ui(result_upd, preview_upd, desc_upd, bar_upd,
                 gr.skip(),  # seed は通常固定
             )
         # 3) 完了時に UI を待機状態に整える
-        yield _pack_ui(
+        yield _gui_frame_status_all(
             gr.skip(),
             gr.skip(),
             gr.update(value=translate("全てのバッチ処理が完了しました")),
@@ -5465,7 +5653,7 @@ def _pack_ui(result_upd, preview_upd, desc_upd, bar_upd,
     
     # 非実行：最後のスナップショットを単発返却
     snap = get_state_snapshot()
-    yield _pack_ui(
+    yield _gui_frame_status_all(
         _result_update(snap.get("result_image") or last_output_filename) if (snap.get("result_image") or last_output_filename) else gr.update(),
         _preview_update(snap.get("last_preview_image"), force_visible=True) if snap.get("last_preview_image") else gr.update(visible=True),
         gr.update(value=snap.get("last_progress_desc", "")),
@@ -5518,6 +5706,9 @@ print(f"🆗 {translate('Startup_sequence_complete')}\n")
 block = gr.Blocks(css=css, js=modal_js).queue()
 
 with block:
+    # 各タブ固有のセッションID（owner自己判定・二重追随防止用）
+    import uuid as _uuid
+    ui_session_id = gr.State(value=_uuid.uuid4().hex)
     # eichiと同じ半透明度スタイルを使用
     gr.HTML('<h1>FramePack<span class="title-suffix">-oichi</span></h1>')
     gr.HTML('<dialog id="modal_dlg"><img /></dialog>')
@@ -7400,7 +7591,7 @@ with block:
     )
     pre_evt.success(
         fn=start_or_follow,
-        inputs=ips,
+        inputs=[ui_session_id] + ips,
         outputs=[
             result_image,
             preview_image,
@@ -7457,7 +7648,7 @@ with block:
     # 再同期（追随）：concurrency_id は付けない（生成本体と別レーンで即時起動させる）
     resync_status_btn.click(
         fn=on_resync_button_clicked,
-        inputs=[],
+        inputs=[ui_session_id],
         outputs=[
             result_image,
             preview_image,
