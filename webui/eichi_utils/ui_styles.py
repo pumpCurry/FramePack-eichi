@@ -208,4 +208,60 @@ def get_app_css():
         border: solid 1px;
     }
 
+    /* === Progress Row: 2行×3列のグリッド ===
+       col1,row1–2: スピナー（rowspan=2）
+       col2,row1   : グラフ（横いっぱい）
+       col3,row1   : ％表示（右寄せ）
+       col2–3,row2 : 状況説明（colspan=2）
+    */
+    .progress-grid {
+      display: grid;
+      grid-template-columns: auto 1fr auto; /* spinner | bar | percent */
+      grid-template-rows: auto auto;        /* row1: bar/percent, row2: desc */
+      gap: 8px;
+      align-items: center;
+    }
+
+    /* スピナー: 2行ぶち抜き */
+    .progress-spinner {
+      grid-column: 1;
+      grid-row: 1 / span 2;
+    }
+
+    /* 進捗グラフ（HTMLバー想定） */
+    .progress-graph {
+      grid-column: 2;
+      grid-row: 1;
+      min-width: 0; /* Grid内でのはみ出し抑止 */
+    }
+
+    /* グラフ内の要素が max-width で暴れないように */
+    .progress-graph > * {
+      width: 100%;
+      max-width: 100% !important;
+    }
+
+    /* ％表示は右端へ寄せて右揃え */
+    .progress-percent {
+      grid-column: 3;
+      grid-row: 1;
+      justify-self: end;      /* グリッドセル内で右端 */
+      text-align: right;
+      white-space: nowrap;    /* 折り返し防止 */
+      font-variant-numeric: tabular-nums; /* 数値の桁揃えがキレイに */
+    }
+
+    /* 状況説明は2列ぶち抜き */
+    .progress-desc {
+      grid-column: 2 / span 2;
+      grid-row: 2;
+    }
+
+    /* スピナーの見た目が低くなる環境向けの保険（任意） */
+    .progress-spinner .my-spinner,
+    .progress-spinner .wrap, 
+    .progress-spinner .loading {
+      min-height: 28px;
+    }
+
     """
