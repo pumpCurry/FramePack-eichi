@@ -1910,7 +1910,7 @@ def _make_simple_bar(
         '<tr class="pc-progress-row">'
         f'{spinner_td}'
         '<td class="pc-progress-cell" '
-        '    style="padding:4px 6px;border:0;outline:0;vertical-align:middle;">
+        '    style="padding:4px 6px;border:0;outline:0;vertical-align:middle;">'
         f'  {progress_html}'
         '</td>'
         '<td class="pc-progress-percent" '
