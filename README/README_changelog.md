@@ -4,6 +4,18 @@
 
 ## 日本語
 
+### 2025-09-25: バージョン1.9.5.4
+- **LoRAメモリ保護とロードの信頼性向上**:
+  - LoRA設定が変わらない場合は事前アンロードやRAMガードをスキップし、最適化辞書の再利用時の待ち時間を削減
+  - メモリ不足を検知したらLoRA state cacheを一時的に無効化し、`.pt`読み込みをmmap＋`weights_only`で安全化
+- **LoRA設定の自己修復と無効化の徹底**:
+  - 保存済みドロップダウン値を自動補正し、テキスト入力したファイル名も受理
+  - 「LoRAを使用する」のチェックを外した際にキャッシュとTransformerを確実に解放
+- **再同期UIと複数タブ追随の改善**:
+  - Startボタンが実行中の重複起動を抑止し、「状況を再同期」に連打ガード・オーナー判定・ジョブ切替追随を追加
+  - 再同期押下直後に最新フレームを返してボタン状態とプレビューを即時回復
+- **進捗バーのレイアウト修正**: CSSグリッドと固定幅スピナーで％表示と説明行が崩れないように調整
+
 ### 2025-09-07: バージョン1.9.5.3
 - **LoRAキャッシュ再利用の強化**: FP8/LoRA最適化済みの辞書データをディスクにキャッシュする機能を強化
   - 1.9.5.2で追加された "LoRAの設定を再起動時再利用する" 機能を強化し、名称変更しました
@@ -274,6 +286,19 @@
 
 ## English
 
+### 2025-09-25: Version 1.9.5.4
+- **LoRA memory guard and safer loading**:
+  - Skip the pre-unload/RAM guard when settings are unchanged to reduce delays while reusing optimized dictionaries
+  - Temporarily disable the LoRA state cache on low-memory warnings and patch `.pt` `torch.load` with memory-mapping plus `weights_only`
+- **Self-healing LoRA configuration**:
+  - Auto-correct saved dropdown values and accept manually typed filenames
+  - Ensure caches and the transformer are released when “Use LoRA” is unchecked
+- **Resync UX & multi-tab following improvements**:
+  - Start blocks duplicate launches while a job is running and “Resync status” gains debounce, owner detection, and rollover streaming
+  - Immediately return the latest frame after resync to restore button states and previews
+- **Progress bar layout fixes**: CSS grid and fixed-width spinners keep percentages and descriptions aligned during batch transitions
+
+
 ### 2025-05-22: Version 1.9.4 ※Official Release
 - **Settings Save Function Implementation**:
   - Colored background items automatically restored on next startup
@@ -511,6 +536,18 @@
 
 ## 简体中文
 
+### 2025-09-25: 版本1.9.5.4
+- **LoRA 记忆体保护与更安全的载入**：
+  - 在设定未变化时跳过预先卸载/RAM 防护，减轻重复使用最佳化字典时的等待
+  - 当侦测到记忆体不足时暂时停用 LoRA 状态快取，并对 `.pt` 的 `torch.load` 套用记忆体映射与 `weights_only`
+- **LoRA 设定自我修复**：
+  - 自动修正已保存的下拉选项，并接受手动输入的档名
+  - 取消勾选「使用 LoRA」时，确实释放快取与 transformer
+- **再同步体验与多分页追随改进**：
+  - Start 按钮在工作执行中会阻止重复启动，「同步状态」具备防连点、拥有者判定与任务切换时的追随串流
+  - 再同步按下后立即返回最新画面，使按钮状态与预览立刻恢复
+- **进度条版面修正**：透过 CSS 网格与固定宽度的转圈图示，确保百分比与说明行在批次切换时不再错位
+
 ### 2025-05-22: 版本1.9.4 ※正式发布版
 - **设定保存功能的实现**:
   - 彩色背景项目在下次启动时自动恢复
@@ -747,6 +784,19 @@
 - 添加关键帧指南功能
 
 ## Русский
+
+### 2025-09-25: Версия 1.9.5.4
+- **Защита памяти и безопасная загрузка LoRA**:
+  - При неизменных настройках пропускается предварительное выгружение и RAM-гарда, что ускоряет повторное использование оптимизированных словарей
+  - При предупреждении о нехватке памяти кэш состояний LoRA временно отключается, а `torch.load` для `.pt` патчится на memory-mapped с `weights_only`
+- **Самовосстановление настроек LoRA**:
+  - Автоматически корректируются сохранённые значения выпадающих списков и принимаются вручную введённые имена файлов
+  - При снятии флажка «Использовать LoRA» кэши и transformer гарантированно освобождаются
+- **Улучшенный UX повторной синхронизации и слежения из нескольких вкладок**:
+  - Кнопка Start блокирует повторный запуск во время активной генерации, а «Повторная синхронизация» получает антидребезг, определение владельца и непрерывное слежение при смене задач
+  - Сразу после повторной синхронизации возвращается актуальный кадр, чтобы мгновенно восстановить состояние кнопок и превью
+- **Исправления макета индикатора прогресса**: CSS grid и фиксированная ширина спиннера удерживают проценты и описания выровненными даже при переключении батчей
+
 
 ### 2025-05-22: Версия 1.9.4 ※Официальный релиз
 - **Реализация функции сохранения настроек**:
