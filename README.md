@@ -17,6 +17,14 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 
 [https://github.com/hinablue](https://github.com/hinablue) Hina Chen氏より多言語対応の協力をいただき非常に感謝しております。
 
+## 開発方針と現在の編集について
+- v1.9.5でコード提供をしていたpumpCurryです。
+- 2025-09-25ぐらいに、x_ai_codeさんがX(twitter)のアカウントと、githubのアカウント[https://github.com/git-ai-code/FramePack-eichi/](https://github.com/git-ai-code/FramePack-eichi/)が見えなくなっていることがわかりました。
+- v1.9.5.3までプルリクエストがマージされたあと([b8f2740a5a3d88fcdbc43368975f4a3938835a41](https://github.com/pumpCurry/FramePack-eichi/commit/b8f2740a5a3d88fcdbc43368975f4a3938835a41))、その修正版のv1.9.5.4をプルリクエストしようとしたらできなかったため、現時点でオリジナル公認の最新のコードからの修正版として、暫定でコードをお預かりしています。
+- oichi2にすべて合流される前提で、oichi1に実験的追加をしていましたが、oichi2も現在リポジトリが見えない？ため、eichi/eichiF1にもoichi1に加えた変更を反映したいと考えています
+- oichi2のコードを完全な形でダウンロードできていなかったことが分かったため、どなたかコード提供いただけないでしょうか
+- pumpCurryの連絡先は、 X @pcb です
+
 ## 🌟 機能強化 (v1.9.5)
 
 **FramePack-eichi v1.9.5.1～1.9.5.4**では、実験的にOichiの機能増強を行っています。LoRAキャッシュ再利用の強化や安定性向上、翻訳機能の整備を行いました。
