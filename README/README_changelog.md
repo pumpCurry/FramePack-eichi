@@ -4,6 +4,18 @@
 
 ## 日本語
 
+### 2025-09-25: バージョン1.9.5.4
+- **LoRAメモリ保護とロードの信頼性向上**:
+  - LoRA設定が変わらない場合は事前アンロードやRAMガードをスキップし、最適化辞書の再利用時の待ち時間を削減
+  - メモリ不足を検知したらLoRA state cacheを一時的に無効化し、`.pt`読み込みをmmap＋`weights_only`で安全化
+- **LoRA設定の自己修復と無効化の徹底**:
+  - 保存済みドロップダウン値を自動補正し、テキスト入力したファイル名も受理
+  - 「LoRAを使用する」のチェックを外した際にキャッシュとTransformerを確実に解放
+- **再同期UIと複数タブ追随の改善**:
+  - Startボタンが実行中の重複起動を抑止し、「状況を再同期」に連打ガード・オーナー判定・ジョブ切替追随を追加
+  - 再同期押下直後に最新フレームを返してボタン状態とプレビューを即時回復
+- **進捗バーのレイアウト修正**: CSSグリッドと固定幅スピナーで％表示と説明行が崩れないように調整
+
 ### 2025-09-07: バージョン1.9.5.3
 - **LoRAキャッシュ再利用の強化**: FP8/LoRA最適化済みの辞書データをディスクにキャッシュする機能を強化
   - 1.9.5.2で追加された "LoRAの設定を再起動時再利用する" 機能を強化し、名称変更しました
@@ -274,6 +286,51 @@
 
 ## English
 
+### 2025-09-25: Version 1.9.5.4
+- **LoRA memory guard and safer loading**:
+  - Skip the pre-unload/RAM guard when settings are unchanged to reduce delays while reusing optimized dictionaries
+  - Temporarily disable the LoRA state cache on low-memory warnings and patch `.pt` `torch.load` with memory-mapping plus `weights_only`
+- **Self-healing LoRA configuration**:
+  - Auto-correct saved dropdown values and accept manually typed filenames
+  - Ensure caches and the transformer are released when “Use LoRA” is unchecked
+- **Resync UX & multi-tab following improvements**:
+  - Start blocks duplicate launches while a job is running and “Resync status” gains debounce, owner detection, and rollover streaming
+  - Immediately return the latest frame after resync to restore button states and previews
+- **Progress bar layout fixes**: CSS grid and fixed-width spinners keep percentages and descriptions aligned during batch transitions
+
+
+### 2025-09-07: Version 1.9.5.3
+- **LoRA cache reuse enhancements**:
+  - Strengthened disk caching of FP8/LoRA-optimized dictionaries and renamed the option introduced in 1.9.5.2
+  - Added an option to keep optimized dictionaries in memory between jobs for faster reuse (may not work on low-VRAM GPUs)
+- **Stability improvements**: Hardened job context initialization and streaming protection with additional startup safeguards
+- **Preserve generation results**: Bug fix to keep the previous generation result
+- **Logging improvements**: Added progress bar and messaging during long LoRA cache loads
+- **Translation enhancements**:
+  - Improved consistency of translation keys
+  - Prepared for locale JSON definition files for additional languages and added verification test files
+
+### 2025-08-22: Version 1.9.5.2
+- **Startup message improvements and spinner adjustments**: Tuned notification layout and spinner behavior
+- **Expanded image queue and batch management**: Specify repeat counts per image; total outputs = image count × batch size with the 100 cap removed
+- **Reference image queue and batch management**: Queue and batch reference images for sequential multi-reference processing
+- **Progress time display**: Show elapsed and remaining time estimates during generation
+- **Input image auto-save option**: Store input images, including clipboard captures, in a specified folder
+- **Log output management**: Choose the console log destination and open the folder directly from the UI
+- **Favorites management**: Save UI settings as favorites for quick reuse
+- **Prompt cache & LoRA state switching**: Persist prompt analysis results to disk and toggle LoRA state caches
+- **High-resolution support**: Generate up to 2K (2160px) output and add long-edge crop mode
+- **“Stop after this generation” button**: Halt once the current image finishes
+- **“Stop at this step” button**: Halt once the current frame finishes
+- **Image preview and original-size modal**: Inspect outputs in windowed preview or a modal at native resolution
+- **Unified `safe_path_join()` usage**: Avoid crashes from invalid values by routing all path joins through the helper
+- **`log_and_continue()` decorator**: Record worker exceptions without aborting the queue
+- **Added `ensure_dir()` helper**: Normalizes falsy values to defaults and prevents `os.makedirs` `TypeError`
+
+### 2025-08-12: Version 1.9.5.1
+- **Startup message improvements and spinner**: Display a spinner during module loading and show a check mark when complete
+
+
 ### 2025-05-22: Version 1.9.4 ※Official Release
 - **Settings Save Function Implementation**:
   - Colored background items automatically restored on next startup
@@ -511,6 +568,49 @@
 
 ## 简体中文
 
+### 2025-09-25: 版本1.9.5.4
+- **LoRA 记忆体保护与更安全的载入**：
+  - 在设定未变化时跳过预先卸载/RAM 防护，减轻重复使用最佳化字典时的等待
+  - 当侦测到记忆体不足时暂时停用 LoRA 状态快取，并对 `.pt` 的 `torch.load` 套用记忆体映射与 `weights_only`
+- **LoRA 设定自我修复**：
+  - 自动修正已保存的下拉选项，并接受手动输入的档名
+  - 取消勾选「使用 LoRA」时，确实释放快取与 transformer
+- **再同步体验与多分页追随改进**：
+  - Start 按钮在工作执行中会阻止重复启动，「同步状态」具备防连点、拥有者判定与任务切换时的追随串流
+  - 再同步按下后立即返回最新画面，使按钮状态与预览立刻恢复
+- **进度条版面修正**：透过 CSS 网格与固定宽度的转圈图示，确保百分比与说明行在批次切换时不再错位
+
+### 2025-09-07: 版本1.9.5.3
+- **LoRA 缓存再利用强化**：
+  - 强化 FP8/LoRA 优化字典的磁盘缓存，并调整 1.9.5.2 引入的再利用选项名称
+  - 新增在任务间保留优化字典于内存的选项，大幅缩短再次使用时的加载时间（可能不适用于低 VRAM GPU）
+- **稳定性改进**：强化任务上下文初始化与串流保护，启动阶段的防护更完整
+- **生成结果保留**：修复无法保留上一轮生成结果的问题
+- **日志增强**：在 LoRA 缓存读取耗时较长时新增进度条与提示信息
+- **翻译功能强化**：
+  - 改善翻译键的一致性
+  - 准备支持放入其他语言的 JSON 定义文件，并新增翻译验证测试文件
+
+### 2025-08-22: 版本1.9.5.2
+- **启动信息改善与转圈指示调整**：优化通知排版与转圈显示
+- **图像队列与批次管理扩充**：可为每张图指定重复次数；总生成量 = 图像数 × 批次数，解除 100 上限
+- **参考图像队列与批次管理**：支持参考图像排队与批次执行，依序处理多张参考图
+- **显示进度时间**：生成中显示已耗时间与剩余时间
+- **输入图像自动保存选项**：包含从剪贴板取得的影像，会保存到指定文件夹
+- **日志输出管理**：可选择主控台日志保存位置，并可从 UI 直接开启
+- **收藏设定管理**：将 UI 设定保存为收藏以便重复使用
+- **提示缓存与 LoRA 状态切换**：将提示解析结果保存到磁盘，并切换 LoRA 状态缓存
+- **高分辨率支持**：新增最高 2K（2160px）输出与长边对齐裁切模式
+- **「在此生成后停止」按钮**：当前影像生成完成后停止
+- **「在此步骤停止」按钮**：当前画面生成完成后停止
+- **图像预览与原尺寸弹窗**：可在视窗预览或原始分辨率弹窗查看输出
+- **统一使用 `safe_path_join()`**：通过公共函数避免非法路径导致的崩溃
+- **`log_and_continue()` 装饰器**：记录工作线程异常并继续队列
+- **新增 `ensure_dir()` 辅助函数**：将布尔/空值转换为预设路径，避免 `os.makedirs` 的 `TypeError`
+
+### 2025-08-12: 版本1.9.5.1
+- **启动信息改善与转圈指示**：模块载入时显示转圈，完成后以勾选标记通知
+
 ### 2025-05-22: 版本1.9.4 ※正式发布版
 - **设定保存功能的实现**:
   - 彩色背景项目在下次启动时自动恢复
@@ -747,6 +847,50 @@
 - 添加关键帧指南功能
 
 ## Русский
+
+### 2025-09-25: Версия 1.9.5.4
+- **Защита памяти и безопасная загрузка LoRA**:
+  - При неизменных настройках пропускается предварительное выгружение и RAM-гарда, что ускоряет повторное использование оптимизированных словарей
+  - При предупреждении о нехватке памяти кэш состояний LoRA временно отключается, а `torch.load` для `.pt` патчится на memory-mapped с `weights_only`
+- **Самовосстановление настроек LoRA**:
+  - Автоматически корректируются сохранённые значения выпадающих списков и принимаются вручную введённые имена файлов
+  - При снятии флажка «Использовать LoRA» кэши и transformer гарантированно освобождаются
+- **Улучшенный UX повторной синхронизации и слежения из нескольких вкладок**:
+  - Кнопка Start блокирует повторный запуск во время активной генерации, а «Повторная синхронизация» получает антидребезг, определение владельца и непрерывное слежение при смене задач
+  - Сразу после повторной синхронизации возвращается актуальный кадр, чтобы мгновенно восстановить состояние кнопок и превью
+- **Исправления макета индикатора прогресса**: CSS grid и фиксированная ширина спиннера удерживают проценты и описания выровненными даже при переключении батчей
+
+
+### 2025-09-07: Версия 1.9.5.3
+- **Усиленное повторное использование кеша LoRA**:
+  - Укреплено дисковое кеширование FP8/LoRA-оптимизированных словарей и уточнено название опции, добавленной в 1.9.5.2
+  - Добавлена возможность удерживать оптимизированные словари в памяти между заданиями, что заметно ускоряет повторное использование (может не работать на GPU с малым VRAM)
+- **Улучшение стабильности**: Укреплена инициализация контекста заданий и защита потоков, добавлены дополнительные меры на этапе запуска
+- **Сохранение результата генерации**: Исправлена потеря предыдущего результата
+- **Усиленные логи**: Появился индикатор прогресса и сообщения при длительной загрузке кеша LoRA
+- **Улучшения перевода**:
+  - Повышена согласованность ключей перевода
+  - Подготовлена поддержка JSON-файлов других языков и добавлены тесты проверки перевода
+
+### 2025-08-22: Версия 1.9.5.2
+- **Улучшение стартовых сообщений и спиннера**: Отрегулированы макет уведомлений и поведение индикатора загрузки
+- **Расширенная очередь изображений и управление пакетами**: Можно задавать количество повторов на изображение; общее число выходов = изображения × размер пакета, лимит 100 снят
+- **Очередь и пакеты для эталонных изображений**: Поддержка очереди и пакетов для эталонов, последовательная обработка нескольких ссылочных кадров
+- **Отображение времени выполнения**: Показывает прошедшее и оставшееся время в ходе генерации
+- **Автосохранение входных изображений**: Сохраняет входные кадры, включая полученные из буфера обмена, в выбранную папку
+- **Управление выводом логов**: Можно выбрать место сохранения консольных логов и открыть папку прямо из интерфейса
+- **Управление избранными настройками**: Сохраняйте конфигурации UI как избранные для повторного использования
+- **Кэш промптов и переключение состояния LoRA**: Сохраняет анализ промптов на диск и позволяет переключать кеш состояния LoRA
+- **Поддержка высокого разрешения**: Генерация до 2K (2160px) и режим кадрирования по длинной стороне
+- **Кнопка «Остановиться после текущей генерации»**: Завершает работу по окончании текущего изображения
+- **Кнопка «Остановиться на текущем шаге»**: Останавливает процесс после текущего кадра
+- **Предпросмотр и модальное окно оригинального размера**: Просмотр результатов в отдельном окне или модальном окне с родным разрешением
+- **Единое использование `safe_path_join()`**: Предотвращает сбои из-за некорректных путей
+- **Декоратор `log_and_continue()`**: Логирует исключения в рабочих потоках и продолжает очередь
+- **Новый помощник `ensure_dir()`**: Приводит ложные значения к путям по умолчанию и избегает `TypeError` в `os.makedirs`
+
+### 2025-08-12: Версия 1.9.5.1
+- **Улучшение стартового сообщения и спиннера**: Во время загрузки модулей отображается спиннер, после завершения — отметка ✓
 
 ### 2025-05-22: Версия 1.9.4 ※Официальный релиз
 - **Реализация функции сохранения настроек**:

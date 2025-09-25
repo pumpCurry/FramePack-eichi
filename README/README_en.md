@@ -18,7 +18,7 @@ We're extremely grateful to [https://github.com/hinablue](https://github.com/hin
 
 ## 🌟 Feature Enhancements (v1.9.5)
 
-**FramePack-eichi v1.9.5.1–1.9.5.3** adds stronger LoRA cache reuse, better stability, and improved translation support.
+**FramePack-eichi v1.9.5.1–1.9.5.4** strengthens LoRA cache reuse, boosts stability, and expands translation support.
 
 ### 🚀 Key Features
 
@@ -44,6 +44,10 @@ We're extremely grateful to [https://github.com/hinablue](https://github.com/hin
 - **Translation enhancements**: Improved consistency of translation keys
   - Prepared to allow locale JSON definition files for other languages placed under `locales`
   - Added test files for translation verification
+- **LoRA memory guard and faster loading**: Skip pre-unload when settings are unchanged, pause the state cache on low-memory warnings, and patch `.pt` loading with memory mapping plus `weights_only`
+- **Self-healing LoRA configuration and reliable disable**: Auto-correct saved dropdown values, accept typed file names, and fully release caches/transformers when LoRA is turned off
+- **Resync UX & multi-tab handling improvements**: Block duplicate starts while a job is running, add debounce/owner detection to “Resync status,” and immediately restore previews after syncing
+- **Progress bar layout fixes**: CSS grid and fixed-width spinners keep percentages and descriptions aligned
 
 ## 🌟 Feature Expansion (v1.9.4) ※Official Release
 
@@ -920,6 +924,19 @@ This project is released under the [Apache License 2.0](LICENSE), in compliance 
 ## 📝 Update History
 
 The latest update information is shown below. For the full update history, please refer to the [Changelog](README_changelog.md).
+
+### 2025-09-25: Version 1.9.5 (1.9.5.1–1.9.5.4)
+- **Release timeline**: 1.9.5.1 (2025-08-12) / 1.9.5.2 (2025-08-22) / 1.9.5.3 (2025-09-07) / 1.9.5.4 (2025-09-25)
+- **Queue & batch upgrades**: Per-image repeat counts, reference queue batching, high-resolution output, stop buttons, and original-size previews streamline bulk generation
+- **LoRA workflow improvements**: Disk and in-memory cache reuse, memory guards, `.pt` memory-mapped loading, and self-healing presets keep LoRA stable and fast
+- **Productivity boosts**: Startup spinner, elapsed/remaining time display, favorites, prompt cache, and automatic input image saving simplify daily use
+- **Operational hardening**: Unified safe path joins, worker exception logging, retention of latest results, resync safeguards, enhanced progress logging, and broader translation coverage
+
+### 2025-05-22: Version 1.9.4 ※Official Release
+- **Settings save function**: Automatically restore highlighted items, with manual and automatic save options compatible with bulk tools
+- **Alarm feature**: Windows system sound notification with ON/OFF toggle for long-running jobs
+- **Tensor processing enhancement**: New tensor modules and unified combine management improve processing capability
+- **Log management system**: Redirect standard output to timestamped log files for easier debugging
 
 ### 2025-05-15: Version 1.9.3
 - **Prompt Queue and Image Queue**: Added automation features for batch processing
