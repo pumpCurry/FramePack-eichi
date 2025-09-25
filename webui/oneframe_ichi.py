@@ -1869,22 +1869,22 @@ def _make_simple_bar(
         desc_colspan = 2
 
     # ---- スピナー列（rowspan=2） ----
-    # spinner=True のときのみ <td> を生成し、100%時は visibility:hidden で中身を隠す
-    # （列幅44pxは保持）。spinner=False の場合は列自体を生成しない。
+    # spinner=True のときのみ <td> を生成。
+    # 100%時は visibility:hidden で中身を隠し、列幅(44px)は保持する。
+    # 余白で右に寄らないよう、セル padding は 0、text-align は left に固定。
     spinner_td = ""
     if spinner:
         _vis = "hidden" if pct >= 100 else "visible"
         spinner_td = (
             '<td class="pc-spinner-cell" rowspan="2" '
-            '    style="width:44px;vertical-align:middle;text-align:center;border:0;outline:0;">'
-            # 36x36 の固定ラッパ（外部CSSの幅拡張の影響を受けない）
-            f'  <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;'
-            f'          visibility:{_vis};margin:0 auto;">'
+            '    style="width:44px;padding:0;vertical-align:middle;text-align:left;border:0;outline:0;padding:10px 4px;">'
+            # 32x32 の固定ラッパ（外部CSSの幅拡張の影響を受けない）
+            f'  <div style="width:32px;height:32px;display:block;visibility:{_vis};margin:0;">'
             # 旧仕様の .loader をそのまま使う（CSSは make_progress_bar_css が供給）
-            # ただし inline で 36x36 を固定して横伸びを防止
+            # ただし inline で 32x32 を固定し、margin も 0 にして左寄せ維持
             f'    <div class="loader" role="status" aria-live="polite" '
             f'         aria-hidden="{"true" if pct >= 100 else "false"}" '
-            f'         style="display:inline-block;width:36px;height:36px;"></div>'
+            f'         style="display:inline-block;width:32px;height:32px;margin:0;"></div>'
             f'  </div>'
             '</td>'
         )
@@ -1901,16 +1901,22 @@ def _make_simple_bar(
         f'         style="position:absolute;inset:0 auto 0 0;width:{pct}%;'
         f'                background:{fg};border-radius:4px;"></div>'
         '  </div>'
-        # % 値はセルとして右端に独立配置するため、ここでは出さない
+        # % 値は別セル（右端）に出すため、ここでは表示しない
         '</div>'
     )
 
+    # 1行目（[spinner?][bar][%]）
     row1 = (
         '<tr class="pc-progress-row">'
         f'{spinner_td}'
-        f'<td class="pc-progress-cell" style="padding:4px 6px;border:0;outline:0;vertical-align:middle;">{progress_html}</td>'
-        '<td class="pc-progress-percent" style="padding:4px 6px;width:56px;border:0;outline:0;vertical-align:middle;">'
-        '  <div style="text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:bold;">'
+        '<td class="pc-progress-cell" '
+        '    style="padding:4px 6px;border:0;outline:0;vertical-align:middle;">
+        f'  {progress_html}'
+        '</td>'
+        '<td class="pc-progress-percent" '
+        '    style="padding:4px 6px;width:56px;border:0;outline:0;vertical-align:middle;">'
+        '  <div style="text-align:right;white-space:nowrap;'
+        '              font-variant-numeric:tabular-nums;font-weight:bold;">'
         f'    {pct}%'
         '  </div>'
         '</td>'
