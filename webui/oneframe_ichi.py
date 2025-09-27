@@ -4,7 +4,7 @@ import traceback
 # 翻訳関連の初期読み込みに時間がかかるため、startingを表示してから翻訳関連の読み込みまで翻訳機能が使えません
 
 # version表記
-__version__ = "1.9.5.4"
+__version__ = "1.9.5.5_dev01"
 
 # 即座に起動しているファイル名をまずは出力して、画面に応答を表示する
 print(f"\n------------------------------------------------------------")
@@ -5690,16 +5690,30 @@ def on_resync_button_clicked(ui_session_id=None):
     except Exception:
         snap = {}
 
-    print(translate(f"[RESYNC] 非実行分岐: ctx_active=False running=False -> スナップショット1フレーム sid={ui_session_id}"))
+    # ★重要：非実行時は「Start=有効/End=無効/Stop群=無効」を毎回“確定的に”明示する
+    #   - interactive に加え、visible と value（ラベル）も常に明示
+    #   - 画像系は snap が無ければ gr.update(visible=True) で占位し、GUI崩れを防ぐ
+    try:
+        print(translate(f"[RESYNC] 非実行分岐: ctx_active=False running=False -> スナップショット1フレーム sid={ui_session_id}"))
+    except Exception:
+        pass
     yield _gui_frame_status_all(
-        (_result_update(snap.get("result_image") or last_output_filename) if (snap.get("result_image") or last_output_filename) else gr.skip()),
-        (_preview_update(snap.get("last_preview_image"), force_visible=True) if snap.get("last_preview_image") else gr.update(visible=True)),
-        (gr.update(value=snap.get("last_progress_desc", ""), visible=True)),
-        (gr.update(value=snap.get("last_progress_bar", ""),  visible=True)),
-        gr.update(interactive=True,  value=translate("Start Generation")),   # 非実行：Start 有効
-        gr.update(interactive=False, value=translate("End Generation")),     # 非実行：End   無効
-        gr.update(interactive=False),                                        # stop_after 無効
-        gr.update(interactive=False),                                        # stop_step  無効
+        (
+            _result_update(snap.get("result_image") or last_output_filename)
+            if (snap.get("result_image") or last_output_filename)
+            else gr.update(visible=True)   # 結果画像が無い場合でも“要素は見える”ようにする
+        ),
+        (
+            _preview_update(snap.get("last_preview_image"), force_visible=True)
+            if snap.get("last_preview_image")
+            else gr.update(visible=True)   # プレビューも同様に“可視化”を明示
+        ),
+        gr.update(value=snap.get("last_progress_desc", ""), visible=True),
+        gr.update(value=snap.get("last_progress_bar", ""),  visible=True),
+        gr.update(visible=True,  interactive=True,  value=translate("Start Generation")),   # Start: 有効/可視/ラベル確定
+        gr.update(visible=True,  interactive=False, value=translate("End Generation")),     # End  : 無効/可視/ラベル確定
+        gr.update(visible=True,  interactive=False),                                        # Stop after: 無効/可視
+        gr.update(visible=True,  interactive=False),                                        # Stop step : 無効/可視
         (gr.update(value=snap.get("seed")) if snap.get("seed") is not None else gr.skip()),
     )
 
