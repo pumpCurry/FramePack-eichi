@@ -22,8 +22,9 @@ FramePack-eichiは、lllyasviel師の[lllyasviel/FramePack](https://github.com/l
 - 2025-09-25ぐらいに、x_ai_codeさんがX(twitter)のアカウントと、githubのアカウント[https://github.com/git-ai-code/FramePack-eichi/](https://github.com/git-ai-code/FramePack-eichi/)が見えなくなっていることがわかりました。
 - v1.9.5.3までプルリクエストがマージされたあと([b8f2740a5a3d88fcdbc43368975f4a3938835a41](https://github.com/pumpCurry/FramePack-eichi/commit/b8f2740a5a3d88fcdbc43368975f4a3938835a41))、その修正版のv1.9.5.4をプルリクエストしようとしたらできなかったため、現時点でオリジナル公認の最新のコードからの修正版として、暫定でコードをお預かりしています。
 - oichi2にすべて合流される前提で、oichi1に実験的追加をしていましたが、oichi2も現在リポジトリが見えない？ため、eichi/eichiF1にもoichi1に加えた変更を反映したいと考えています
-- oichi2のコードを完全な形でダウンロードできていなかったことが分かったため、どなたかコード提供いただけないでしょうか
-- pumpCurryの連絡先は、 X @pcb です
+- **oichi2のコードを完全な形でダウンロードできていなかったことが分かったため、どなたかコード提供いただけないでしょうか**
+- pumpCurryの連絡先は、 X [@pcb](https://x.com/pcb/) です
+- 次の開発メモはこちら： [/README/memo/development.md](README/memo/development.md)
 
 ## 🌟 機能強化 (v1.9.5)
 
