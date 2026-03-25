@@ -1,18 +1,102 @@
 import os
-print(f"{os.path.basename(__file__)} : Starting....")
+import traceback
 
-import sys
-sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
+# version表記
+__version__ = "1.9.5.4"
+
+# 即座に起動しているファイル名をまずは出力して、画面に応答を表示する
+print(f"\n------------------------------------------------------------")
+print(f"{os.path.basename(__file__)} : version {__version__} Starting....")
+print(f"------------------------------------------------------------\n")
+
+# 進捗バーやスピナーと協調するスレッドセーフなprint文を有効化
+from eichi_utils.tqdm_print import enable_tqdm_print
+enable_tqdm_print()
+
+# スピナーを読み込む
+from eichi_utils.spinner import spinner_while_running
+
+# スピナーで進捗を示しながら基本モジュールをインポート
+importlib, sys, argparse = spinner_while_running(
+    "Load: Initialize",
+    lambda: (
+        __import__("importlib"),
+        __import__("sys"),
+        __import__("argparse"),
+    ),
+)
+
+# スピナーで進捗を表示しつつ FramePack サブモジュールのパスを追加
+spinner_while_running(
+    "Path: FramePack",
+    sys.path.append,
+    os.path.abspath(
+        os.path.realpath(
+            os.path.join(os.path.dirname(__file__), "./submodules/FramePack")
+        )
+    ),
+)
+
+# サーバーアドレスやUI言語などの共通CLIオプションを解析
+parser = argparse.ArgumentParser()
+parser.add_argument('--share', action='store_true')
+parser.add_argument("--server", type=str, default='127.0.0.1')
+parser.add_argument("--port", type=int, default=8001)
+parser.add_argument("--inbrowser", action='store_true')
+parser.add_argument("--lang", type=str, default='ja', help="Language: ja, zh-tw, en")
+args = parser.parse_args()
+
+# 翻訳機能の読み込み
+set_lang, translate = spinner_while_running(
+    "Load: i18n",
+    lambda: (
+        importlib.import_module("locales.i18n_extended").set_lang,
+        importlib.import_module("locales.i18n_extended").translate,
+    ),
+)
+set_lang(args.lang)
+
+# これ以降 translate() が使えます
 
 # Windows環境で loop再生時に [WinError 10054] の warning が出るのを回避する設定
-import asyncio
+(
+    asyncio,
+    login,
+    random,
+    time,
+    yaml,
+    json,
+    glob,
+    subprocess,
+    snapshot_download,
+) = spinner_while_running(
+    translate("Load_System Libraries"),
+    lambda: (
+        importlib.import_module("asyncio"),
+        importlib.import_module("diffusers_helper.hf_login").login,
+        importlib.import_module("random"),
+        importlib.import_module("time"),
+        importlib.import_module("yaml"),
+        importlib.import_module("json"),
+        importlib.import_module("glob"),
+        importlib.import_module("subprocess"),
+        importlib.import_module("huggingface_hub").snapshot_download,
+    ),
+)
 if sys.platform in ('win32', 'cygwin'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from diffusers_helper.hf_login import login
+import shutil
+import zipfile
+from datetime import datetime, timedelta
 
 # VAEキャッシュ機能のインポート
-from eichi_utils.vae_cache import vae_decode_cache
+vae_decode_cache = spinner_while_running(
+    translate("Load_eichi_utils.vae_cache"),
+    lambda: importlib.import_module("eichi_utils.vae_cache").vae_decode_cache,
+)
+
+from eichi_utils.notification_utils import play_completion_sound
 
 # グローバル変数の設定
 vae_cache_enabled = False  # VAEキャッシュのチェックボックス状態を保持
@@ -31,48 +115,31 @@ generation_stopped = False      # 生成中断フラグ
 current_batch_data = None      # 現在のバッチデータ
 transformer_model = None       # Transformerモデルの参照
 
-import os
-import random
-import time
-import subprocess
-import shutil
-import traceback  # ログ出力用
-# クロスプラットフォーム対応のための条件付きインポート
-import yaml
-import zipfile
-
-import argparse
-
 # PNGメタデータ処理モジュールのインポート
-import sys
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from eichi_utils.png_metadata import (
     embed_metadata_to_png, extract_metadata_from_png, extract_metadata_from_numpy_array,
     PROMPT_KEY, SEED_KEY, SECTION_PROMPT_KEY, SECTION_NUMBER_KEY
 )
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--share', action='store_true')
-parser.add_argument("--server", type=str, default='127.0.0.1')
-parser.add_argument("--port", type=int, default=8001)
-parser.add_argument("--inbrowser", action='store_true')
-parser.add_argument("--lang", type=str, default='ja', help="Language: ja, zh-tw, en")
-args = parser.parse_args()
-
-# Load translations from JSON files
-from locales.i18n_extended import (set_lang, translate)
-set_lang(args.lang)
-
-from eichi_utils.notification_utils import play_completion_sound
-import json
-import traceback
-from datetime import datetime, timedelta
-
 # ログ管理モジュールをインポート
-from eichi_utils.log_manager import (
-    enable_logging, disable_logging, is_logging_enabled, 
+(
+    enable_logging, disable_logging, is_logging_enabled,
     get_log_folder, set_log_folder, open_log_folder,
-    get_default_log_settings, load_log_settings, apply_log_settings
+    get_default_log_settings, load_log_settings, apply_log_settings,
+) = spinner_while_running(
+    translate("Load_eichi_utils.log_manager"),
+    lambda: (
+        importlib.import_module("eichi_utils.log_manager").enable_logging,
+        importlib.import_module("eichi_utils.log_manager").disable_logging,
+        importlib.import_module("eichi_utils.log_manager").is_logging_enabled,
+        importlib.import_module("eichi_utils.log_manager").get_log_folder,
+        importlib.import_module("eichi_utils.log_manager").set_log_folder,
+        importlib.import_module("eichi_utils.log_manager").open_log_folder,
+        importlib.import_module("eichi_utils.log_manager").get_default_log_settings,
+        importlib.import_module("eichi_utils.log_manager").load_log_settings,
+        importlib.import_module("eichi_utils.log_manager").apply_log_settings,
+    ),
 )
 
 if 'HF_HOME' not in os.environ:
@@ -91,83 +158,168 @@ try:
 except ImportError:
     print(translate("LoRAサポートが無効です（lora_utilsモジュールがインストールされていません）"))
 
-# 設定モジュールをインポート（ローカルモジュール）
-import os.path
-from eichi_utils.video_mode_settings import (
+# --- eichi_utils 群の読み込み ---
+def _load_eichi_settings_modules():
+    """設定・プリセット・キーフレーム等の eichi_utils モジュールを一括読み込み"""
+    import os.path  # noqa: F811
+    from eichi_utils.video_mode_settings import (
+        VIDEO_MODE_SETTINGS, get_video_modes, get_video_seconds, get_important_keyframes,
+        get_copy_targets, get_max_keyframes_count, get_total_sections, generate_keyframe_guide_html,
+        handle_mode_length_change, process_keyframe_change, MODE_TYPE_NORMAL, MODE_TYPE_LOOP
+    )
+    from eichi_utils.settings_manager import (
+        get_settings_file_path, get_output_folder_path, initialize_settings,
+        load_settings, save_settings, open_output_folder
+    )
+    from eichi_utils.preset_manager import (
+        initialize_presets, load_presets, get_default_startup_prompt,
+        save_preset, delete_preset
+    )
+    from eichi_utils.lora_preset_manager import (
+        initialize_lora_presets, load_lora_presets, save_lora_preset,
+        load_lora_preset, get_preset_names
+    )
+    from eichi_utils import lora_state_cache
+    from eichi_utils.path_utils import safe_path_join, ensure_dir
+    from eichi_utils.error_utils import log_and_continue
+    from eichi_utils.keyframe_handler import (
+        ui_to_code_index, code_to_ui_index,
+        unified_keyframe_change_handler, unified_input_image_change_handler
+    )
+    from eichi_utils.section_manager import upload_zipfile_handler, download_zipfile_handler
+    from eichi_utils.keyframe_handler_extended import extended_mode_length_change_handler
+    return (
+        VIDEO_MODE_SETTINGS, get_video_modes, get_video_seconds, get_important_keyframes,
+        get_copy_targets, get_max_keyframes_count, get_total_sections, generate_keyframe_guide_html,
+        handle_mode_length_change, process_keyframe_change, MODE_TYPE_NORMAL, MODE_TYPE_LOOP,
+        get_settings_file_path, get_output_folder_path, initialize_settings,
+        load_settings, save_settings, open_output_folder,
+        initialize_presets, load_presets, get_default_startup_prompt, save_preset, delete_preset,
+        initialize_lora_presets, load_lora_presets, save_lora_preset, load_lora_preset, get_preset_names,
+        lora_state_cache, safe_path_join, ensure_dir, log_and_continue,
+        ui_to_code_index, code_to_ui_index,
+        unified_keyframe_change_handler, unified_input_image_change_handler,
+        upload_zipfile_handler, download_zipfile_handler,
+        extended_mode_length_change_handler,
+    )
+
+(
     VIDEO_MODE_SETTINGS, get_video_modes, get_video_seconds, get_important_keyframes,
     get_copy_targets, get_max_keyframes_count, get_total_sections, generate_keyframe_guide_html,
-    handle_mode_length_change, process_keyframe_change, MODE_TYPE_NORMAL, MODE_TYPE_LOOP
+    handle_mode_length_change, process_keyframe_change, MODE_TYPE_NORMAL, MODE_TYPE_LOOP,
+    get_settings_file_path, get_output_folder_path, initialize_settings,
+    load_settings, save_settings, open_output_folder,
+    initialize_presets, load_presets, get_default_startup_prompt, save_preset, delete_preset,
+    initialize_lora_presets, load_lora_presets, save_lora_preset, load_lora_preset, get_preset_names,
+    lora_state_cache, safe_path_join, ensure_dir, log_and_continue,
+    ui_to_code_index, code_to_ui_index,
+    unified_keyframe_change_handler, unified_input_image_change_handler,
+    upload_zipfile_handler, download_zipfile_handler,
+    extended_mode_length_change_handler,
+) = spinner_while_running(
+    translate("Load_eichi_utils settings/presets/keyframes"),
+    _load_eichi_settings_modules,
 )
 
-# 設定管理モジュールをインポート
-from eichi_utils.settings_manager import (
-    get_settings_file_path,
-    get_output_folder_path,
-    initialize_settings,
-    load_settings,
-    save_settings,
-    open_output_folder
+# --- UI / Gradio ---
+gr = spinner_while_running(
+    translate("Load_Gradio"),
+    lambda: importlib.import_module("gradio"),
 )
-
-# プリセット管理モジュールをインポート
-from eichi_utils.preset_manager import (
-    initialize_presets,
-    load_presets,
-    get_default_startup_prompt,
-    save_preset,
-    delete_preset
-)
-
-# LoRAプリセット管理モジュールをインポート
-from eichi_utils.lora_preset_manager import (
-    initialize_lora_presets,
-    load_lora_presets,
-    save_lora_preset,
-    load_lora_preset,
-    get_preset_names
-)
-from eichi_utils import lora_state_cache
-from eichi_utils.path_utils import safe_path_join, ensure_dir
-from eichi_utils.error_utils import log_and_continue
-
-# キーフレーム処理モジュールをインポート
-from eichi_utils.keyframe_handler import (
-    ui_to_code_index,
-    code_to_ui_index,
-    unified_keyframe_change_handler,
-    unified_input_image_change_handler
-)
-
-# セクション情報の一括管理モジュールをインポート
-from eichi_utils.section_manager import upload_zipfile_handler, download_zipfile_handler
-
-# 拡張キーフレーム処理モジュールをインポート
-from eichi_utils.keyframe_handler_extended import extended_mode_length_change_handler
-import gradio as gr
-# UI関連モジュールのインポート
 from eichi_utils.ui_styles import get_app_css
-import torch
-import einops
-import safetensors.torch as sf
-import numpy as np
-import math
 
-from PIL import Image
-from diffusers import AutoencoderKLHunyuanVideo
-from transformers import LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer
-from diffusers_helper.hunyuan import encode_prompt_conds, vae_encode, vae_decode_fake, vae_decode
-from diffusers_helper.utils import save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw, resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge, generate_timestamp
-from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
-from diffusers_helper.pipelines.k_diffusion_hunyuan import sample_hunyuan
-from diffusers_helper.memory import cpu, gpu, get_cuda_free_memory_gb, move_model_to_device_with_memory_preservation, offload_model_from_device_for_memory_preservation, fake_diffusers_current_device, DynamicSwapInstaller, unload_complete_models, load_model_as_complete
-from diffusers_helper.thread_utils import AsyncStream, async_run
-from diffusers_helper.gradio.progress_bar import make_progress_bar_css, make_progress_bar_html
-from transformers import SiglipImageProcessor, SiglipVisionModel
-from diffusers_helper.clip_vision import hf_clip_vision_encode
-from diffusers_helper.bucket_tools import find_nearest_bucket, SAFE_RESOLUTIONS
+# --- 重い科学計算ライブラリ ---
+def _load_heavy_libs():
+    """torch, einops, safetensors, numpy, PIL 等を一括読み込み"""
+    import torch
+    import einops
+    import safetensors.torch as sf
+    import numpy as np
+    import math
+    from PIL import Image
+    return torch, einops, sf, np, math, Image
 
-from eichi_utils.transformer_manager import TransformerManager
-from eichi_utils.text_encoder_manager import TextEncoderManager
+torch, einops, sf, np, math, Image = spinner_while_running(
+    translate("Load_torch/einops/numpy/PIL"),
+    _load_heavy_libs,
+)
+
+# --- diffusers / transformers ---
+def _load_diffusers_transformers():
+    """diffusers, transformers, パイプライン等を一括読み込み"""
+    from diffusers import AutoencoderKLHunyuanVideo
+    from transformers import LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer
+    from diffusers_helper.hunyuan import encode_prompt_conds, vae_encode, vae_decode_fake, vae_decode
+    from diffusers_helper.utils import (
+        save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw,
+        resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge,
+        generate_timestamp,
+    )
+    from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
+    from diffusers_helper.pipelines.k_diffusion_hunyuan import sample_hunyuan
+    from diffusers_helper.memory import (
+        cpu, gpu, get_cuda_free_memory_gb,
+        move_model_to_device_with_memory_preservation,
+        offload_model_from_device_for_memory_preservation,
+        fake_diffusers_current_device, DynamicSwapInstaller,
+        unload_complete_models, load_model_as_complete,
+    )
+    from diffusers_helper.thread_utils import AsyncStream, async_run
+    from diffusers_helper.gradio.progress_bar import make_progress_bar_css, make_progress_bar_html
+    from transformers import SiglipImageProcessor, SiglipVisionModel
+    from diffusers_helper.clip_vision import hf_clip_vision_encode
+    from diffusers_helper.bucket_tools import find_nearest_bucket, SAFE_RESOLUTIONS
+    return (
+        AutoencoderKLHunyuanVideo,
+        LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer,
+        encode_prompt_conds, vae_encode, vae_decode_fake, vae_decode,
+        save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw,
+        resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge,
+        generate_timestamp,
+        HunyuanVideoTransformer3DModelPacked, sample_hunyuan,
+        cpu, gpu, get_cuda_free_memory_gb,
+        move_model_to_device_with_memory_preservation,
+        offload_model_from_device_for_memory_preservation,
+        fake_diffusers_current_device, DynamicSwapInstaller,
+        unload_complete_models, load_model_as_complete,
+        AsyncStream, async_run,
+        make_progress_bar_css, make_progress_bar_html,
+        SiglipImageProcessor, SiglipVisionModel,
+        hf_clip_vision_encode,
+        find_nearest_bucket, SAFE_RESOLUTIONS,
+    )
+
+(
+    AutoencoderKLHunyuanVideo,
+    LlamaModel, CLIPTextModel, LlamaTokenizerFast, CLIPTokenizer,
+    encode_prompt_conds, vae_encode, vae_decode_fake, vae_decode,
+    save_bcthw_as_mp4, crop_or_pad_yield_mask, soft_append_bcthw,
+    resize_and_center_crop, state_dict_weighted_merge, state_dict_offset_merge,
+    generate_timestamp,
+    HunyuanVideoTransformer3DModelPacked, sample_hunyuan,
+    cpu, gpu, get_cuda_free_memory_gb,
+    move_model_to_device_with_memory_preservation,
+    offload_model_from_device_for_memory_preservation,
+    fake_diffusers_current_device, DynamicSwapInstaller,
+    unload_complete_models, load_model_as_complete,
+    AsyncStream, async_run,
+    make_progress_bar_css, make_progress_bar_html,
+    SiglipImageProcessor, SiglipVisionModel,
+    hf_clip_vision_encode,
+    find_nearest_bucket, SAFE_RESOLUTIONS,
+) = spinner_while_running(
+    translate("Load_diffusers/transformers/pipeline"),
+    _load_diffusers_transformers,
+)
+
+# --- モデル管理モジュール ---
+(TransformerManager, TextEncoderManager) = spinner_while_running(
+    translate("Load_eichi_utils.transformer_manager"),
+    lambda: (
+        importlib.import_module("eichi_utils.transformer_manager").TransformerManager,
+        importlib.import_module("eichi_utils.text_encoder_manager").TextEncoderManager,
+    ),
+)
 
 free_mem_gb = get_cuda_free_memory_gb(gpu)
 high_vram = free_mem_gb > 100
@@ -176,8 +328,10 @@ print(translate('Free VRAM {0} GB').format(free_mem_gb))
 print(translate('High-VRAM Mode: {0}').format(high_vram))
 
 # モデルを並列ダウンロードしておく
-from eichi_utils.model_downloader import ModelDownloader
-ModelDownloader().download_original()
+spinner_while_running(
+    translate("Download_ensure_models"),
+    lambda: importlib.import_module("eichi_utils.model_downloader").ModelDownloader().download_original(),
+)
 
 def _norm_dropdown(val):
     """Return a clean str or None from a Gr.Dropdown value."""
@@ -191,26 +345,62 @@ transformer_manager = TransformerManager(device=gpu, high_vram_mode=high_vram, u
 text_encoder_manager = TextEncoderManager(device=gpu, high_vram_mode=high_vram)
 
 try:
-    tokenizer = LlamaTokenizerFast.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer')
-    tokenizer_2 = CLIPTokenizer.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2')
-    vae = AutoencoderKLHunyuanVideo.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='vae', torch_dtype=torch.float16).cpu()
+    tokenizer = spinner_while_running(
+        translate("Load_tokenizer_tokenizer_2"),
+        lambda: LlamaTokenizerFast.from_pretrained(
+            "hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer'
+        ),
+    )
+    tokenizer_2 = spinner_while_running(
+        translate("Load_tokenizer_2_CLIP"),
+        lambda: CLIPTokenizer.from_pretrained(
+            "hunyuanvideo-community/HunyuanVideo", subfolder='tokenizer_2'
+        ),
+    )
+    vae = spinner_while_running(
+        translate("Load_VAE"),
+        lambda: AutoencoderKLHunyuanVideo.from_pretrained(
+            "hunyuanvideo-community/HunyuanVideo", subfolder='vae',
+            torch_dtype=torch.float16,
+        ).cpu(),
+    )
 
     # text_encoderとtext_encoder_2の初期化
-    if not text_encoder_manager.ensure_text_encoder_state():
-        raise Exception(translate("text_encoderとtext_encoder_2の初期化に失敗しました"))
-    text_encoder, text_encoder_2 = text_encoder_manager.get_text_encoders()
+    def _init_text_encoders():
+        if not text_encoder_manager.ensure_text_encoder_state():
+            raise Exception(translate("text_encoderとtext_encoder_2の初期化に失敗しました"))
+        return text_encoder_manager.get_text_encoders()
+    text_encoder, text_encoder_2 = spinner_while_running(
+        translate("Load_text_encoders"),
+        _init_text_encoders,
+    )
 
     # transformerの初期化
-    transformer_manager.ensure_download_models()
-    transformer = transformer_manager.get_transformer()  # 仮想デバイス上のtransformerを取得
+    transformer = spinner_while_running(
+        translate("Load_transformer"),
+        lambda: (
+            transformer_manager.ensure_download_models(),
+            transformer_manager.get_transformer(),
+        )[-1],
+    )
 
     # 他のモデルの読み込み
-    feature_extractor = SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
-    image_encoder = SiglipVisionModel.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='image_encoder', torch_dtype=torch.float16).cpu()
+    feature_extractor = spinner_while_running(
+        translate("Load_feature_extractor"),
+        lambda: SiglipImageProcessor.from_pretrained(
+            "lllyasviel/flux_redux_bfl", subfolder='feature_extractor'
+        ),
+    )
+    image_encoder = spinner_while_running(
+        translate("Load_image_encoder"),
+        lambda: SiglipVisionModel.from_pretrained(
+            "lllyasviel/flux_redux_bfl", subfolder='image_encoder',
+            torch_dtype=torch.float16,
+        ).cpu(),
+    )
 except Exception as e:
     print(translate("モデル読み込みエラー: {0}").format(e))
     print(translate("プログラムを終了します..."))
-    import sys
     sys.exit(1)
 
 vae.eval()
