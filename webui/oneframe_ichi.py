@@ -2691,6 +2691,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         # LoRA キャッシュ利用時は FP8 最適化を再実行しない。
         # それ以外では UI の fp8_optimization に従う。
         fp8_enabled_flag = bool(fp8_optimization) and not lora_cache_enabled
+        if bool(fp8_optimization) and lora_cache_enabled:
+            print(translate("LoRAキャッシュが有効なため、FP8最適化は無効化されました。両方を使用するにはLoRAキャッシュをOFFにしてください。"))
 
         # 「LoRAキャッシュ」または「最適化辞書の再利用」のどちらかが有効なら分割を抑止
         force_dict_split_flag = not (lora_cache_enabled or reuse_flag)
@@ -2898,23 +2900,6 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 transformer = transformer_manager.get_transformer()
                 print(translate("transformer状態チェック完了"))
 
-                # === RAMガードで一時的に無効化した LoRA キャッシュの復元 ===
-                # - 前段で _ram_guard_maybe_disable_lora_cache() が発火した場合、LoRAキャッシュは「一時的に無効」になる
-                #   そのままだと後続ジョブでも無効状態を引きずり、毎回フルロードになってしまうので
-                #   ensure_transformer_state() 直後＝Transformerが有効な状態に戻ったタイミングで、前回有効だったかどうかを見て復元。
-                #   - _PREV_LORA_CACHE_ENABLED に退避しておいた真偽値を取り出して復元後、退避値はpop()で破棄
-                try:
-                    from eichi_utils import lora_state_cache as _lcache3
-                    _prev = globals().pop("_PREV_LORA_CACHE_ENABLED", None)
-                    if _prev is not None and hasattr(_lcache3, "set_cache_enabled"):
-                        _lcache3.set_cache_enabled(bool(_prev))
-                        try:
-                            print(translate("LoRAキャッシュ設定を復元しました: enabled={0}").format(bool(_prev)))
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
                 # === 今回のLoRA設定シグネチャを保存（次回の変更判定に使用） ===
                 #   ここで保存するのは「比較用の要約」。ジョブ完了後の状態を基準に、次回ジョブ開始時の変更有無を素早く判定のため
                 #   なお、厳密な変化（例: 重みファイルの中身の差異）はここでは検出しない（I/Oコスト増を避けるため）
@@ -2927,7 +2912,22 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 print(translate("transformerのリロードに失敗しました: {0}").format(e))
                 traceback.print_exc()
                 raise Exception(translate("transformerのリロードに失敗しました"))
-        
+            finally:
+                # === RAMガードで一時的に無効化した LoRA キャッシュの復元 ===
+                # ensure_transformer_state()が成功/失敗に関わらず、必ずキャッシュ設定を復元する。
+                # 復元しないと後続ジョブ全てがフルロードになり、再起動まで復帰しない。
+                try:
+                    from eichi_utils import lora_state_cache as _lcache3
+                    _prev = globals().pop("_PREV_LORA_CACHE_ENABLED", None)
+                    if _prev is not None and hasattr(_lcache3, "set_cache_enabled"):
+                        _lcache3.set_cache_enabled(bool(_prev))
+                        try:
+                            print(translate("LoRAキャッシュ設定を復元しました: enabled={0}").format(bool(_prev)))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
         # 入力画像の処理
         push_progress(None, '', 0, 'Image processing ...')
         

@@ -10,7 +10,7 @@ def fake_save(obj, path):
     with open(path, 'wb') as f:
         pickle.dump(obj, f)
 
-def fake_load(path):
+def fake_load(path, **kwargs):
     with open(path, 'rb') as f:
         return pickle.load(f)
 

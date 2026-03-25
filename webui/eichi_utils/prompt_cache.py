@@ -23,7 +23,7 @@ def load_from_cache(prompt: str, n_prompt: str):
     print(f"Looking for prompt cache: {cache_file}")
     if os.path.exists(cache_file):
         try:
-            data = torch.load(cache_file)
+            data = torch.load(cache_file, weights_only=True)
             print("Prompt cache hit")
             return data
         except Exception:

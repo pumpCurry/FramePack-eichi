@@ -23,6 +23,6 @@ def test_save_app_settings_bool(tmp_path, monkeypatch):
 
     sm.save_app_settings_oichi({'resolution': 640, 'lora_cache': True})
 
-    data = json.loads(settings_file.read_text())
+    data = json.loads(settings_file.read_text(encoding='utf-8'))
     assert isinstance(data['app_settings_oichi']['lora_cache'], bool)
     assert data['app_settings_oichi']['lora_cache'] is True

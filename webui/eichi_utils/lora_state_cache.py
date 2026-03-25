@@ -44,6 +44,28 @@ def set_cache_enabled(value: bool):
     print(f"LoRA state cache enabled: {cache_enabled}")
 
 
+def is_cache_enabled() -> bool:
+    """現在のキャッシュ有効/無効状態を返す"""
+    return cache_enabled
+
+
+def peek_next_cache_path(lora_paths=None, lora_scales=None, fp8_enabled=False, force_dict_split=False):
+    """次のキャッシュファイルのパスを予測して返す（存在チェック用）。
+    RAMガードがキャッシュファイルサイズを事前判定するために使用。
+    model_filesは予測段階では不明のため空リストで近似する。
+    ファイルが存在しない場合はNoneを返す。"""
+    if not cache_enabled:
+        return None
+    try:
+        cache_key = generate_cache_key([], lora_paths or [], lora_scales or [], fp8_enabled)
+        cache_path = os.path.join(get_cache_dir(), cache_key + '.pt')
+        if os.path.exists(cache_path):
+            return cache_path
+    except Exception:
+        pass
+    return None
+
+
 def get_cache_dir():
     """Return directory for cached LoRA state dictionaries."""
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -164,18 +186,18 @@ def load_from_cache(cache_key):
                 f, size, translate("キャッシュ読み込み中")
             ) as wrapped:
                 try:
-                    obj = torch.load(wrapped, map_location="cpu", mmap=False)
+                    obj = torch.load(wrapped, map_location="cpu", mmap=False, weights_only=True)
                 except TypeError:
-                    obj = torch.load(wrapped, map_location="cpu")
+                    obj = torch.load(wrapped, map_location="cpu", weights_only=True)
         except Exception:
             try:
                 _echo_fetching_cache(translate("キャッシュ読み込み中"))
             except Exception:
                 pass
             try:
-                obj = torch.load(cache_fullpath, map_location="cpu", mmap=False)
+                obj = torch.load(cache_fullpath, map_location="cpu", mmap=False, weights_only=True)
             except TypeError:
-                obj = torch.load(cache_fullpath, map_location="cpu")
+                obj = torch.load(cache_fullpath, map_location="cpu", weights_only=True)
 
         # ② 読み込んだデータをオンメモリに保存
         _inmem_set(cache_key, obj)

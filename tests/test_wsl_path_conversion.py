@@ -21,6 +21,8 @@ spec_log.loader.exec_module(log_manager)
 def test_open_output_folder_wsl(monkeypatch, tmp_path):
     called = {}
 
+    # Windows環境(os.name=='nt')ではWSL分岐に入らないため、posixに偽装する
+    monkeypatch.setattr(os, 'name', 'posix')
     monkeypatch.setattr(settings_manager, '_is_wsl', lambda: True)
     monkeypatch.setattr(settings_manager.shutil, 'which', lambda cmd: 'explorer.exe' if cmd == 'explorer.exe' else None)
 
@@ -43,6 +45,8 @@ def test_open_output_folder_wsl(monkeypatch, tmp_path):
 def test_open_log_folder_wsl(monkeypatch, tmp_path):
     called = {}
 
+    # Windows環境(os.name=='nt')ではWSL分岐に入らないため、posixに偽装する
+    monkeypatch.setattr(os, 'name', 'posix')
     monkeypatch.setattr(log_manager, '_is_wsl', lambda: True)
     monkeypatch.setattr(log_manager, '_log_folder', str(tmp_path))
     monkeypatch.setattr(log_manager.shutil, 'which', lambda cmd: 'explorer.exe' if cmd == 'explorer.exe' else None)

@@ -16,6 +16,7 @@ if 'PIL' not in sys.modules:
         @staticmethod
         def fromarray(*a, **k):
             return _Img()
+    image_mod.Image = _Img
     image_mod.open = _Img.open
     image_mod.fromarray = _Img.fromarray
     png_mod = types.ModuleType("PIL.PngImagePlugin")
@@ -197,7 +198,7 @@ class _Base:
         return cls()
     def to(self, *a, **k):
         return self
-transformers_mod.LlamaModel = type('LlamaModel', (), {})
+transformers_mod.LlamaModel = type('LlamaModel', (), {'forward': lambda self, *a, **k: None})
 transformers_mod.CLIPTextModel = type('CLIPTextModel', (), {})
 transformers_mod.LlamaTokenizerFast = type('LlamaTokenizerFast', (_Base,), {})
 transformers_mod.CLIPTokenizer = type('CLIPTokenizer', (_Base,), {})
@@ -217,7 +218,14 @@ einops_stub.rearrange = lambda *a, **k: None
 sys.modules['einops'] = einops_stub
 
 # ==== ダミー gradio ====
+class _DummyComponent:
+    pass
+
+class _DummyComponents:
+    Component = _DummyComponent
+
 class _DummyGr:
+    components = _DummyComponents()
     @staticmethod
     def update(**kwargs): return ("update", kwargs)
     @staticmethod
