@@ -2412,41 +2412,45 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
     process_start_dt = datetime.now()
 
     def push_progress(preview, desc, percent, hint):
-        now = datetime.now()
-        elapsed = now - process_start_dt
-        start_str = process_start_dt.strftime('%H:%M:%S')
-        now_str = now.strftime('%H:%M:%S')
-        elapsed_str = str(elapsed).split('.')[0]
-        if percent and percent > 0:
-            total_secs = elapsed.total_seconds() / (percent / 100)
-            est_dt = process_start_dt + timedelta(seconds=total_secs)
-            est_str = est_dt.strftime('%H:%M:%S')
-        else:
-            est_str = '--:--:--'
-
-        progress_html = ''
+        """進捗をUIに配信する。内部で例外を握りつぶすため、呼び出し側でtry/catchは不要。"""
         try:
-            global progress_ref_idx, progress_ref_total, progress_ref_name
-            global progress_img_idx, progress_img_total, progress_img_name
-            progress_html = (
-                f"<br/><strong>進捗:</strong> 《参考画像 {progress_ref_idx}/{progress_ref_total}》"
-                f"{progress_ref_name} / 《実施予定数 {progress_img_idx}/{progress_img_total}》{progress_img_name} <br/>"
-            )
-        except Exception:
+            now = datetime.now()
+            elapsed = now - process_start_dt
+            start_str = process_start_dt.strftime('%H:%M:%S')
+            now_str = now.strftime('%H:%M:%S')
+            elapsed_str = str(elapsed).split('.')[0]
+            if percent and percent > 0:
+                total_secs = elapsed.total_seconds() / (percent / 100)
+                est_dt = process_start_dt + timedelta(seconds=total_secs)
+                est_str = est_dt.strftime('%H:%M:%S')
+            else:
+                est_str = '--:--:--'
+
             progress_html = ''
+            try:
+                global progress_ref_idx, progress_ref_total, progress_ref_name
+                global progress_img_idx, progress_img_total, progress_img_name
+                progress_html = (
+                    f"<br/><strong>進捗:</strong> 《参考画像 {progress_ref_idx}/{progress_ref_total}》"
+                    f"{progress_ref_name} / 《実施予定数 {progress_img_idx}/{progress_img_total}》{progress_img_name} <br/>"
+                )
+            except Exception:
+                progress_html = ''
 
-        time_info = f"{start_str}▶{now_str} ({elapsed_str}) ▶{est_str}"
-        if desc:
-            desc = f"{progress_html}{desc}\n{time_info}"
-        else:
-            desc = f"{progress_html}{time_info}"
+            time_info = f"{start_str}▶{now_str} ({elapsed_str}) ▶{est_str}"
+            if desc:
+                desc = f"{progress_html}{desc}\n{time_info}"
+            else:
+                desc = f"{progress_html}{time_info}"
 
-        bar_html = make_progress_bar_html2(percent, hint)
-        global last_progress_desc, last_progress_bar, last_preview_image
-        last_progress_desc = desc
-        last_progress_bar = bar_html
-        last_preview_image = preview
-        bus.publish(('progress', (preview, desc, bar_html)))
+            bar_html = make_progress_bar_html2(percent, hint)
+            global last_progress_desc, last_progress_bar, last_preview_image
+            last_progress_desc = desc
+            last_progress_bar = bar_html
+            last_preview_image = preview
+            bus.publish(('progress', (preview, desc, bar_html)))
+        except Exception:
+            pass
 
     if save_before_input_images:
         for p, suffix in [
@@ -2465,15 +2469,11 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
     # プログレスバーの初期化
     push_progress(None, '', 0, 'Starting ...')
 
-    # --- 準備中（黄色）フック：最初に1枚だけ出す。失敗しても本体は続行 ---
-    try:
-        _prep_idx  = (progress_img_idx + 1) if isinstance(progress_img_idx, int) else 1
-        _prep_tot  = (progress_img_total   ) if isinstance(progress_img_total, int) else 1
-        _prep_text = translate("Preparing next job ({0}/{1})").format(_prep_idx, _prep_tot)
-        # spinner は既定 True。明示したい場合は hint に spinner=true/false を入れる
-        push_progress(None, _prep_text, 0, "[THEME=yellow spinner=true]"+_prep_text)
-    except Exception:
-        pass
+    # --- 準備中（黄色）フック：最初に1枚だけ出す ---
+    _prep_idx  = (progress_img_idx + 1) if isinstance(progress_img_idx, int) else 1
+    _prep_tot  = (progress_img_total   ) if isinstance(progress_img_total, int) else 1
+    _prep_text = translate("Preparing next job ({0}/{1})").format(_prep_idx, _prep_tot)
+    push_progress(None, _prep_text, 0, "[THEME=yellow spinner=true]"+_prep_text)
     
     # モデルや中間ファイルなどのキャッシュ利用フラグ
     use_cached_files = use_prompt_cache
@@ -2701,31 +2701,24 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         print(translate("LoRA設定: lora_cache={0}, reuse={1}, fp8={2}, force_split={3}")
               .format(lora_cache_enabled, reuse_flag, fp8_enabled_flag, force_dict_split_flag))
 
-       # --- 進捗バー黄色:100% 準備中（yellow）をここで完了表示にしてクローズ ---
-        try:
-            _prep_idx  = (progress_img_idx + 1) if isinstance(progress_img_idx, int) else 1
-            _prep_tot  = (progress_img_total   ) if isinstance(progress_img_total, int) else 1
-            _prep_text = translate("Preparing next job ({0}/{1})").format(_prep_idx, _prep_tot)
-            # 100% で visibility:hidden（幅保持）に切り替わる
-            push_progress(None, _prep_text, 100, "[THEME=yellow spinner=true]"+_prep_text)
-        except Exception:
-            pass
+        # --- 進捗バー黄色:100% 準備中（yellow）をここで完了表示にしてクローズ ---
+        _prep_idx  = (progress_img_idx + 1) if isinstance(progress_img_idx, int) else 1
+        _prep_tot  = (progress_img_total   ) if isinstance(progress_img_total, int) else 1
+        _prep_text = translate("Preparing next job ({0}/{1})").format(_prep_idx, _prep_tot)
+        push_progress(None, _prep_text, 100, "[THEME=yellow spinner=true]"+_prep_text)
 
 
         # === LoRAロードの進捗表示（概算） ===
-        try:
-            _total = 0
-            _n = len(current_lora_paths) if isinstance(current_lora_paths, list) else 0
-            for _p in (current_lora_paths or []):
-                try:
-                    if os.path.isfile(_p):
-                        _total += os.path.getsize(_p)
-                except Exception:
-                    pass
-            _total_gb = _total / (1024**3) if _total else 0.0
-            push_progress(None, translate('LoRAキャッシュを読み込み中...'), 0, f'[BAR fg=#ff9800]LoRA Cache Loading: 0.00GB / {_total_gb:.2f}GB (0/{_n})')
-        except Exception:
-            pass
+        _total = 0
+        _n = len(current_lora_paths) if isinstance(current_lora_paths, list) else 0
+        for _p in (current_lora_paths or []):
+            try:
+                if os.path.isfile(_p):
+                    _total += os.path.getsize(_p)
+            except Exception:
+                pass
+        _total_gb = _total / (1024**3) if _total else 0.0
+        push_progress(None, translate('LoRAキャッシュを読み込み中...'), 0, f'[BAR fg=#ff9800]LoRA Cache Loading: 0.00GB / {_total_gb:.2f}GB (0/{_n})')
 
         # 次ジョブに向けたTransformer側の設定通知
         transformer_manager.set_next_settings(
@@ -2756,39 +2749,21 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
         # ここまで戻ってきた＝LoRAキャッシュ/適用の準備が完了（失敗時は上で例外になる）。
         # 正確なバイト数が取得できる環境ではそれを優先、無ければ 100% の完了表示だけ確実に出す。
-        try:
-            _n = len(current_lora_paths) if isinstance(current_lora_paths, list) else 0
-            _msg_done = translate("LoRAキャッシュの準備が完了しました")
-            # 将来: transformer_manager が統計を提供するならそれを使う
-            #   例） get_cache_stats() -> {"loaded": int, "total": int, "count": i, "n": n}
-            _stats = None
+        _n = len(current_lora_paths) if isinstance(current_lora_paths, list) else 0
+        _msg_done = translate("LoRAキャッシュの準備が完了しました")
+        # 将来: transformer_manager が統計を提供するならそれを使う
+        _stats = None
+        if hasattr(transformer_manager, "get_cache_stats"):
             try:
-                if hasattr(transformer_manager, "get_cache_stats"):
-                    _stats = transformer_manager.get_cache_stats() or None
+                _stats = transformer_manager.get_cache_stats() or None
             except Exception:
                 _stats = None
-            if _stats and "total" in _stats:
-                _loaded = int(_stats.get("loaded") or 0)
-                _total  = int(_stats.get("total")  or 0)
-                _i      = int(_stats.get("count")  or _n)
-                _n2     = int(_stats.get("n")      or _n)
-                # テキストだけ反映（単位計算は安全のため省略可能）
-                push_progress(
-                    None,
-                    _msg_done,
-                    100,
-                    f"[THEME=yellow spinner=true]{_msg_done} ({_i}/{_n2})"
-                )
-            else:
-                # 統計が無くても「終わった」ことは UI に知らせる（黄色100%）
-                push_progress(
-                    None,
-                    _msg_done,
-                    100,
-                    f"[THEME=yellow spinner=true]{_msg_done} ({_n}/{_n})"
-                )
-        except Exception:
-            pass
+        if _stats and "total" in _stats:
+            _i  = int(_stats.get("count") or _n)
+            _n2 = int(_stats.get("n") or _n)
+            push_progress(None, _msg_done, 100, f"[THEME=yellow spinner=true]{_msg_done} ({_i}/{_n2})")
+        else:
+            push_progress(None, _msg_done, 100, f"[THEME=yellow spinner=true]{_msg_done} ({_n}/{_n})")
 
 
         # -------- LoRA 設定 END ---------
@@ -3182,18 +3157,15 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         # 条件: 1) プロンプトキャッシュ機能が有効 2) まだメモリキャッシュが利用できない
         if use_prompt_cache and not use_cache:
 
-            try:
-                push_progress(None, translate('キャッシュを読み込み中...'), 0, '[BAR fg=#ff9800]Cache Loading: 0.00GB / ?.?GB')
-            except Exception:
-                pass
+            push_progress(None, translate('キャッシュを読み込み中...'), 0, '[BAR fg=#ff9800]Cache Loading: 0.00GB / ?.?GB')
+
             disk_cache = prompt_cache.load_from_cache(prompt, n_prompt)
             if disk_cache:
 
-                try:
-                    # 読み込み完了（サイズ既知でないため100%表示）
-                    push_progress(None, translate('キャッシュの読み込みが完了しました'), 100, '[BAR fg=#ff9800]Cache Loading: 100%')
-                except Exception:
-                    pass
+                # 読み込み完了（サイズ既知でないため100%表示）
+
+                push_progress(None, translate('キャッシュの読み込みが完了しました'), 100, '[BAR fg=#ff9800]Cache Loading: 100%')
+
                 # 既存のディスクキャッシュを利用
                 print(translate("ファイルキャッシュからテキストエンコード結果を読み込みます"))
                 llama_vec = disk_cache['llama_vec']
@@ -3761,11 +3733,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 load_model_as_complete(transformer, target_device=gpu, unload=True)
 
 
-            # --- 初期サンプリング表示を追加 (0/N) ---
-            try:
-                push_progress(None, translate('1フレームモード: サンプリング中...'), 0, f'Sampling 0/{steps}')
-            except Exception:
-                pass
+            # サンプリング開始表示はテンソル準備後の sample_hunyuan 直前で行う（重複防止）
+
 
 
             # teacacheの設定
@@ -4058,11 +4027,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 # エラーログから、widthが60、heightが104になっているのが問題
                 # これらはlatentサイズであり、実際の画像サイズではない
 
-                try:
-                    # LoRA読み込みフェーズ完了（概算）
-                    push_progress(None, translate('LoRAのロードが完了しました'), 100, '[BAR fg=#ff9800]LoRA Cache Loading: 100%')
-                except Exception:
-                    pass
+                # LoRA読み込みフェーズ完了表示は LoRA設定 END セクション（2770行付近）で実施済み
+
 
                 print(translate("実際の画像サイズを再確認"))
                 print(translate("入力画像のサイズ: {0}").format(input_image_np.shape))
@@ -4079,15 +4045,12 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     print(translate("【初回実行について】初回は Anti-drifting Sampling の履歴データがないため、ノイズが入る場合があります"))
                 
                 # --- 進捗:サンプリング直前に0/stepsを出す（青）---
-                try:
-                    push_progress(
-                        None,
-                        translate('1フレームモード: サンプリング中...'),
-                        0,
-                        f"[THEME=cyan spinner=true]Sampling 0/{steps}"
-                    )
-                except Exception:
-                    pass
+                push_progress(
+                    None,
+                    translate('1フレームモード: サンプリング中...'),
+                    0,
+                    f"[THEME=cyan spinner=true]Sampling 0/{steps}"
+                )
                 
                 try:
                     generated_latents = sample_hunyuan(
@@ -4174,10 +4137,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
 
             # 緑の進捗バー 1
-            try:
-                push_progress(None, translate("Transformer Checking..."), 0, "[THEME=green]Transformer Checking...")
-            except Exception:
-                pass
+            push_progress(None, translate("Transformer Checking..."), 0, "[THEME=green]Transformer Checking...")
+
 
             # 生成完了後のメモリ最適化 - 軽量な処理に変更
             if not high_vram:
@@ -4185,19 +4146,15 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 print(translate("生成完了 - transformerをアンロード中..."))
 
                 # 緑の進捗バー 2a
-                try:
-                    push_progress(None, translate("Transformer offloading..."), 0, "[THEME=green]Transformer offloading...")
-                except Exception:
-                    pass
+                push_progress(None, translate("Transformer offloading..."), 0, "[THEME=green]Transformer offloading...")
+
 
                 # 元の方法に戻す - 軽量なオフロードで速度とメモリのバランスを取る
                 offload_model_from_device_for_memory_preservation(transformer, target_device=gpu, preserved_memory_gb=8)
 
                 # 緑の進捗バー 2b
-                try:
-                    push_progress(None, translate("Transformer offloading..."), 12, "[THEME=green]Transformer offloading...")
-                except Exception:
-                    pass
+                push_progress(None, translate("Transformer offloading..."), 12, "[THEME=green]Transformer offloading...")
+
 
                 # アンロード後のメモリ状態をログ
                 free_mem_gb_after_unload = get_cuda_free_memory_gb(gpu)
@@ -4219,10 +4176,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                         setup_vae_if_loaded()  # VAEの設定を適用
 
                 # 緑の進捗バー 2c
-                try:
-                    push_progress(None, translate("Transformer/VRAM offloading..."), 24, "[THEME=green]Transformer/VRAM offloading...")
-                except Exception:
-                    pass
+                push_progress(None, translate("Transformer/VRAM offloading..."), 24, "[THEME=green]Transformer/VRAM offloading...")
+
 
                 print(translate("VAEをGPUにロード中..."))
                 load_model_as_complete(vae, target_device=gpu)
@@ -4235,10 +4190,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 torch.cuda.empty_cache()
 
             # 緑の進捗バー 3
-            try:
-                push_progress(None, translate("Extract latents..."), 36, "[THEME=green]Extract latents...")
-            except Exception:
-                pass
+            push_progress(None, translate("Extract latents..."), 36, "[THEME=green]Extract latents...")
+
 
             # 実際に使用するラテントを抽出
             real_history_latents = history_latents[:, :, :total_generated_latent_frames, :, :]
@@ -4249,10 +4202,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
 
             # 緑の進捗バー 4
-            try:
-                push_progress(None, translate("Preparing to save image..."), 42, "[THEME=green]Preparing to save image...")
-            except Exception:
-                pass
+            push_progress(None, translate("Preparing to save image..."), 42, "[THEME=green]Preparing to save image...")
+
             
             # 1フレームモードではVAEデコードを行い、画像を直接保存
             try:
@@ -4308,10 +4259,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 }
 
                 # 緑の進捗バー 5
-                try:
-                    push_progress(None, translate("Saving image file..."), 42, "[THEME=green]Saving image file...")
-                except Exception:
-                    pass
+                push_progress(None, translate("Saving image file..."), 42, "[THEME=green]Saving image file...")
+
                 
                 # 画像として保存（メタデータ埋め込み）
                 from PIL import Image
@@ -4357,10 +4306,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
     print(translate("処理が完了しました"))
 
     # 緑の進捗バー 6
-    try:
-        push_progress(None, translate("Saved the generated image successfully"), 100, "[THEME=green]Saved the generated image successfully")
-    except Exception:
-        pass
+    push_progress(None, translate("Saved the generated image successfully"), 100, "[THEME=green]Saved the generated image successfully")
+
 
     
     # worker関数内では効果音を鳴らさない（バッチ処理全体の完了時のみ鳴らす）
