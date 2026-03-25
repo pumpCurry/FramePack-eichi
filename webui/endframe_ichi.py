@@ -1,6 +1,5 @@
 import os
 print(f"{os.path.basename(__file__)} : Starting....")
-from webui.eichi_utils.console import info
 
 import sys
 sys.path.append(os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './submodules/FramePack'))))
@@ -980,7 +979,9 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 # 画像がない場合は指定解像度の黒い画像を生成
                 img = np.zeros((resolution, resolution, 3), dtype=np.uint8)
                 height = width = resolution
-                return img, img, height, width
+                img_pt = torch.from_numpy(img).float() / 127.5 - 1
+                img_pt = img_pt.permute(2, 0, 1)[None, :, None]
+                return img, img_pt, height, width
 
             # TensorからNumPyへ変換する必要があれば行う
             if isinstance(img_path_or_array, torch.Tensor):
