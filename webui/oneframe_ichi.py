@@ -2467,7 +2467,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     print(translate("入力画像のコピーに失敗しました: {0}").format(e))
     
     # プログレスバーの初期化
-    push_progress(None, '', 0, 'Starting ...')
+    push_progress(None, '', 0, '[THEME=yellow]Starting ...')
 
     # --- 準備中（黄色）フック：最初に1枚だけ出す ---
     _prep_idx  = (progress_img_idx + 1) if isinstance(progress_img_idx, int) else 1
@@ -2718,7 +2718,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             except Exception:
                 pass
         _total_gb = _total / (1024**3) if _total else 0.0
-        push_progress(None, translate('LoRAキャッシュを読み込み中...'), 0, f'[BAR fg=#ff9800]LoRA Cache Loading: 0.00GB / {_total_gb:.2f}GB (0/{_n})')
+        push_progress(None, translate('LoRAキャッシュを読み込み中...'), 0, f'[THEME=orange]LoRA Cache Loading: 0.00GB / {_total_gb:.2f}GB (0/{_n})')
 
         # 次ジョブに向けたTransformer側の設定通知
         transformer_manager.set_next_settings(
@@ -2761,9 +2761,9 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         if _stats and "total" in _stats:
             _i  = int(_stats.get("count") or _n)
             _n2 = int(_stats.get("n") or _n)
-            push_progress(None, _msg_done, 100, f"[THEME=yellow spinner=true]{_msg_done} ({_i}/{_n2})")
+            push_progress(None, _msg_done, 100, f"[THEME=orange]{_msg_done} ({_i}/{_n2})")
         else:
-            push_progress(None, _msg_done, 100, f"[THEME=yellow spinner=true]{_msg_done} ({_n}/{_n})")
+            push_progress(None, _msg_done, 100, f"[THEME=orange]{_msg_done} ({_n}/{_n})")
 
 
         # -------- LoRA 設定 END ---------
@@ -2904,7 +2904,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     pass
 
         # 入力画像の処理
-        push_progress(None, '', 0, 'Image processing ...')
+        push_progress(None, '', 0, '[THEME=cyan]Image processing ...')
         
         # 入力画像がNoneの場合はデフォルトの黒い画像を作成
         if input_image is None:
@@ -2952,7 +2952,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         input_image_pt = input_image_pt.permute(2, 0, 1)[None, :, None]
         
         # VAE エンコーディング
-        push_progress(None, '', 0, 'VAE encoding ...')
+        push_progress(None, '', 17, '[THEME=cyan]VAE encoding ...')
         
         try:
             # エンコード前のメモリ状態を記録
@@ -3019,7 +3019,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         
         if use_reference_image and reference_image is not None:
             print(translate("着せ替え参照画像を処理します: {0}").format(reference_image))
-            push_progress(None, '', 0, 'Processing reference image ...')
+            push_progress(None, '', 33, '[THEME=cyan]Processing reference image ...')
             
             try:
                 # 参照画像をロード
@@ -3079,7 +3079,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 reference_encoder_output = None
         
         # CLIP Vision エンコーディング
-        push_progress(None, '', 0, 'CLIP Vision encoding ...')
+        push_progress(None, '', 50, '[THEME=cyan]CLIP Vision encoding ...')
         
         try:
             # 画像エンコーダのロード（未ロードの場合）
@@ -3119,7 +3119,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             raise e
         
         # テキストエンコーディング
-        push_progress(None, '', 0, 'Text encoding ...')
+        push_progress(None, '', 67, '[THEME=cyan]Text encoding ...')
         
         # イメージキューでカスタムプロンプトを使用しているかどうかを確認
         using_custom_prompt = False
@@ -3157,14 +3157,14 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         # 条件: 1) プロンプトキャッシュ機能が有効 2) まだメモリキャッシュが利用できない
         if use_prompt_cache and not use_cache:
 
-            push_progress(None, translate('キャッシュを読み込み中...'), 0, '[BAR fg=#ff9800]Cache Loading: 0.00GB / ?.?GB')
+            push_progress(None, translate('キャッシュを読み込み中...'), 80, '[THEME=cyan]Prompt cache loading ...')
 
             disk_cache = prompt_cache.load_from_cache(prompt, n_prompt)
             if disk_cache:
 
                 # 読み込み完了（サイズ既知でないため100%表示）
 
-                push_progress(None, translate('キャッシュの読み込みが完了しました'), 100, '[BAR fg=#ff9800]Cache Loading: 100%')
+                push_progress(None, translate('キャッシュの読み込みが完了しました'), 90, '[THEME=cyan]Prompt cache loaded')
 
                 # 既存のディスクキャッシュを利用
                 print(translate("ファイルキャッシュからテキストエンコード結果を読み込みます"))
@@ -3455,7 +3455,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                             except Exception:
                                 pass
                         _gb = _sz / (1024**3)
-                        push_progress(None, translate('キャッシュを書き出しています...'), 100, f'[BAR fg=#f44336 bg=#eee]Cache Writing: {_gb:.2f}GB / {_gb:.2f}GB')
+                        push_progress(None, translate('キャッシュを書き出しています...'), 100, f'[THEME=cyan]Prompt cache saving: {_gb:.2f}GB')
                     except Exception:
                         pass
 
@@ -3497,7 +3497,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             torch.cuda.empty_cache()
         
         # 1フレームモード用の設定
-        push_progress(None, '', 0, 'Start sampling ...')
+        push_progress(None, '', 0, '[THEME=blue]Start sampling ...')
 
         rnd = torch.Generator("cpu").manual_seed(seed)
         
@@ -3753,7 +3753,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
                 current_step = d['i'] + 1
                 percentage = int(100.0 * current_step / steps)
-                hint = f'Sampling {current_step}/{steps}'
+                hint = f'[THEME=blue]Sampling {current_step}/{steps}'
                 desc = translate('1フレームモード: サンプリング中...')
 
                 # 1) 「このステップで打ち切り」→ end を流してから例外で中断
@@ -4049,7 +4049,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     None,
                     translate('1フレームモード: サンプリング中...'),
                     0,
-                    f"[THEME=cyan spinner=true]Sampling 0/{steps}"
+                    f"[THEME=blue]Sampling 0/{steps}"
                 )
                 
                 try:
@@ -4146,14 +4146,14 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 print(translate("生成完了 - transformerをアンロード中..."))
 
                 # 緑の進捗バー 2a
-                push_progress(None, translate("Transformer offloading..."), 0, "[THEME=green]Transformer offloading...")
+                push_progress(None, translate("Transformer offloading..."), 10, "[THEME=green]Transformer offloading...")
 
 
                 # 元の方法に戻す - 軽量なオフロードで速度とメモリのバランスを取る
                 offload_model_from_device_for_memory_preservation(transformer, target_device=gpu, preserved_memory_gb=8)
 
                 # 緑の進捗バー 2b
-                push_progress(None, translate("Transformer offloading..."), 12, "[THEME=green]Transformer offloading...")
+                push_progress(None, translate("Transformer offloading..."), 20, "[THEME=green]Transformer offloading...")
 
 
                 # アンロード後のメモリ状態をログ
@@ -4176,7 +4176,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                         setup_vae_if_loaded()  # VAEの設定を適用
 
                 # 緑の進捗バー 2c
-                push_progress(None, translate("Transformer/VRAM offloading..."), 24, "[THEME=green]Transformer/VRAM offloading...")
+                push_progress(None, translate("Transformer/VRAM offloading..."), 35, "[THEME=green]Transformer/VRAM offloading...")
 
 
                 print(translate("VAEをGPUにロード中..."))
@@ -4190,7 +4190,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 torch.cuda.empty_cache()
 
             # 緑の進捗バー 3
-            push_progress(None, translate("Extract latents..."), 36, "[THEME=green]Extract latents...")
+            push_progress(None, translate("Extract latents..."), 50, "[THEME=green]Extract latents...")
 
 
             # 実際に使用するラテントを抽出
@@ -4202,7 +4202,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
 
             # 緑の進捗バー 4
-            push_progress(None, translate("Preparing to save image..."), 42, "[THEME=green]Preparing to save image...")
+            push_progress(None, translate("Preparing to save image..."), 65, "[THEME=green]Preparing to save image...")
 
             
             # 1フレームモードではVAEデコードを行い、画像を直接保存
@@ -4259,7 +4259,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 }
 
                 # 緑の進捗バー 5
-                push_progress(None, translate("Saving image file..."), 42, "[THEME=green]Saving image file...")
+                push_progress(None, translate("Saving image file..."), 80, "[THEME=green]Saving image file...")
 
                 
                 # 画像として保存（メタデータ埋め込み）
