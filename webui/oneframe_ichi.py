@@ -325,114 +325,25 @@ class _UserStop(Exception):
     pass
 
 
-class FanoutQueue:
-    """履歴を再生できるスレッドセーフなファンアウトキュー"""
-
-    def __init__(self, maxlen: int = 200, maxsize: int = 64):
-        self._history = deque(maxlen=maxlen)
-        self._subs = weakref.WeakSet()
-        self._lock = threading.Lock()
-        self._maxsize = maxsize
-        self._closed = False
-
-    def publish(self, item) -> None:
-        """要素を全ての購読者に配信し履歴に保存する"""
-        with self._lock:
-            if self._closed:
-                return
-            # 履歴へ保存
-            self._history.append(item)
-
-            # ★スナップショット・タップ更新：購読者ゼロの時間帯でも last_* を更新しておく
-            #   これにより、新規タブが「状況を再同期」を押した直後の 1 フレームが空/古い になりにくくなる
-            try:
-                _snapshot_tap_update(item)
-            except Exception:
-                pass
-
-            # 購読者へ配信（満杯なら古い1件を捨てて最新を入れる＝前進優先）
-            for q in list(self._subs):
-                try:
-                    q.put_nowait(item)
-                except queue.Full:
-                    # 満杯なら古い1件を捨てて最新を入れる（前進優先）
-                    try:
-                        _ = q.get_nowait()
-                        q.put_nowait(item)
-                    except Exception:
-                        pass
-
-    def subscribe(self) -> queue.Queue:
-        """キューに購読し既存の履歴を即座に受け取る"""
-        q: queue.Queue = queue.Queue(maxsize=self._maxsize)
-        with self._lock:
-            for item in list(self._history):
-                try:
-                    q.put_nowait(item)
-                except queue.Full:
-                    break
-            self._subs.add(q)
-            if self._closed:
-                try:
-                    q.put_nowait(BUS_END_SENTINEL)
-                except queue.Full:
-                    _ = q.get_nowait()
-                    q.put_nowait(BUS_END_SENTINEL)
-        return q
-
-    def unsubscribe(self, q: queue.Queue) -> None:
-        with self._lock:
-            try:
-                self._subs.discard(q)
-            except Exception:
-                pass
-
-    def clear(self) -> None:
-        """履歴と全ての購読キューをクリアする"""
-        with self._lock:
-            self._history.clear()
-            for q in list(self._subs):
-                while not q.empty():
-                    try:
-                        q.get_nowait()
-                    except queue.Empty:
-                        break
-
-    def close(self) -> None:
-        """全ての購読キューを閉じて削除する。センチネルを必ず送信する。"""
-        with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            for q in list(self._subs):
-                # キューをドレインせずに必ずセンチネルを入れる
-                try:
-                    q.put_nowait(BUS_END_SENTINEL)
-                except queue.Full:
-                    try:
-                        _ = q.get_nowait()
-                        q.put_nowait(BUS_END_SENTINEL)
-                    except Exception:
-                        pass
-            self._subs.clear()
+# --- ブラウザ再接続コア: 共通モジュールから読み込み ---
+from eichi_utils.resync_core import (          # noqa: E402
+    FanoutQueue, JobContext, BUS_END_SENTINEL,
+    alloc_ui_session_id as _alloc_ui_session_id_core,
+    RESYNC_MIN_INTERVAL_MS, RESYNC_CTX_LINGER_SEC,
+)
 
 
 def _snapshot_tap_update(item):
-    """
-    イベントバスに流れた内容を last_* 系へ“写し取る”だけの軽量更新。
-    - UI の購読者がゼロの時間帯でも、get_state_snapshot() の素材となる last_* が最新化される。
-    - イベントの想定形：
-        ('progress', (preview_image, progress_desc:str, progress_bar_html:str))
-        ('file', '/path/to/output.png')
-        ('seed', 123456789)
-        ('end', None)  # end はここでは特に更新不要
-    """
+    “””
+    イベントバスに流れた内容を last_* 系へ”写し取る”だけの軽量更新。
+    oneframe固有のグローバル変数に依存するため、ここにローカル定義として残す。
+    FanoutQueue の on_publish_tap コールバックとして渡される。
+    “””
     try:
         kind, payload = item
     except Exception:
         return
 
-    # グローバル・スナップショット素材へ反映
     global last_preview_image, last_progress_desc, last_progress_bar
     global last_output_filename, current_seed
 
@@ -459,42 +370,6 @@ def _snapshot_tap_update(item):
             current_seed = int(payload)
         except Exception:
             pass
-    # 'end' はここでは処理不要
-
-
-class JobContext:
-    """ファンアウトキューなどジョブ固有の状態を保持するクラス"""
-
-    def __init__(self):
-        self.bus = FanoutQueue()
-        self.done = threading.Event()
-        # 停止リクエストはジョブ単位で保持して、UI側がグローバルを
-        # クリアしてもバックグラウンドスレッドから参照できるようにする
-        self.stop_mode = None  # "image" or "step" - 現在リクエスト中の停止モード
-        # stop_mode と _sent_end への同時アクセスを防ぐロック
-        # UI のトグルとサンプラのコールバックの競合を避ける
-        self._stop_lock = threading.Lock()
-
-    def should_stop_step(self) -> bool:
-        """
-        中断モードが「step」で、かつサンプラがまだ'end'を送っていない場合にTrueを返す。
-        判定ロジックをヘルパー化して重複を避ける。
-
-        UIからの同時更新を防ぐためロックを取得する。
-        ロックしないとstop_modeや_sent_endが判定中に変化する恐れがある。
-        """
-        with self._stop_lock:
-            return self.stop_mode == "step" and not getattr(self, "_sent_end", False)
-
-    def reset_stop_mode(self) -> None:
-        """
-        ジョブ開始時に呼び出し、stop_modeと内部のend送信フラグをリセットする。
-        これにより古い状態が次回の実行に影響しない。
-        """
-        with self._stop_lock:
-            self.stop_mode = None
-            # 新しいジョブではendマーカーを一度だけ送れるようにする
-            self._sent_end = False
 
 
 # ----------------- globals -----------------
@@ -931,7 +806,7 @@ def get_state_snapshot():
 def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
     """独立したコンテキストを持つ新しいジョブを生成・開始する"""
     global generation_active, cur_job
-    ctx = JobContext()
+    ctx = JobContext(on_publish_tap=_snapshot_tap_update)
 
     try:
         # owner(生成開始を押したタブ)のSIDを保存

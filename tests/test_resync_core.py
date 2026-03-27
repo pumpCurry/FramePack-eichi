@@ -1,0 +1,146 @@
+"""eichi_utils.resync_core の単体テスト"""
+
+import os
+import importlib.util
+import threading
+import time
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+spec = importlib.util.spec_from_file_location(
+    "resync_core",
+    os.path.join(ROOT, "webui", "eichi_utils", "resync_core.py"),
+)
+rc = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rc)
+
+FanoutQueue = rc.FanoutQueue
+JobContext = rc.JobContext
+BUS_END_SENTINEL = rc.BUS_END_SENTINEL
+
+
+class TestFanoutQueue:
+    def test_publish_subscribe(self):
+        fq = FanoutQueue()
+        q = fq.subscribe()
+        fq.publish(("progress", "test"))
+        assert q.get_nowait() == ("progress", "test")
+
+    def test_history_replay(self):
+        fq = FanoutQueue()
+        fq.publish(("a", 1))
+        fq.publish(("b", 2))
+        # Late subscriber gets history
+        q = fq.subscribe()
+        assert q.get_nowait() == ("a", 1)
+        assert q.get_nowait() == ("b", 2)
+
+    def test_close_sends_sentinel(self):
+        fq = FanoutQueue()
+        q = fq.subscribe()
+        fq.close()
+        assert q.get_nowait() == BUS_END_SENTINEL
+
+    def test_publish_after_close_ignored(self):
+        fq = FanoutQueue()
+        q = fq.subscribe()
+        fq.close()
+        fq.publish(("should", "ignore"))
+        # Only sentinel in queue
+        items = []
+        while not q.empty():
+            items.append(q.get_nowait())
+        assert items == [BUS_END_SENTINEL]
+
+    def test_on_publish_tap(self):
+        captured = []
+        fq = FanoutQueue(on_publish_tap=lambda item: captured.append(item))
+        fq.publish(("x", 1))
+        fq.publish(("y", 2))
+        assert len(captured) == 2
+        assert captured[0] == ("x", 1)
+
+    def test_unsubscribe(self):
+        fq = FanoutQueue()
+        q = fq.subscribe()
+        fq.unsubscribe(q)
+        fq.publish(("after", "unsub"))
+        assert q.empty()
+
+    def test_clear(self):
+        fq = FanoutQueue()
+        fq.publish(("a", 1))
+        fq.clear()
+        q = fq.subscribe()
+        assert q.empty()
+
+    def test_maxlen_history(self):
+        fq = FanoutQueue(maxlen=3)
+        for i in range(10):
+            fq.publish(("item", i))
+        q = fq.subscribe()
+        items = []
+        while not q.empty():
+            items.append(q.get_nowait())
+        assert len(items) == 3
+        assert items[0] == ("item", 7)  # oldest in ring buffer
+
+    def test_multi_subscriber(self):
+        fq = FanoutQueue()
+        q1 = fq.subscribe()
+        q2 = fq.subscribe()
+        fq.publish(("test", 1))
+        assert q1.get_nowait() == ("test", 1)
+        assert q2.get_nowait() == ("test", 1)
+
+
+class TestJobContext:
+    def test_default_state(self):
+        ctx = JobContext()
+        assert ctx.stop_mode is None
+        assert ctx.should_stop_step() is False
+        assert ctx.owner_sid is None
+
+    def test_stop_step(self):
+        ctx = JobContext()
+        ctx.stop_mode = "step"
+        assert ctx.should_stop_step() is True
+        ctx._sent_end = True
+        assert ctx.should_stop_step() is False
+
+    def test_reset_stop_mode(self):
+        ctx = JobContext()
+        ctx.stop_mode = "image"
+        ctx._sent_end = True
+        ctx.reset_stop_mode()
+        assert ctx.stop_mode is None
+        assert ctx._sent_end is False
+
+    def test_bus_is_fanout_queue(self):
+        ctx = JobContext()
+        assert isinstance(ctx.bus, FanoutQueue)
+
+    def test_on_publish_tap_wired(self):
+        captured = []
+        ctx = JobContext(on_publish_tap=lambda item: captured.append(item))
+        ctx.bus.publish(("test", 1))
+        assert len(captured) == 1
+
+
+class TestAllocSessionId:
+    def test_returns_hex_string(self):
+        sid = rc.alloc_ui_session_id()
+        assert isinstance(sid, str)
+        assert len(sid) == 32  # uuid4 hex
+
+    def test_unique(self):
+        sid1 = rc.alloc_ui_session_id()
+        sid2 = rc.alloc_ui_session_id()
+        assert sid1 != sid2
+
+
+class TestSentinel:
+    def test_sentinel_value(self):
+        assert BUS_END_SENTINEL == (None, None)
+
+    def test_sentinel_is_tuple(self):
+        assert isinstance(BUS_END_SENTINEL, tuple)
