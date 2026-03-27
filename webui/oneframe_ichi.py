@@ -164,21 +164,10 @@ def _get_mem_snapshot():
         "cuda": {"free_gb": float|None, "total_gb": float|None, "allocated_gb": float|None, "reserved_gb": float|None}
       }
     """
-    host_avail_gb, host_total_gb = None, None
-    try:
-        with open("/proc/meminfo", "r") as f:
-            kv = {}
-            for line in f:
-                if ":" in line:
-                    k, rest = line.split(":", 1)
-                    val = rest.strip().split()[0]
-                    kv[k.strip()] = int(val) * 1024  # kB->B
-        if "MemAvailable" in kv:
-            host_avail_gb = _bytes_to_gb(kv["MemAvailable"])
-        if "MemTotal" in kv:
-            host_total_gb = _bytes_to_gb(kv["MemTotal"])
-    except Exception:
-        pass
+    from eichi_utils.host_memory import host_mem_snapshot as _hms
+    _snap = _hms()
+    host_avail_gb = _snap["avail_gb"]
+    host_total_gb = _snap["total_gb"]
 
     c = _cuda_mem_info()
     cuda = {
@@ -631,19 +620,9 @@ def _cleanup_cuda(reason):
     except Exception as e:
         print(translate("メモリクリーンアップで例外が発生しました: {0}").format(e))
 def _host_mem_available_gb():
-    """ホストRAMの空き容量(GB)を /proc/meminfo から概算。取れなければ None。"""
-    try:
-        with open("/proc/meminfo", "r") as f:
-            kv = {}
-            for line in f:
-                if ":" in line:
-                    k, rest = line.split(":", 1)
-                    kv[k.strip()] = int(rest.strip().split()[0])  # kB
-        if "MemAvailable" in kv:
-            return kv["MemAvailable"] / (1024.0 * 1024.0)
-    except Exception:
-        pass
-    return None
+    """ホストRAMの空き容量(GB)。psutil→/proc/meminfo→Noneのフォールバック。"""
+    from eichi_utils.host_memory import host_mem_available_gb
+    return host_mem_available_gb()
 
 def _pre_gc_before_next_lora(next_cache_path: "str|None"):
     """
@@ -2434,11 +2413,9 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         global current_reuse_optimized_dict
         reuse_flag = bool(current_reuse_optimized_dict)
 
-        # LoRA キャッシュ利用時は FP8 最適化を再実行しない。
-        # それ以外では UI の fp8_optimization に従う。
-        fp8_enabled_flag = bool(fp8_optimization) and not lora_cache_enabled
-        if bool(fp8_optimization) and lora_cache_enabled:
-            print(translate("LoRAキャッシュが有効なため、FP8最適化は無効化されました。両方を使用するにはLoRAキャッシュをOFFにしてください。"))
+        # FP8 最適化: キャッシュキーに fp8 フラグが含まれるため、
+        # FP8 ON/OFF でキャッシュは自動的に分離される。共存可能。
+        fp8_enabled_flag = bool(fp8_optimization)
 
         # 「LoRAキャッシュ」または「最適化辞書の再利用」のどちらかが有効なら分割を抑止
         force_dict_split_flag = not (lora_cache_enabled or reuse_flag)
@@ -5505,6 +5482,11 @@ if saved_app_settings:
         lora_state_cache.set_cache_enabled,
         saved_app_settings.get("lora_cache", False),
     )
+    # キャッシュ保存形式の適用
+    _cache_fmt = saved_app_settings.get("cache_format", "safetensors")
+    lora_state_cache.set_preferred_format(_cache_fmt)
+    from eichi_utils import prompt_cache as _pc_startup
+    _pc_startup.set_preferred_format(_cache_fmt)
 
 # 起動時デフォルトプロンプトをロード
 startup_prompt = spinner_while_running(
@@ -5851,6 +5833,37 @@ with block:
                     return None
 
                 reuse_optimized_dict_checkbox.change(fn=update_reuse, inputs=[reuse_optimized_dict_checkbox], outputs=[])
+
+            # --- キャッシュ管理パネル ---
+            from eichi_utils import cache_manager_ui as _cmu
+            _cache_panel = _cmu.build_cache_panel(translate)
+
+            _cache_outputs = [
+                _cache_panel["lora_size_md"],
+                _cache_panel["prompt_size_md"],
+                _cache_panel["status_md"],
+            ]
+            _cache_panel["refresh_btn"].click(
+                fn=_cmu.make_refresh_handler(translate),
+                inputs=[], outputs=_cache_outputs,
+            )
+            _cache_panel["clear_lora_btn"].click(
+                fn=_cmu.make_clear_lora_handler(translate),
+                inputs=[], outputs=_cache_outputs,
+            )
+            _cache_panel["clear_prompt_btn"].click(
+                fn=_cmu.make_clear_prompt_handler(translate),
+                inputs=[], outputs=_cache_outputs,
+            )
+            _cache_panel["clear_all_btn"].click(
+                fn=_cmu.make_clear_all_handler(translate),
+                inputs=[], outputs=_cache_outputs,
+            )
+            _cache_panel["cache_format_radio"].change(
+                fn=_cmu.make_format_change_handler(translate),
+                inputs=[_cache_panel["cache_format_radio"]],
+                outputs=[_cache_panel["status_md"]],
+            )
 
             # メタデータ抽出結果表示用（非表示）
             extracted_info = gr.Markdown(visible=False)

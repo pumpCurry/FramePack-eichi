@@ -248,6 +248,9 @@ class TransformerManager:
 
                 # 状態辞書のファイルを取得
                 model_files = self._find_model_files(model_path)
+                # peek_next_cache_path が正確なキーを生成するために記憶
+                from eichi_utils import lora_state_cache as _lsc
+                _lsc.register_last_model_files(model_files)
                 if len(model_files) == 0:
                     # モデルファイルが見つからない場合はエラーをスロー （アプリ起動時にdownload&preloadしているはず）
                     raise FileNotFoundError(translate("モデルファイルが見つかりませんでした。"))
