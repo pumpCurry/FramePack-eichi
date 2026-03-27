@@ -236,6 +236,9 @@ def get_default_app_settings(current_lang="ja"):
 
         # 生成終了時に Transformer を破棄しない機能
         "reuse_optimized_dict": False,
+
+        # キャッシュ保存形式 ("safetensors" or "pt")
+        "cache_format": "safetensors",
     }
 
 def get_default_app_settings_f1(current_lang="ja"):
@@ -280,6 +283,9 @@ def get_default_app_settings_f1(current_lang="ja"):
 
         # 生成終了時に Transformer を破棄しない機能
         "reuse_optimized_dict": False,
+
+        # キャッシュ保存形式 ("safetensors" or "pt")
+        "cache_format": "safetensors",
     }
 
 def get_default_app_settings_oichi():

@@ -116,6 +116,11 @@ from eichi_utils import lora_state_cache
 saved_app_settings = load_app_settings_f1()
 if saved_app_settings:
     lora_state_cache.set_cache_enabled(saved_app_settings.get("lora_cache", False))
+    # キャッシュ保存形式の適用
+    _cache_fmt = saved_app_settings.get("cache_format", "safetensors")
+    lora_state_cache.set_preferred_format(_cache_fmt)
+    from eichi_utils import prompt_cache as _pc_startup
+    _pc_startup.set_preferred_format(_cache_fmt)
 
 # 読み込んだ設定をログに出力
 if saved_app_settings:
@@ -5098,6 +5103,36 @@ with block:
 
             lora_cache_checkbox.change(
                 fn=update_lora_cache, inputs=[lora_cache_checkbox], outputs=[]
+            )
+
+            # --- キャッシュ管理パネル ---
+            from eichi_utils import cache_manager_ui as _cmu
+            _cache_panel = _cmu.build_cache_panel(translate)
+            _cache_outputs = [
+                _cache_panel["lora_size_md"],
+                _cache_panel["prompt_size_md"],
+                _cache_panel["status_md"],
+            ]
+            _cache_panel["refresh_btn"].click(
+                fn=_cmu.make_refresh_handler(translate),
+                inputs=[], outputs=_cache_outputs,
+            )
+            _cache_panel["clear_lora_btn"].click(
+                fn=_cmu.make_clear_lora_handler(translate),
+                inputs=[], outputs=_cache_outputs,
+            )
+            _cache_panel["clear_prompt_btn"].click(
+                fn=_cmu.make_clear_prompt_handler(translate),
+                inputs=[], outputs=_cache_outputs,
+            )
+            _cache_panel["clear_all_btn"].click(
+                fn=_cmu.make_clear_all_handler(translate),
+                inputs=[], outputs=_cache_outputs,
+            )
+            _cache_panel["cache_format_radio"].change(
+                fn=_cmu.make_format_change_handler(translate),
+                inputs=[_cache_panel["cache_format_radio"]],
+                outputs=[_cache_panel["status_md"]],
             )
 
             # セクション入力用のリストを初期化
