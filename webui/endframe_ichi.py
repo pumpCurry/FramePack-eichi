@@ -1812,11 +1812,15 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 generated_latents = torch.cat([start_latent.to(generated_latents), generated_latents], dim=2)
 
             total_generated_latent_frames += int(generated_latents.shape[2])
-            history_latents = torch.cat([generated_latents.to(history_latents), history_latents], dim=2)
+            # Risk-3軽減: generated_latentsをCPUに移動してからcat、直後に参照を切る
+            _gen_cpu = generated_latents.to(history_latents)
+            history_latents = torch.cat([_gen_cpu, history_latents], dim=2)
+            del _gen_cpu, generated_latents  # 旧テンソルの即時解放を促進
 
             if not high_vram:
-                # 減圧時に使用するGPUメモリ値も明示的に浮動小数点に設定
-                preserved_memory_offload = 8.0  # こちらは固定値のまま
+                # Risk-2修正: offload側もUIスライダー値に連動 (旧: 8.0固定)
+                # VAEロード用の空きを確保するため、load側の値+2GBを使用
+                preserved_memory_offload = (float(gpu_memory_preservation) if gpu_memory_preservation is not None else 6.0) + 2.0
                 print(translate('Offloading transformer with memory preservation: {0} GB').format(preserved_memory_offload))
                 offload_model_from_device_for_memory_preservation(transformer, target_device=gpu, preserved_memory_gb=preserved_memory_offload)
                 load_model_as_complete(vae, target_device=gpu)
@@ -2279,9 +2283,10 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                             save_bcthw_as_mp4(history_pixels, original_output_filename, fps=30, crf=mp4_crf)
                             print(translate("元の動画を保存しました: {original_output_filename}").format(original_output_filename=original_output_filename))
 
-                            # 元データのコピーを取得
-                            combined_history_latents = real_history_latents.clone()
-                            combined_history_pixels = history_pixels.clone() if history_pixels is not None else None
+                            # Risk-6修正: cloneせず参照で開始。catで新テンソルが作られるため元は変更されない。
+                            # 旧: clone()×2で history_latents/pixels が一時的に2倍のメモリを消費していた
+                            combined_history_latents = real_history_latents
+                            combined_history_pixels = history_pixels
 
                             # 各チャンクの処理前に明示的にメモリ解放
                             if torch.cuda.is_available():
