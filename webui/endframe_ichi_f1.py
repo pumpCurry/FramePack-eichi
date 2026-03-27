@@ -2727,6 +2727,46 @@ def get_image_queue_files():
     image_queue_files = image_files
     return image_files
 
+
+def cleanup_generation_resources():
+    """生成リソースの完全クリーンアップ (Risk-7修正: f1にも追加)
+
+    worker()終了時に必ず呼び出し、以下を確実に解放する:
+    - _INMEM_CACHE (LoRA state dictキャッシュ、12-20GB)
+    - CUDAメモリ
+    - Pythonガベージ
+    キュー連続実行時のメモリ蓄積を防止する。
+    """
+    import gc
+
+    # reuse_optimized_dictが有効ならキャッシュは温存
+    _reuse = False
+    try:
+        from eichi_utils import settings_manager as _sm
+        _load = getattr(_sm, 'load_app_settings_f1', None)
+        if _load:
+            _reuse = bool(_load().get('reuse_optimized_dict', False))
+    except Exception:
+        pass
+    if os.environ.get('FRAMEPACK_REUSE_FP8', '0') in ('1', 'true', 'TRUE'):
+        _reuse = True
+
+    if not _reuse:
+        try:
+            from eichi_utils import lora_state_cache as _lsc
+            _lsc._inmem_clear()
+        except Exception:
+            pass
+
+    # CUDA メモリクリア
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+    gc.collect()
+    print(translate("生成リソースをクリーンアップしました"))
+
+
 @torch.no_grad()
 @log_and_continue("worker error")
 def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, image_strength=1.0, keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, frame_save_mode=None):
@@ -3260,6 +3300,13 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
         # セクション順次処理
         for i_section in range(total_sections):
+            # Risk-4修正: セクション間で中間テンソルを解放
+            if i_section > 0:
+                import gc as _gc_sec
+                _gc_sec.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
             # 先に変数を定義
             is_first_section = i_section == 0
 
@@ -4015,6 +4062,10 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             unload_complete_models(
                 text_encoder, text_encoder_2, image_encoder, vae, transformer
             )
+
+    # Risk-7修正: 生成リソースを必ずクリーンアップ
+    # キュー連続実行時の_INMEM_CACHE蓄積を防止
+    cleanup_generation_resources()
 
     stream.output_queue.push(('end', None))
     return

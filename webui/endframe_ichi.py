@@ -1563,6 +1563,14 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
             raise e
 
         for i_section, latent_padding in enumerate(latent_paddings):
+            # Risk-4修正: セクション間で中間テンソルを解放
+            # 前セクションの generated_latents, clean_latents 等がGCされずに滞留するのを防ぐ
+            if i_section > 0:
+                import gc as _gc_sec
+                _gc_sec.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
             # 先に変数を定義
             is_first_section = i_section == 0
 
