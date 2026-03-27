@@ -598,7 +598,7 @@ def set_generation_stopped(stopped=True):
 
 @torch.no_grad()
 @log_and_continue("worker error")
-def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, alarm_on_completion=False):
+def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, alarm_on_completion=False, use_prompt_cache=True):
     # グローバル変数を使用
     global vae_cache_enabled, current_prompt, generation_stopped, current_batch_data, transformer_model
     
@@ -1072,52 +1072,95 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 image_encoder, vae
             )
 
-        # Text encoding
+        # Text encoding (with prompt cache support)
 
         push_progress(None, '', 0, f'[THEME=cyan]{translate("Text encoding ...")}')
 
-        if not high_vram:
-            fake_diffusers_current_device(text_encoder, gpu)  # since we only encode one text - that is one model move and one encode, offload is same time consumption since it is also one load and one encode.
-            load_model_as_complete(text_encoder_2, target_device=gpu)
+        # プロンプトキャッシュ: ディスクからの読み込みを試行
+        _prompt_cache_hit = False
+        if use_prompt_cache:
+            try:
+                from eichi_utils import prompt_cache
+                disk_cache = prompt_cache.load_from_cache(current_prompt, n_prompt)
+                if disk_cache is not None:
+                    llama_vec = disk_cache['llama_vec']
+                    llama_vec_n = disk_cache['llama_vec_n']
+                    clip_l_pooler = disk_cache['clip_l_pooler']
+                    clip_l_pooler_n = disk_cache['clip_l_pooler_n']
+                    llama_attention_mask = disk_cache['llama_attention_mask']
+                    llama_attention_mask_n = disk_cache['llama_attention_mask_n']
+                    _prompt_cache_hit = True
+                    print(translate("プロンプトキャッシュからエンコード結果を読み込みました"))
+            except Exception as e:
+                print(translate("プロンプトキャッシュ読み込み失敗: {0}").format(e))
+                _prompt_cache_hit = False
 
-        # プロンプトキューから選択されたプロンプトを使用
-        # フラグが設定されていなくてもcurrent_promptを使うことで、
-        # バッチ処理中で既にプロンプトが上書きされていた場合でも対応
-        llama_vec, clip_l_pooler = encode_prompt_conds(current_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
+        if not _prompt_cache_hit:
+            # キャッシュミス: text_encoderをロードしてエンコード
+            if not high_vram:
+                fake_diffusers_current_device(text_encoder, gpu)
+                load_model_as_complete(text_encoder_2, target_device=gpu)
 
-        if cfg == 1:
-            llama_vec_n, clip_l_pooler_n = torch.zeros_like(llama_vec), torch.zeros_like(clip_l_pooler)
-        else:
-            llama_vec_n, clip_l_pooler_n = encode_prompt_conds(n_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
+            llama_vec, clip_l_pooler = encode_prompt_conds(current_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
 
-        llama_vec, llama_attention_mask = crop_or_pad_yield_mask(llama_vec, length=512)
-        llama_vec_n, llama_attention_mask_n = crop_or_pad_yield_mask(llama_vec_n, length=512)
+            if cfg == 1:
+                llama_vec_n, clip_l_pooler_n = torch.zeros_like(llama_vec), torch.zeros_like(clip_l_pooler)
+            else:
+                llama_vec_n, clip_l_pooler_n = encode_prompt_conds(n_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
+
+            llama_vec, llama_attention_mask = crop_or_pad_yield_mask(llama_vec, length=512)
+            llama_vec_n, llama_attention_mask_n = crop_or_pad_yield_mask(llama_vec_n, length=512)
+
+            # プロンプトキャッシュ: ディスクに保存
+            if use_prompt_cache:
+                try:
+                    from eichi_utils import prompt_cache
+                    prompt_cache.save_to_cache(current_prompt, n_prompt, {
+                        'llama_vec': llama_vec.cpu(),
+                        'llama_vec_n': llama_vec_n.cpu(),
+                        'clip_l_pooler': clip_l_pooler.cpu(),
+                        'clip_l_pooler_n': clip_l_pooler_n.cpu(),
+                        'llama_attention_mask': llama_attention_mask.cpu(),
+                        'llama_attention_mask_n': llama_attention_mask_n.cpu(),
+                    })
+                except Exception as e:
+                    print(translate("プロンプトキャッシュ保存失敗: {0}").format(e))
 
         # セクションプロンプトを事前にエンコードしておく
+        # (セクション別プロンプトはtext_encoderが必要。キャッシュヒット時でもsection_mapがあれば
+        #  text_encoderを使う必要がある)
         section_prompt_embeddings = {}
-        if section_map:
+        _need_section_encoding = section_map and any(
+            sp and sp.strip() for _, (_, sp) in section_map.items()
+        )
+        if _need_section_encoding:
+            # キャッシュヒット時でもtext_encoderが必要
+            if _prompt_cache_hit and not high_vram:
+                if not text_encoder_manager.ensure_text_encoder_state():
+                    raise Exception(translate("text_encoderの初期化に失敗しました"))
+                text_encoder, text_encoder_2 = text_encoder_manager.get_text_encoders()
+                fake_diffusers_current_device(text_encoder, gpu)
+                load_model_as_complete(text_encoder_2, target_device=gpu)
+
             print(translate("セクションプロンプトを事前にエンコードしています..."))
             for sec_num, (_, sec_prompt) in section_map.items():
                 if sec_prompt and sec_prompt.strip():
                     try:
-                        # セクションプロンプトをエンコード
                         print(translate("セクション{0}の専用プロンプトを事前エンコード: {1}...").format(sec_num, sec_prompt[:30]))
                         sec_llama_vec, sec_clip_l_pooler = encode_prompt_conds(sec_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
                         sec_llama_vec, sec_llama_attention_mask = crop_or_pad_yield_mask(sec_llama_vec, length=512)
 
-                        # データ型を明示的にメインプロンプトと合わせる
                         sec_llama_vec = sec_llama_vec.to(dtype=llama_vec.dtype, device=llama_vec.device)
                         sec_clip_l_pooler = sec_clip_l_pooler.to(dtype=clip_l_pooler.dtype, device=clip_l_pooler.device)
                         sec_llama_attention_mask = sec_llama_attention_mask.to(dtype=llama_attention_mask.dtype, device=llama_attention_mask.device)
 
-                        # 結果を保存
                         section_prompt_embeddings[sec_num] = (sec_llama_vec, sec_clip_l_pooler, sec_llama_attention_mask)
                         print(translate("セクション{0}のプロンプトエンコード完了").format(sec_num))
                     except Exception as e:
                         print(translate("セクション{0}のプロンプトエンコードに失敗: {1}").format(sec_num, e))
                         traceback.print_exc()
 
-        # これ以降の処理は text_encoder, text_encoder_2 は不要なので、メモリ解放してしまって構わない
+        # これ以降の処理は text_encoder, text_encoder_2 は不要なので、メモリ解放
         if not high_vram:
             text_encoder, text_encoder_2 = None, None
             text_encoder_manager.dispose_text_encoders()
@@ -2767,7 +2810,7 @@ def validate_images(input_image, section_settings, length_radio=None, frame_size
     error_bar = make_progress_bar_html2(100, f'[THEME=red]{translate("画像がありません")}')
     return False, error_html + error_bar
 
-def process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, save_settings_on_start=False, alarm_on_completion=False):
+def process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, save_settings_on_start=False, alarm_on_completion=False, use_prompt_cache=True):
     # プロセス関数の最初でVAEキャッシュ設定を確認
     global stream
     global batch_stopped
@@ -3322,7 +3365,8 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             use_vae_cache,  # VAEキャッシュ設定
             bool(use_queue),  # キュー使用フラグ - 確実にブール値として渡す
             prompt_queue_file,  # プロンプトキューファイル
-            actual_alarm_value  # アラーム設定（値のみ）
+            actual_alarm_value,  # アラーム設定（値のみ）
+            use_prompt_cache  # プロンプトキャッシュ設定
         )
 
         # 現在のバッチの出力ファイル名
@@ -5803,6 +5847,14 @@ with block:
             # チェックボックスの状態が変更されたときにグローバル変数を更新
             use_vae_cache.change(fn=update_vae_cache_state, inputs=[use_vae_cache], outputs=[])
 
+            # プロンプトキャッシュ設定
+            use_prompt_cache = gr.Checkbox(
+                label=translate('Use Prompt Cache'),
+                value=saved_app_settings.get("use_prompt_cache", True) if saved_app_settings else True,
+                info=translate('Cache encoded prompts to disk for reuse after restart.'),
+                elem_classes="saveable-setting"
+            )
+
             # Use Random Seedの初期値
             use_random_seed_default = True
             seed_default = random.randint(0, 2**32 - 1) if use_random_seed_default else 1
@@ -6329,6 +6381,7 @@ with block:
                 use_vae_cache_val,
                 save_settings_on_start_val,
                 alarm_on_completion_val,
+                use_prompt_cache_val,
                 # ログ設定項目
                 log_enabled_val,
                 log_folder_val
@@ -6363,7 +6416,9 @@ with block:
                     # 自動保存設定
                     "save_settings_on_start": save_settings_on_start_val,
                     # アラーム設定
-                    "alarm_on_completion": alarm_on_completion_val
+                    "alarm_on_completion": alarm_on_completion_val,
+                    # プロンプトキャッシュ設定
+                    "use_prompt_cache": use_prompt_cache_val
                 }
                 
                 # 設定を保存
@@ -6504,6 +6559,7 @@ with block:
                     use_vae_cache,
                     save_settings_on_start,
                     alarm_on_completion,
+                    use_prompt_cache,
                     log_enabled,
                     log_folder
                 ],
@@ -6542,7 +6598,7 @@ with block:
             # プロンプト管理パネル（右カラムから左カラムに移動済み）
 
     # 実行前のバリデーション関数
-    def validate_and_process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, save_settings_on_start=False, alarm_on_completion=False):
+    def validate_and_process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, end_frame=None, end_frame_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, section_settings=None, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, frame_save_mode="保存しない", use_vae_cache=False, use_queue=False, prompt_queue_file=None, save_settings_on_start=False, alarm_on_completion=False, use_prompt_cache=True):
         """入力画像または最後のキーフレーム画像のいずれかが有効かどうかを確認し、問題がなければ処理を実行する"""
 
         # 前回の進捗情報をリセットし、常に最初から開始されるようにする
@@ -6684,7 +6740,9 @@ with block:
                 # 自動保存設定
                 "save_settings_on_start": actual_save_settings_value,
                 # アラーム設定
-                "alarm_on_completion": actual_alarm_value
+                "alarm_on_completion": actual_alarm_value,
+                # プロンプトキャッシュ設定
+                "use_prompt_cache": use_prompt_cache
             }
             
             # 設定を保存
@@ -6865,7 +6923,8 @@ with block:
                 use_queue=bool(queue_enabled),  # 確実にブール値として渡す
                 prompt_queue_file=prompt_queue_file,
                 save_settings_on_start=actual_save_settings_value,  # 値取得後の自動保存パラメータを追加
-                alarm_on_completion=actual_alarm_value  # 値取得後のアラームパラメータを追加
+                alarm_on_completion=actual_alarm_value,  # 値取得後のアラームパラメータを追加
+                use_prompt_cache=use_prompt_cache  # プロンプトキャッシュ設定
             )
         except Exception as e:
             import traceback
@@ -6883,7 +6942,7 @@ with block:
 
     # 実行ボタンのイベント
     # UIから渡されるパラメーターリスト
-    ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, end_frame, end_frame_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, section_settings, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_vae_cache, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion]
+    ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, end_frame, end_frame_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, section_settings, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_vae_cache, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion, use_prompt_cache]
     
     start_button.click(fn=validate_and_process, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, seed])
     end_button.click(fn=end_process, outputs=[end_button, stop_after_button, stop_step_button], queue=False)

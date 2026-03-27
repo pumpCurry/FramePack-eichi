@@ -2774,7 +2774,7 @@ def cleanup_generation_resources():
 
 @torch.no_grad()
 @log_and_continue("worker error")
-def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, image_strength=1.0, keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, frame_save_mode=None):
+def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, mp4_crf=16, all_padding_value=1.0, image_strength=1.0, keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_index=None, frame_save_mode=None, use_prompt_cache=True):
 
     # frame_save_modeに基づいてフラグを設定
     save_latent_frames = False
@@ -2941,59 +2941,84 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 image_encoder, vae
             )
 
-        # Text encoding
+        # Text encoding (with prompt cache support)
 
         stream.output_queue.push(('progress', (None, '', make_progress_bar_html2(0, f'[THEME=cyan]{translate("Text encoding ...")}'))))
 
-        if not high_vram:
-            fake_diffusers_current_device(text_encoder, gpu)  # since we only encode one text - that is one model move and one encode, offload is same time consumption since it is also one load and one encode.
-            load_model_as_complete(text_encoder_2, target_device=gpu)
-        
-        # イメージキューのカスタムプロンプトの場合、詳細ログを追加
-        # リクエスト内のキュー情報からカスタムプロンプトの使用をいつでも確認できるよう変数からチェック
-        # ローカル変数ではなく、グローバル設定から確認する
-        using_custom_txt = False
-        if queue_enabled and queue_type == "image" and batch_index is not None and batch_index > 0:
-            if batch_index - 1 < len(image_queue_files):
-                img_path = image_queue_files[batch_index - 1]
-                txt_path = os.path.splitext(img_path)[0] + ".txt"
-                if os.path.exists(txt_path):
-                    using_custom_txt = True
-        
-        # 実際に使用されるプロンプトを必ず表示
-        actual_prompt = prompt  # 実際に使用するプロンプト
-        prompt_source = translate("共通プロンプト")  # プロンプトの種類
+        # プロンプトキャッシュ: ディスクからの読み込みを試行
+        _prompt_cache_hit = False
+        if use_prompt_cache:
+            try:
+                from eichi_utils import prompt_cache
+                disk_cache = prompt_cache.load_from_cache(prompt, n_prompt)
+                if disk_cache is not None:
+                    llama_vec = disk_cache['llama_vec']
+                    llama_vec_n = disk_cache['llama_vec_n']
+                    clip_l_pooler = disk_cache['clip_l_pooler']
+                    clip_l_pooler_n = disk_cache['clip_l_pooler_n']
+                    llama_attention_mask = disk_cache['llama_attention_mask']
+                    llama_attention_mask_n = disk_cache['llama_attention_mask_n']
+                    _prompt_cache_hit = True
+                    print(translate("プロンプトキャッシュからエンコード結果を読み込みました"))
+            except Exception as e:
+                print(translate("プロンプトキャッシュ読み込み失敗: {0}").format(e))
 
-        # プロンプトソースの判定
-        if queue_enabled and queue_type == "prompt" and batch_index is not None:
-            # プロンプトキューの場合
-            prompt_source = translate("プロンプトキュー")
-            print(translate("プロンプトキューからのプロンプトをエンコードしています..."))
-        elif using_custom_txt:
-            # イメージキューのカスタムプロンプトの場合
-            actual_prompt = prompt  # カスタムプロンプトを使用
-            prompt_source = translate("カスタムプロンプト(イメージキュー)")
-            print(translate("カスタムプロンプトをエンコードしています..."))
-        else:
-            # 通常の共通プロンプトの場合
-            print(translate("共通プロンプトをエンコードしています..."))
-        
-        # プロンプトの内容とソースを表示
-        print(translate("プロンプト情報: ソース: {0}").format(prompt_source))
-        print(translate("プロンプト情報: 内容: {0}").format(actual_prompt))
-        
-        llama_vec, clip_l_pooler = encode_prompt_conds(prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
+        if not _prompt_cache_hit:
+            if not high_vram:
+                fake_diffusers_current_device(text_encoder, gpu)
+                load_model_as_complete(text_encoder_2, target_device=gpu)
 
-        if cfg == 1:
-            llama_vec_n, clip_l_pooler_n = torch.zeros_like(llama_vec), torch.zeros_like(clip_l_pooler)
-        else:
-            llama_vec_n, clip_l_pooler_n = encode_prompt_conds(n_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
+            # イメージキューのカスタムプロンプト判定
+            using_custom_txt = False
+            if queue_enabled and queue_type == "image" and batch_index is not None and batch_index > 0:
+                if batch_index - 1 < len(image_queue_files):
+                    img_path = image_queue_files[batch_index - 1]
+                    txt_path = os.path.splitext(img_path)[0] + ".txt"
+                    if os.path.exists(txt_path):
+                        using_custom_txt = True
 
-        llama_vec, llama_attention_mask = crop_or_pad_yield_mask(llama_vec, length=512)
-        llama_vec_n, llama_attention_mask_n = crop_or_pad_yield_mask(llama_vec_n, length=512)
+            actual_prompt = prompt
+            prompt_source = translate("共通プロンプト")
 
+            if queue_enabled and queue_type == "prompt" and batch_index is not None:
+                prompt_source = translate("プロンプトキュー")
+                print(translate("プロンプトキューからのプロンプトをエンコードしています..."))
+            elif using_custom_txt:
+                actual_prompt = prompt
+                prompt_source = translate("カスタムプロンプト(イメージキュー)")
+                print(translate("カスタムプロンプトをエンコードしています..."))
+            else:
+                print(translate("共通プロンプトをエンコードしています..."))
 
-        # これ以降の処理は text_encoder, text_encoder_2 は不要なので、メモリ解放してしまって構わない
+            print(translate("プロンプト情報: ソース: {0}").format(prompt_source))
+            print(translate("プロンプト情報: 内容: {0}").format(actual_prompt))
+
+            llama_vec, clip_l_pooler = encode_prompt_conds(prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
+
+            if cfg == 1:
+                llama_vec_n, clip_l_pooler_n = torch.zeros_like(llama_vec), torch.zeros_like(clip_l_pooler)
+            else:
+                llama_vec_n, clip_l_pooler_n = encode_prompt_conds(n_prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2)
+
+            llama_vec, llama_attention_mask = crop_or_pad_yield_mask(llama_vec, length=512)
+            llama_vec_n, llama_attention_mask_n = crop_or_pad_yield_mask(llama_vec_n, length=512)
+
+            # プロンプトキャッシュ: ディスクに保存
+            if use_prompt_cache:
+                try:
+                    from eichi_utils import prompt_cache
+                    prompt_cache.save_to_cache(prompt, n_prompt, {
+                        'llama_vec': llama_vec.cpu(),
+                        'llama_vec_n': llama_vec_n.cpu(),
+                        'clip_l_pooler': clip_l_pooler.cpu(),
+                        'clip_l_pooler_n': clip_l_pooler_n.cpu(),
+                        'llama_attention_mask': llama_attention_mask.cpu(),
+                        'llama_attention_mask_n': llama_attention_mask_n.cpu(),
+                    })
+                except Exception as e:
+                    print(translate("プロンプトキャッシュ保存失敗: {0}").format(e))
+
+        # これ以降の処理は text_encoder, text_encoder_2 は不要なので、メモリ解放
         if not high_vram:
             text_encoder, text_encoder_2 = None, None
             text_encoder_manager.dispose_text_encoders()
@@ -4162,7 +4187,7 @@ def validate_images(input_image, section_settings, length_radio=None, frame_size
     error_bar = make_progress_bar_html2(100, f'[THEME=red]{translate("画像がありません")}')
     return False, error_html + error_bar
 
-def process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, image_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, section_settings=None, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, frame_save_mode=translate("保存しない"), use_queue=False, prompt_queue_file=None, save_settings_on_start=False, alarm_on_completion=False):
+def process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf=16, all_padding_value=1.0, image_strength=1.0, frame_size_setting="1秒 (33フレーム)", keep_section_videos=False, lora_files=None, lora_files2=None, lora_files3=None, lora_scales_text="0.8,0.8,0.8", output_dir=None, save_section_frames=False, use_all_padding=False, use_lora=False, lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, save_tensor_data=False, section_settings=None, tensor_data_input=None, fp8_optimization=False, resolution=640, batch_count=1, frame_save_mode=translate("保存しない"), use_queue=False, prompt_queue_file=None, save_settings_on_start=False, alarm_on_completion=False, use_prompt_cache=True):
     # 引数の型確認
     # 異常な型の修正 (boolなど)
     if section_settings is not None and not isinstance(section_settings, list):
@@ -4630,7 +4655,8 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             fp8_optimization,
             resolution,
             batch_index,
-            frame_save_mode_actual
+            frame_save_mode_actual,
+            use_prompt_cache  # プロンプトキャッシュ設定
         )
 
         # 現在のバッチの出力ファイル名
@@ -5103,6 +5129,14 @@ with block:
 
             lora_cache_checkbox.change(
                 fn=update_lora_cache, inputs=[lora_cache_checkbox], outputs=[]
+            )
+
+            # プロンプトキャッシュ設定
+            use_prompt_cache = gr.Checkbox(
+                label=translate('Use Prompt Cache'),
+                value=saved_app_settings.get("use_prompt_cache", True) if saved_app_settings else True,
+                info=translate('Cache encoded prompts to disk for reuse after restart.'),
+                elem_classes="saveable-setting"
             )
 
             # --- キャッシュ管理パネル ---
@@ -6140,6 +6174,8 @@ with block:
                 # Auto-save settings
                 save_settings_on_start_val,
                 alarm_on_completion_val,
+                # Prompt cache settings
+                use_prompt_cache_val,
                 # Log settings
                 log_enabled_val,
                 log_folder_val,
@@ -6172,6 +6208,8 @@ with block:
                     # 自動保存・アラーム設定
                     "save_settings_on_start": save_settings_on_start_val,
                     "alarm_on_completion": alarm_on_completion_val,
+                    # プロンプトキャッシュ設定
+                    "use_prompt_cache": use_prompt_cache_val,
                     # CONFIG QUEUE設定 - NEW
                     "add_timestamp_to_config": bool(add_timestamp_to_config_val)
                 }
@@ -6250,20 +6288,21 @@ with block:
                 updates.append(gr.update(value=default_settings.get("frame_save_mode", translate("保存しない"))))  # 13
                 updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  # 14
                 updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  # 15
-                
-                # ログ設定 (16番目,17番目の要素)
+                updates.append(gr.update(value=default_settings.get("use_prompt_cache", True)))  # 16
+
+                # ログ設定 (17番目,18番目の要素)
                 # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
-                updates.append(gr.update(value=False))  # log_enabled (16)
-                updates.append(gr.update(value="logs"))  # log_folder (17)
-                
+                updates.append(gr.update(value=False))  # log_enabled (17)
+                updates.append(gr.update(value="logs"))  # log_folder (18)
+
                 # ログ設定をアプリケーションに適用
                 default_log_settings = {
                     "log_enabled": False,
                     "log_folder": "logs"
                 }
 
-                # CONFIG QUEUE設定 (18番目の要素)
-                updates.append(gr.update(value=default_settings.get("add_timestamp_to_config", True)))  # 18
+                # CONFIG QUEUE設定 (19番目の要素)
+                updates.append(gr.update(value=default_settings.get("add_timestamp_to_config", True)))  # 19
                 
                 # 設定ファイルを更新
                 all_settings = load_settings()
@@ -6273,8 +6312,8 @@ with block:
                 # ログ設定を適用 (既存のログファイルを閉じて、設定に従って再設定)
                 disable_logging()  # 既存のログを閉じる
                 
-                # 設定状態メッセージ (19番目の要素)
-                updates.append(translate("設定をデフォルトに戻しました"))  # 19
+                # 設定状態メッセージ (20番目の要素)
+                updates.append(translate("設定をデフォルトに戻しました"))  # 20
                 
                 return updates
 
@@ -6293,8 +6332,8 @@ with block:
         # [18]lora_files, [19]lora_files2, [20]lora_files3, [21]lora_scales_text, [22]output_dir, [23]save_section_frames,
         # [24]use_all_padding, [25]use_lora, [26]lora_mode, [27]lora_dropdown1, [28]lora_dropdown2, [29]lora_dropdown3,
         # [30]save_tensor_data, [31]section_settings, [32]tensor_data_input, [33]fp8_optimization, [34]resolution,
-        # [35]batch_count, [36]frame_save_mode, [37]use_queue, [38]prompt_queue_file, [39]save_settings_on_start, [40]alarm_on_completion
-        
+        # [35]batch_count, [36]frame_save_mode, [37]use_queue, [38]prompt_queue_file, [39]save_settings_on_start, [40]alarm_on_completion, [41]use_prompt_cache
+
         # 各引数を明示的に取得 - コメントに基づいて正確なインデックスを使用
         output_dir = args[22] if len(args) > 22 else None
         save_section_frames = args[23] if len(args) > 23 else False
@@ -6325,7 +6364,8 @@ with block:
         # 自動保存・アラーム設定の引数を取得
         save_settings_on_start_ui = args[39] if len(args) > 39 else False
         alarm_on_completion_ui = args[40] if len(args) > 40 else False
-        
+        use_prompt_cache_ui = args[41] if len(args) > 41 else True
+
         # 値の取得処理
         actual_save_settings_value = save_settings_on_start_ui
         if hasattr(save_settings_on_start_ui, 'value'):
@@ -6483,6 +6523,8 @@ with block:
             new_args[38] = prompt_queue_file_ui  # prompt_queue_file
             new_args[39] = actual_save_settings_value  # save_settings_on_start
             new_args[40] = actual_alarm_value  # alarm_on_completion
+            if len(new_args) > 41:
+                new_args[41] = use_prompt_cache_ui  # use_prompt_cache
 
         # process関数に渡す前に重要な値を確認
         # 注意: ここではインデックス25と書かれていますが、これは誤りです
@@ -6518,6 +6560,7 @@ with block:
             frame_save_mode,
             save_settings_on_start,
             alarm_on_completion,
+            use_prompt_cache,
             # ログ設定を追加
             log_enabled,
             log_folder,
@@ -6547,10 +6590,11 @@ with block:
             frame_save_mode,      # 13
             save_settings_on_start, # 14
             alarm_on_completion,  # 15
-            log_enabled,          # 16
-            log_folder,           # 17
-            config_queue_components['add_timestamp_to_config'], # 18 - NEW OUTPUT
-            settings_status       # 19
+            use_prompt_cache,     # 16
+            log_enabled,          # 17
+            log_folder,           # 18
+            config_queue_components['add_timestamp_to_config'], # 19 - NEW OUTPUT
+            settings_status       # 20
         ]
     )
 
@@ -6568,8 +6612,8 @@ with block:
     #  [18]lora_files, [19]lora_files2, [20]lora_files3, [21]lora_scales_text, [22]output_dir, [23]save_section_frames,
     #  [24]use_all_padding, [25]use_lora, [26]lora_mode, [27]lora_dropdown1, [28]lora_dropdown2, [29]lora_dropdown3,
     #  [30]save_tensor_data, [31]section_settings, [32]tensor_data_input, [33]fp8_optimization, [34]resolution,
-    #  [35]batch_count, [36]frame_save_mode, [37]use_queue, [38]prompt_queue_file, [39]save_settings_on_start, [40]alarm_on_completion
-    ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, image_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, section_settings, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion]
+    #  [35]batch_count, [36]frame_save_mode, [37]use_queue, [38]prompt_queue_file, [39]save_settings_on_start, [40]alarm_on_completion, [41]use_prompt_cache
+    ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, image_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, section_settings, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion, use_prompt_cache]
 
     start_button.click(fn=validate_and_process_with_queue_check, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, queue_start_button, seed])
     end_button.click(fn=end_process_enhanced, outputs=[end_button, stop_after_button, queue_start_button], queue=False)
