@@ -315,26 +315,27 @@ class TransformerManager:
                 print(translate("状態辞書を読み込んでいます..."))
                 self.transformer.load_state_dict(state_dict, assign=True, strict=True)
 
+                # OOM-2修正: assign=Trueでテンソルはtransformerパラメータに移動済み。
+                # _INMEM_CACHEがstate_dictへの参照を保持しているとメモリが解放されない。
+                # ディスクキャッシュは残るので次回はディスクから読める。
+                from eichi_utils import lora_state_cache as _lsc_reload
+                _lsc_reload._inmem_clear()
+
                 # 読み込み後に一時的な状態辞書をメモリから解放
-                # 注: 大きな状態辞書がメモリに残ると大量のRAMを消費するため、
-                # ここでの明示的な解放は非常に重要
                 import gc
-                # 参照を削除する前に状態辞書のサイズを取得
                 try:
                     state_dict_size = sum(param.numel() * param.element_size() for param in state_dict.values() if hasattr(param, 'numel'))
                     print(translate("解放される状態辞書サイズ: {0:.2f} GB").format(state_dict_size / (1024**3)))
-                except:
-                    # 状態辞書のサイズ計算に失敗してもプログラムの実行は継続
+                except Exception:
                     print(translate("状態辞書のサイズ計算に失敗しました"))
 
-                # ここで参照を明示的に削除
-                # 注: メインの参照は本メソッド終了時に自動解放されるが、
-                # 他にもコンテキスト内で保持される可能性があるため明示的に削除
-                torch_state_dict_backup = state_dict
+                # OOM-3修正: torch_state_dict_backupを作らずに直接del
+                # (backup変数が参照を保持してdelが無効化されていた)
                 del state_dict
-
-                # Pythonの循環参照オブジェクトを強制的に解放
                 gc.collect()
+                # MEM-7修正: gc.collect()直後にempty_cacheも呼ぶ
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             
             self.transformer.cpu()
             self.transformer.eval()
@@ -349,19 +350,10 @@ class TransformerManager:
             else:
                 self.transformer.to(self.device)
             
-            # 中間変数のクリーンアップ
-            # 状態辞書のコピーを保持する前に不要な参照を削除
-            if 'temp_dict' in locals():
-                del temp_dict
-            if 'state_dict' in locals():
-                print(translate("大きな状態辞書参照を解放します"))
-                # 参照カウントを減らす
-                del state_dict
-                # 明示的なメモリクリーンアップ
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                import gc
-                gc.collect()
+            # 中間変数のクリーンアップ (state_dictは上で既にdel済み)
+            for _var_name in ('temp_dict', 'state_dict'):
+                if _var_name in locals():
+                    del locals()[_var_name]
 
             # 状態を更新
             self.next_state['is_loaded'] = True

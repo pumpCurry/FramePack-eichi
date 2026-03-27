@@ -2558,73 +2558,65 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 print(translate("LoRA設定に変更なし＋Transformer再利用のため、事前アンロードとRAMガードをスキップします"))
             except Exception:
                 pass
-        if _do_pre_unload_and_guard:
-            try:
-                predicted_cache_path = None
+        # MEM-4修正: RAMガード復元をpre_unload〜ensure_transformer全体を包むfinallyで保証
+        # _pre_unload_lora_cachesで例外が起きてもfinally到達する構造にする
+        _prev_cache_state = lora_state_cache.is_cache_enabled()
+        try:
+            if _do_pre_unload_and_guard:
                 try:
-                    from eichi_utils import lora_state_cache as _lcache2
-                    if hasattr(_lcache2, "peek_next_cache_path"):
-                        predicted_cache_path = _lcache2.peek_next_cache_path(
-                            lora_paths=current_lora_paths,
-                            lora_scales=current_lora_scales,
-                            fp8_enabled=fp8_enabled_flag,
-                            force_dict_split=force_dict_split_flag
-                        )
-                except Exception:
                     predicted_cache_path = None
+                    try:
+                        from eichi_utils import lora_state_cache as _lcache2
+                        if hasattr(_lcache2, "peek_next_cache_path"):
+                            predicted_cache_path = _lcache2.peek_next_cache_path(
+                                lora_paths=current_lora_paths,
+                                lora_scales=current_lora_scales,
+                                fp8_enabled=fp8_enabled_flag,
+                                force_dict_split=force_dict_split_flag
+                            )
+                    except Exception:
+                        predicted_cache_path = None
 
-                # 1) 先にオンメモリLoRA（および付随キャッシュ）を解放
-                #    - 新規 .pt/.safetensors をロードする前提時のOOM低減・断片化抑制に有効
-                #    - 再利用ケースでは呼ばれない（上の条件でスキップ）ため、キャッシュは温存される
-                _pre_unload_lora_caches()
+                    _pre_unload_lora_caches()
+                    _ram_guard_maybe_disable_lora_cache(predicted_cache_path)
 
-                # 2) RAMガード: システム空きRAM（MemAvailable）が閾値未満等のとき、
-                #    LoRA state cache のディスクロード経路を一時的に無効化して、巨大ファイルIO/常駐を抑止。
-                #    ※ 発火した場合は ensure_transformer_state() 後に元の設定へ復元（下の復元処理参照）
-                _ram_guard_maybe_disable_lora_cache(predicted_cache_path)
+                except Exception as _e2:
+                    print(translate("LoRA切替前のアンロード/ガードで例外が発生しました: {0}").format(_e2))
 
-            except Exception as _e2:
-                print(translate("LoRA切替前のアンロード/ガードで例外が発生しました: {0}").format(_e2))
+            # OOM-1修正: ensure_transformer_state()の前にmodule globalのtransformer参照を解放
+            # _reload_transformer()内でself.transformer=Noneにしても、ここのglobalが旧モデルを保持
+            # していると、新旧2つのモデルがメモリに同時存在してOOMの原因になる
+            import gc as _gc_oom1
+            transformer = None
+            _gc_oom1.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
-        
-        # === 追加: この区間のみ torch.load を mmap & weights_only に補強 ===
-        with _PatchTorchLoadForLoRA():
+            with _PatchTorchLoadForLoRA():
+                try:
+                    if not transformer_manager.ensure_transformer_state():
+                        raise Exception(translate("transformer状態の確認に失敗しました"))
+
+                    transformer = transformer_manager.get_transformer()
+                    print(translate("transformer状態チェック完了"))
+
+                    try:
+                        _LAST_LORA_SIG = _cur_sig
+                    except Exception:
+                        pass
+
+                except Exception as e:
+                    print(translate("transformerのリロードに失敗しました: {0}").format(e))
+                    traceback.print_exc()
+                    raise Exception(translate("transformerのリロードに失敗しました"))
+        finally:
+            # MEM-4修正: pre_unload/RAM guard/ensure_transformer どこで例外が起きても必ず復元
             try:
-                # transformerの状態を確認し、必要に応じてリロード
-                if not transformer_manager.ensure_transformer_state():
-                    raise Exception(translate("transformer状態の確認に失敗しました"))
-
-                # 最新のtransformerインスタンスを取得
-                transformer = transformer_manager.get_transformer()
-                print(translate("transformer状態チェック完了"))
-
-                # === 今回のLoRA設定シグネチャを保存（次回の変更判定に使用） ===
-                #   ここで保存するのは「比較用の要約」。ジョブ完了後の状態を基準に、次回ジョブ開始時の変更有無を素早く判定のため
-                #   なお、厳密な変化（例: 重みファイルの中身の差異）はここでは検出しない（I/Oコスト増を避けるため）
-                try:
-                    _LAST_LORA_SIG = _cur_sig
-                except Exception:
-                    pass
-
-            except Exception as e:
-                print(translate("transformerのリロードに失敗しました: {0}").format(e))
-                traceback.print_exc()
-                raise Exception(translate("transformerのリロードに失敗しました"))
-            finally:
-                # === RAMガードで一時的に無効化した LoRA キャッシュの復元 ===
-                # ensure_transformer_state()が成功/失敗に関わらず、必ずキャッシュ設定を復元する。
-                # 復元しないと後続ジョブ全てがフルロードになり、再起動まで復帰しない。
-                try:
-                    from eichi_utils import lora_state_cache as _lcache3
-                    _prev = globals().pop("_PREV_LORA_CACHE_ENABLED", None)
-                    if _prev is not None and hasattr(_lcache3, "set_cache_enabled"):
-                        _lcache3.set_cache_enabled(bool(_prev))
-                        try:
-                            print(translate("LoRAキャッシュ設定を復元しました: enabled={0}").format(bool(_prev)))
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                lora_state_cache.set_cache_enabled(_prev_cache_state)
+                # 旧globals方式のクリーンアップ
+                globals().pop("_PREV_LORA_CACHE_ENABLED", None)
+            except Exception:
+                pass
 
         # 入力画像の処理
         push_progress(None, '', 0, '[THEME=cyan]Image processing ...')

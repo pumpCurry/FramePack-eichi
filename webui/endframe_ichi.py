@@ -1542,7 +1542,15 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
         # セクション処理開始前にtransformerの状態を確認
         print(translate("セクション処理開始前のtransformer状態チェック..."))
         try:
-            # transformerの状態を確認し、必要に応じてリロード
+            # OOM-1修正: ensure_transformer_stateの前にmodule globalのtransformer参照を解放
+            # _reload_transformer内でself.transformer=Noneにしても、ここのglobalが旧モデルを
+            # 保持していると新旧2つが同時存在してOOMになる
+            transformer = None
+            import gc as _gc_oom1
+            _gc_oom1.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
             if not transformer_manager.ensure_transformer_state():
                 raise Exception(translate("transformer状態の確認に失敗しました"))
 
