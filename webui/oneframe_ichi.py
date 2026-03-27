@@ -5580,14 +5580,16 @@ with block:
                     maximum=100,
                     value=1,
                     step=1,
-                    info=translate("同じ設定で連続生成する回数。SEEDは各回で+1されます")
+                    info=translate("同じ設定で連続生成する回数。SEEDは各回で+1されます"),
+                    elem_classes="saveable-setting"
                 )
                 
                 # RoPE値バッチ処理用のチェックボックス
                 use_rope_batch = gr.Checkbox(
                     label=translate("RoPE値バッチ処理を使用"),
                     value=False,
-                    info=translate("チェックすると、SEEDではなくRoPE値を各バッチで+1していきます（64に達すると停止）")
+                    info=translate("チェックすると、SEEDではなくRoPE値を各バッチで+1していきます（64に達すると停止）"),
+                    elem_classes="saveable-setting"
                 )
 
                 # キュー機能設定 - endframe_ichiと同様の実装
@@ -5600,7 +5602,8 @@ with block:
                         use_queue = gr.Checkbox(
                             label=translate("キュー機能を使用"),
                             value=False,
-                            info=translate("入力ディレクトリの画像または指定したプロンプトリストを使用して連続して画像を生成します")
+                            info=translate("入力ディレクトリの画像または指定したプロンプトリストを使用して連続して画像を生成します"),
+                            elem_classes="saveable-setting"
                         )
 
                         # キュータイプの選択
@@ -5870,7 +5873,8 @@ with block:
             use_reference_image_default = saved_app_settings.get("use_reference_image", False) if saved_app_settings else False
             use_reference_image = gr.Checkbox(
                 label=translate("参照画像を使用"),
-                value=use_reference_image_default
+                value=use_reference_image_default,
+                elem_classes="saveable-setting"
             )
 
             # 参照画像を長辺合わせにするかどうか
@@ -6164,7 +6168,8 @@ with block:
                     use_lora = gr.Checkbox(
                         label=translate("LoRAを使用する"),
                         value=saved_app_settings.get("use_lora", False) if saved_app_settings else False,
-                        info=translate("チェックをオンにするとLoRAを使用します（要16GB VRAM以上）")
+                        info=translate("チェックをオンにするとLoRAを使用します（要16GB VRAM以上）"),
+                        elem_classes="saveable-setting"
                     )
 
                     # LoRAモード選択（初期状態では非表示）
