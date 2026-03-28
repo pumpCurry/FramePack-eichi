@@ -4,6 +4,31 @@
 
 ## 日本語
 
+### 2026-03-28: バージョン1.9.5.5
+- **キャッシュシステムの完成と3プログラム統一**:
+  - LoRAキャッシュとプロンプトキャッシュの保存形式を `.pt`/`.safetensors` 両対応（デュアルフォーマット）
+  - FP8最適化とLoRAキャッシュの同時使用が可能に（従来は排他）
+  - クロスプラットフォームRAMガード: psutil対応（Windows/Linux/WSL全環境）
+  - キャッシュ管理UIパネル: ディスク使用量表示・個別/一括クリア・フォーマット切替
+  - endframe / endframe_f1 にもプロンプトキャッシュとキャッシュ管理UIを展開
+- **OOM（メモリ不足）問題の全面修正**:
+  - LoRAキャッシュ切替時のstate_dict二重保持を解消
+  - プロンプトキャッシュの際限ないメモリ蓄積を防止
+  - endframe系のセクション間GC・生成リソース解放を追加
+  - history_latentsのclone蓄積・動的オフロード・参照カウント問題を修正
+- **ブラウザ再接続の15件のバグ修正**:
+  - q.get()永久ハング防止（60秒タイムアウト追加）
+  - FanoutQueueのsentinel配信を3回リトライ+フラッシュで確実化
+  - ロールオーバーループに120秒デッドライン（スレッド枯渇防止）
+  - 匿名セッションのストリーミング暴走防止
+  - 例外時のUIボタン状態リカバリーフレーム追加
+  - generation_active/cur_jobのアトミック更新
+- **起動体験の統一**: 3プログラム全てにスピナー付きCUI起動シーケンスを導入
+- **進捗表示の5色フェーズシステム**: 共通モジュール化（黄=準備, 水色=エンコード, 橙=ロード, 青=生成, 緑=後処理, 赤=エラー）
+- **push_progressの安全性向上**: try/catch構造をB案（関数内包含）で再設計、14箇所の冗長ラッパー削除
+- **Issue対応**: #223 endframe起動クラッシュ修正、#224 preprocess_image型エラー修正
+- **テストカバレッジ**: 90→114テストに拡充（キャッシュ・進捗バー・resync・i18n）
+
 ### 2025-09-25: バージョン1.9.5.4
 - **LoRAメモリ保護とロードの信頼性向上**:
   - LoRA設定が変わらない場合は事前アンロードやRAMガードをスキップし、最適化辞書の再利用時の待ち時間を削減
@@ -285,6 +310,31 @@
 - キーフレームガイド機能の追加
 
 ## English
+
+### 2026-03-28: Version 1.9.5.5
+- **Complete cache system with unified 3-program support**:
+  - Dual-format storage: `.pt` and `.safetensors` for both LoRA and prompt caches
+  - FP8 optimization and LoRA cache can now coexist (previously mutually exclusive)
+  - Cross-platform RAM guard with psutil (Windows/Linux/WSL)
+  - Cache management UI panel: disk usage display, individual/bulk clear, format switching
+  - Prompt cache and management UI deployed to endframe / endframe_f1
+- **Comprehensive OOM (out of memory) fixes**:
+  - Eliminate state_dict double-retention during LoRA cache transitions
+  - Prevent unbounded prompt cache memory accumulation
+  - Add per-section GC and generation resource cleanup for endframe programs
+  - Fix history_latents clone accumulation, dynamic offload, and reference count issues
+- **15 browser reconnection bug fixes**:
+  - Prevent permanent hang on q.get() (60s timeout added)
+  - FanoutQueue sentinel delivery with 3x retry + flush fallback
+  - Rollover loop 120s deadline (prevents thread exhaustion)
+  - Block anonymous sessions from entering streaming path
+  - Recovery frame yield on exception to restore UI button states
+  - Atomic updates for generation_active/cur_job
+- **Unified startup experience**: Spinner-based CUI startup for all 3 programs
+- **5-color phase progress system**: Shared module (yellow=prep, cyan=encode, orange=load, blue=gen, green=post, red=error)
+- **push_progress safety redesign**: Restructured try/catch pattern, removed 14 redundant wrappers
+- **Issue fixes**: #223 endframe startup crash, #224 preprocess_image type error
+- **Test coverage**: 90 → 114 tests (cache, progress bar, resync, i18n)
 
 ### 2025-09-25: Version 1.9.5.4
 - **LoRA memory guard and safer loading**:
@@ -568,6 +618,30 @@
 
 ## 简体中文
 
+### 2026-03-28: 版本1.9.5.5
+- **完整缓存系统，3个程序统一支持**：
+  - 双格式存储：LoRA 和提示缓存均支持 `.pt` 和 `.safetensors`
+  - FP8 优化与 LoRA 缓存现可共存（之前互斥）
+  - 跨平台 RAM 守护：psutil 支持（Windows/Linux/WSL）
+  - 缓存管理 UI 面板：磁盘使用量显示、单独/批量清除、格式切换
+  - 提示缓存和管理 UI 已部署到 endframe / endframe_f1
+- **全面修复 OOM（内存不足）问题**：
+  - 消除 LoRA 缓存切换时的 state_dict 双重保留
+  - 防止提示缓存无限内存累积
+  - 为 endframe 程序添加分段 GC 和生成资源清理
+  - 修复 history_latents 克隆累积、动态卸载和引用计数问题
+- **15 个浏览器重连 bug 修复**：
+  - 防止 q.get() 永久挂起（添加 60 秒超时）
+  - FanoutQueue 哨兵传递 3 次重试 + 刷新回退
+  - 滚动循环 120 秒截止时间（防止线程耗尽）
+  - 阻止匿名会话进入流式路径
+  - 异常时恢复帧以还原 UI 按钮状态
+  - generation_active/cur_job 原子更新
+- **统一启动体验**：所有 3 个程序均带旋转器 CUI 启动
+- **5 色阶段进度系统**：共享模块（黄=准备, 青=编码, 橙=加载, 蓝=生成, 绿=后处理, 红=错误）
+- **Issue 修复**：#223 endframe 启动崩溃，#224 preprocess_image 类型错误
+- **测试覆盖率**：90 → 114 个测试
+
 ### 2025-09-25: 版本1.9.5.4
 - **LoRA 记忆体保护与更安全的载入**：
   - 在设定未变化时跳过预先卸载/RAM 防护，减轻重复使用最佳化字典时的等待
@@ -847,6 +921,30 @@
 - 添加关键帧指南功能
 
 ## Русский
+
+### 2026-03-28: Версия 1.9.5.5
+- **Полная система кэширования с поддержкой всех 3 программ**:
+  - Двойной формат: `.pt` и `.safetensors` для кэшей LoRA и промптов
+  - FP8-оптимизация и кэш LoRA теперь могут работать одновременно
+  - Кроссплатформенный RAM-гард с psutil (Windows/Linux/WSL)
+  - Панель управления кэшем: отображение использования диска, очистка, переключение формата
+  - Кэш промптов и UI управления развёрнуты в endframe / endframe_f1
+- **Комплексное исправление OOM (нехватка памяти)**:
+  - Устранение двойного хранения state_dict при переключении кэша LoRA
+  - Предотвращение неограниченного накопления кэша промптов
+  - Добавление GC по секциям и очистки ресурсов для endframe
+  - Исправление накопления клонов history_latents и проблем с подсчётом ссылок
+- **15 исправлений ошибок переподключения браузера**:
+  - Предотвращение зависания q.get() (тайм-аут 60 сек)
+  - Доставка sentinel в FanoutQueue с 3 повторами + сброс
+  - Дедлайн 120 сек для цикла ролловера
+  - Блокировка анонимных сессий от потоковой передачи
+  - Восстановительный кадр при исключении для сброса кнопок UI
+  - Атомарное обновление generation_active/cur_job
+- **Единый запуск**: Спиннер CUI для всех 3 программ
+- **5-цветная система прогресса**: Общий модуль (жёлтый=подготовка, голубой=кодирование, оранжевый=загрузка, синий=генерация, зелёный=обработка, красный=ошибка)
+- **Исправления Issues**: #223 крах endframe, #224 ошибка preprocess_image
+- **Тесты**: 90 → 114 тестов
 
 ### 2025-09-25: Версия 1.9.5.4
 - **Защита памяти и безопасная загрузка LoRA**:
