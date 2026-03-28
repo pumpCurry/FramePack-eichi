@@ -309,6 +309,14 @@ class TransformerManager:
                     except Exception as e:
                         print(translate("FP8最適化エラー: {0}").format(e))
                         traceback.print_exc()
+                        # OOM-H2修正: FP8 apply失敗時にstate_dictを確実に解放
+                        try:
+                            del state_dict
+                            import gc; gc.collect()
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                        except Exception:
+                            pass
                         raise e
                 
                 # 必要に応じてLoRA、FP8最適化が施された状態辞書を読み込み。assign=Trueで仮想デバイスのテンソルを置換

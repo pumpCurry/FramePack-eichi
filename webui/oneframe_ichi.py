@@ -386,10 +386,9 @@ if sys.platform in ('win32', 'cygwin'):
 user_abort = False
 user_abort_notified = False
 
-# ストリームとバスの終了を表すセンチネルを定義
-# 名前付き定数を使うことで可読性が向上し、終端マーカーの統一が容易になる
+# ストリームの終了を表すセンチネルを定義
+# BUS_END_SENTINEL は resync_core からインポート済み（ローカル再定義は衝突リスクのため削除）
 STREAM_END_SENTINEL = 'end'
-BUS_END_SENTINEL = (None, None)
 
 # バッチ処理とキュー機能用グローバル変数
 batch_stopped = False  # バッチ処理中断フラグ
@@ -453,7 +452,8 @@ _ACTIVE_RESYNCS: _OrderedDict = _OrderedDict()  # ui_session_id -> last_started_
 _LIVE_STREAMING: set = set()         # 今まさにストリーム中の ui_session_id
 
 # BUG-6修正: ロールオーバーループのデッドライン (秒)
-_ROLLOVER_DEADLINE_SEC = 120.0
+# HANG-H1修正: デッドラインを短縮（120s→30s）しスレッド枯渇リスクを低減
+_ROLLOVER_DEADLINE_SEC = 30.0
 
 
 # ===== 先行GC/メモリ安全化ユーティリティ =====
@@ -1366,9 +1366,10 @@ def encode_prompt_conds(
         return (mt == "clip") or ("clip" in name)
 
     # 想定：text_encoder が LLaMA、text_encoder_2 が CLIP。逆なら入替（tokenizer もペアで交換）
+    # LOW-2修正: パラメータ名に合わせる（旧 tok1/tok2 は未定義でNameErrorだった）
     if _is_clip(text_encoder) and _is_llama(text_encoder_2):
         text_encoder, text_encoder_2 = text_encoder_2, text_encoder
-        tok1, tok2 = tok2, tok1
+        tokenizer, tokenizer_2 = tokenizer_2, tokenizer
 
     # ------------------------------------------------------------
     # 1) どの呼び出し経路でも hidden_states / ModelOutput を返すよう“要求”を徹底
@@ -1554,6 +1555,16 @@ def encode_prompt_conds(
 
     if clip_l_pooler is None:
         raise RuntimeError("CLIP 側の pooler_output を取得できませんでした")
+
+    # OOM-3修正: CLIP ModelOutput と中間変数を明示解放
+    try:
+        del clip_out, clip_inputs, clip_input_ids
+    except NameError:
+        pass
+    try:
+        del llama_inputs
+    except NameError:
+        pass
 
     # ------------------------------------------------------------
     # 4) 返却：上流の transformer でそのまま使用できる形
@@ -2763,7 +2774,11 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         global cached_clip_l_pooler, cached_clip_l_pooler_n, cached_llama_attention_mask, cached_llama_attention_mask_n
         
         # プロンプトが変更されたかチェック
-        use_cache = (cached_prompt == prompt and cached_n_prompt == n_prompt and
+        # DATA-1修正: カスタムプロンプト使用時は current_prompt で比較する
+        _effective_prompt = current_prompt  # カスタムまたはベースプロンプト
+        # DATA-4修正: use_prompt_cache=False ならインメモリキャッシュも使わない
+        use_cache = (use_prompt_cache and
+                     cached_prompt == _effective_prompt and cached_n_prompt == n_prompt and
                      cached_llama_vec is not None and cached_llama_vec_n is not None)
 
         # 条件: 1) プロンプトキャッシュ機能が有効 2) まだメモリキャッシュが利用できない
@@ -2771,7 +2786,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
 
             push_progress(None, translate('キャッシュを読み込み中...'), 80, '[THEME=cyan]Prompt cache loading ...')
 
-            disk_cache = prompt_cache.load_from_cache(prompt, n_prompt)
+            disk_cache = prompt_cache.load_from_cache(_effective_prompt, n_prompt)
             if disk_cache:
 
                 # 読み込み完了（サイズ既知でないため100%表示）
@@ -2787,7 +2802,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 llama_attention_mask = disk_cache['llama_attention_mask']
                 llama_attention_mask_n = disk_cache['llama_attention_mask_n']
                 use_cache = True
-                cached_prompt = prompt
+                cached_prompt = _effective_prompt  # DATA-1修正: 実際にエンコードしたプロンプトでキャッシュ
                 cached_n_prompt = n_prompt
                 cached_llama_vec = llama_vec
                 cached_llama_vec_n = llama_vec_n
@@ -2795,9 +2810,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 cached_clip_l_pooler_n = clip_l_pooler_n
                 cached_llama_attention_mask = llama_attention_mask
                 cached_llama_attention_mask_n = llama_attention_mask_n
+                del disk_cache  # OOM-2修正: ディスクキャッシュ辞書を即解放
 
-
-        
         if use_cache:
             # キャッシュを使用
             print(translate("キャッシュされたテキストエンコード結果を使用します"))
@@ -2850,7 +2864,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     # 参考: diffusers HunyuanVideoPipeline の引数（text_encoder=LlamaModel, text_encoder_2=CLIPTextModel）。 :contentReference[oaicite:0]{index=0}
                     if _is_clip(text_encoder) and _is_llama(text_encoder_2):
                         text_encoder, text_encoder_2 = text_encoder_2, text_encoder
-                        tok1, tok2 = tok2, tok1
+                        tok1, tok2 = tok2, tok1  # _worker_impl のローカル変数
                         print("[TE-DEBUG] swap encoders -> (LLaMA first, CLIP second)")
                         _te_debug("after-swap", text_encoder, "text_encoder")
                         _te_debug("after-swap", text_encoder_2, "text_encoder_2")
@@ -3036,9 +3050,9 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                 
                 # エンコード結果をキャッシュ
                 print(translate("エンコード結果をキャッシュします"))
-                cached_prompt = prompt
+                cached_prompt = _effective_prompt  # DATA-1修正: 実際にエンコードしたプロンプトでキャッシュ
                 cached_n_prompt = n_prompt
-                
+
                 # エンコード処理後にキャッシュを更新
                 llama_vec, llama_attention_mask = crop_or_pad_yield_mask(llama_vec, length=512)
                 llama_vec_n, llama_attention_mask_n = crop_or_pad_yield_mask(llama_vec_n, length=512)
@@ -3071,7 +3085,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     except Exception:
                         pass
 
-                    prompt_cache.save_to_cache(prompt, n_prompt, {
+                    prompt_cache.save_to_cache(_effective_prompt, n_prompt, {
                         'llama_vec': llama_vec.cpu(),
                         'llama_vec_n': llama_vec_n.cpu(),
                         'clip_l_pooler': clip_l_pooler.cpu(),
@@ -3748,6 +3762,41 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             history_latents = torch.cat([generated_latents.to(history_latents), history_latents], dim=2)
             del generated_latents  # OOM-1修正: cat後に即解放
 
+            # OOM-1(CRIT): CLIP Vision hidden stateをsampling後に解放
+            try:
+                del image_encoder_last_hidden_state
+            except NameError:
+                pass
+
+            # OOM-4(HIGH): clean_latents*をsampling後に解放（VAE decodeでは不要）
+            try:
+                del clean_latents, clean_latents_2x, clean_latents_4x
+            except NameError:
+                pass
+            try:
+                del clean_latents_pre, clean_latents_post
+            except NameError:
+                pass
+            try:
+                del clean_latent_indices, clean_latent_2x_indices, clean_latent_4x_indices
+            except NameError:
+                pass
+
+            # MED-1: GPU上のpromptテンソルもVAE decode前に解放
+            try:
+                del llama_vec, llama_vec_n
+            except NameError:
+                pass
+            try:
+                del clip_l_pooler, clip_l_pooler_n
+            except NameError:
+                pass
+            try:
+                del llama_attention_mask, llama_attention_mask_n
+            except NameError:
+                pass
+            torch.cuda.empty_cache()
+
             # 緑の進捗バー 1
             push_progress(None, translate("Transformer Checking..."), 0, "[THEME=green]Transformer Checking...")
 
@@ -4080,12 +4129,16 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     # --- ここから新規ジョブ開始 ---
     # 開始時点のUI値をスナップショットしておく（再同期で復元用）
     global last_start_options, last_job_id
+    # HANG-2修正: UI値のスナップショットを構築
+    # 再接続時にget_state_snapshot()から返されるオプション情報
+    opts = {}
     try:
-        # 既存の UI→辞書化ヘルパがある場合はそれを使う
-        opts = get_current_start_options()  # なければ UI 値を個々に詰める
+        opts["prompt"] = prompt if isinstance(prompt, str) else ""
+        opts["n_prompt"] = n_prompt if isinstance(n_prompt, str) else ""
+        opts["seed"] = seed
+        opts["use_prompt_cache"] = bool(use_prompt_cache) if 'use_prompt_cache' in dir() else True
     except Exception:
-        # フォールバック：最低限のキーだけでも残す
-        opts = {}
+        pass
     # 入力/参照画像のパスも記録（temp キャッシュを使う構成ならそのパス）
     if isinstance(input_image, str):
         opts["input_image_path"] = input_image
@@ -4124,6 +4177,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
     last_progress_desc = ""
     last_progress_bar = ""
     current_seed = None
+    last_output_filename = None  # DATA-3修正: 前回生成の結果が新規生成のUIに漏れないようリセット
+    last_preview_image = None    # DATA-3修正: 同上
 
     # バッチ処理開始メッセージを表示
     print("*" * 50)
@@ -4843,7 +4898,16 @@ def end_process():
             # バックグラウンドジョブに停止を通知
             ctx.done.set()
 
-    with ctx_lock:  # F-4修正: アトミック更新
+    # HANG-3修正: generation_active は worker の finally で False にする。
+    # ここで即 False にすると End→Start 連打で二重起動するため、
+    # worker に停止を通知するだけに留める。
+    # generation_active = False は削除（worker.finally が担当）
+
+    # HANG-H3修正: ジョブが無い場合のボタン復帰も含める
+    with ctx_lock:
+        _has_job = (cur_job is not None)
+    if not _has_job:
+        # ジョブが無い/既に終了 → generation_active も即リセットして安全
         generation_active = False
 
     # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
