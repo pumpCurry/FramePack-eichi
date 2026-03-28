@@ -4,6 +4,27 @@
 
 ## 日本語
 
+### 2026-03-29: バージョン1.9.5.6
+- **安全性監査による25件の問題修正**:
+  - CRITICAL: カスタムプロンプトがベースプロンプトのキーでキャッシュされ、後続の生成が汚染される問題を修正
+  - CRITICAL: BUS_END_SENTINELのローカル再定義を削除（将来のリファクタでの無限ハングリスク除去）
+  - CRITICAL: ブラウザ再接続時のスナップショットが常に空だった問題を修正（get_current_start_options未定義）
+  - CRITICAL: End→Start連打で2つのworkerが同時実行される二重起動レースを排除
+- **OOMメモリ解放の追加修正**:
+  - sampling完了後にCLIP Vision hidden state / clean_latents* / GPUプロンプトテンソルを明示解放
+  - プロンプトキャッシュのディスク読み込み後にdisk_cache辞書を即解放
+  - FP8モンキーパッチ失敗時にstate_dictを確実に解放
+  - encode_prompt_conds内のCLIP ModelOutput中間オブジェクトを明示解放
+- **データ汚染防止**:
+  - use_prompt_cache=Falseがインメモリキャッシュにも正しく反映されるように修正
+  - 生成開始時にlast_output_filename/last_preview_imageをリセット（前回結果の漏洩防止）
+  - LoRAキャッシュキーにファイルサイズを追加（mtime保存コピーでの汚染防止）
+  - 削除済みLoRAファイルが無LoRA生成と同じキャッシュキーになる衝突を解消
+- **安定性改善**:
+  - ロールオーバーデッドラインを120秒→30秒に短縮（スレッド枯渇リスク低減）
+  - Endボタン二重クリック時のボタン固着を修正
+  - encode_prompt_condsのエンコーダスワップパスでのNameError修正
+
 ### 2026-03-28: バージョン1.9.5.5
 - **キャッシュシステムの完成と3プログラム統一**:
   - LoRAキャッシュとプロンプトキャッシュの保存形式を `.pt`/`.safetensors` 両対応（デュアルフォーマット）
@@ -310,6 +331,27 @@
 - キーフレームガイド機能の追加
 
 ## English
+
+### 2026-03-29: Version 1.9.5.6
+- **Comprehensive safety audit: 25 issues fixed**:
+  - CRITICAL: Custom prompt cached under base prompt key, contaminating subsequent generations
+  - CRITICAL: Removed shadowed BUS_END_SENTINEL local redefinition (prevents future infinite hang)
+  - CRITICAL: Browser reconnection snapshot now properly populated
+  - CRITICAL: End→Start double-worker race condition eliminated
+- **Additional OOM memory fixes**:
+  - Explicit cleanup of CLIP Vision hidden state, clean_latents*, GPU prompt tensors after sampling
+  - Prompt cache disk_cache dict freed immediately after extraction
+  - state_dict freed on FP8 monkey-patch failure
+  - CLIP ModelOutput intermediaries freed in encode_prompt_conds
+- **Data contamination prevention**:
+  - use_prompt_cache=False now correctly disables in-memory cache
+  - last_output_filename/last_preview_image reset at generation start
+  - LoRA cache key includes file size (mtime+size validation)
+  - Deleted LoRA files produce distinct cache keys
+- **Stability improvements**:
+  - Rollover deadline reduced 120s→30s (thread exhaustion prevention)
+  - End button no longer sticks on double-click
+  - NameError fix in encode_prompt_conds encoder swap path
 
 ### 2026-03-28: Version 1.9.5.5
 - **Complete cache system with unified 3-program support**:
