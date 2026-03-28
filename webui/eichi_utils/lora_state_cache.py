@@ -130,21 +130,27 @@ def generate_cache_key(model_files, lora_paths, lora_scales, fp8_enabled):
     items = []
 
     # model files are order independent
+    # DATA-H1修正: mtime+サイズでファイル変更を検出（mtime保存コピー対策）
     for path in sorted([str(p) for p in (model_files or [])]):
         if os.path.exists(path):
             items.append(path)
             items.append(str(os.path.getmtime(path)))
+            items.append(str(os.path.getsize(path)))
 
     # keep LoRA paths paired with their scale values when sorting
+    # DATA-M2修正: 存在しないパスもキーに含める（削除LoRAとの衝突回避）
     if lora_paths:
         scales = lora_scales or [None] * len(lora_paths)
         pairs = [(str(p), s) for p, s in zip(lora_paths, scales)]
         for path, scale in sorted(pairs, key=lambda x: x[0]):
+            items.append(path)  # パスは常に含める
             if os.path.exists(path):
-                items.append(path)
                 items.append(str(os.path.getmtime(path)))
-                if scale is not None:
-                    items.append(str(scale))
+                items.append(str(os.path.getsize(path)))
+            else:
+                items.append("MISSING")  # 存在しないことを明示
+            if scale is not None:
+                items.append(str(scale))
 
     items.append('fp8' if fp8_enabled else 'no_fp8')
     key_str = '|'.join(items)
