@@ -818,16 +818,13 @@ def get_state_snapshot():
     return snap
 
 
-def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
-    """独立したコンテキストを持つ新しいジョブを生成・開始する"""
+def _start_job_for_single_task(*worker_args, owner_sid=None, **worker_kwargs) -> JobContext:
+    """独立したコンテキストを持つ新しいジョブを生成・開始する。
+    F-2修正: owner_sidをパラメータで受け取り、グローバル変数経由の競合を排除。
+    """
     global generation_active, cur_job
     ctx = JobContext(on_publish_tap=_snapshot_tap_update)
-
-    try:
-        # owner(生成開始を押したタブ)のSIDを保存
-        ctx.owner_sid = globals().pop("_PENDING_OWNER_SID", None)
-    except Exception:
-        pass
+    ctx.owner_sid = owner_sid
 
     # ジョブ専用のstreamとフラグを持たせる
     ctx.stream = AsyncStream()
@@ -1511,9 +1508,7 @@ def encode_prompt_conds(
     llama_attention_length = int(llama_attention_mask.sum().item())
     src_layer = (hs[-3] if hs is not None and len(hs) >= 3 else (hs[-1] if hs is not None else last))
     llama_vec = src_layer[:, crop_start:llama_attention_length]  # upstream と同様に -3 層を使用
-    # （必要ならマスクも同様に crop 済みを使う。upstream では assert all(True) のみ）
-    # llama_attention_mask = llama_attention_mask[:, crop_start:llama_attention_length]
-    # assert torch.all(llama_attention_mask.bool())
+    del llama_outputs, hs, src_layer, last  # OOM-5修正: 全層hidden states を即解放
 
     # ------------------------------------------------------------
     # 3) CLIP 側：標準の 77 トークンでトークナイズ → pooler_output を取得
@@ -2679,11 +2674,14 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                         setup_image_encoder_if_loaded()
                     load_model_as_complete(image_encoder, target_device=gpu)
                 
-                reference_encoder_output = hf_clip_vision_encode(ref_image_np, feature_extractor, image_encoder)
-                
+                _ref_enc_out = hf_clip_vision_encode(ref_image_np, feature_extractor, image_encoder)
+                # OOM-7修正: 全ModelOutputを保持せず、使用有無フラグのみ残す
+                reference_encoder_output = (_ref_enc_out is not None)  # bool
+                del _ref_enc_out
+
                 if not high_vram:
                     image_encoder.to('cpu')
-                
+
                 print(translate("参照画像の処理が完了しました"))
                 
             except Exception as e:
@@ -2716,7 +2714,8 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             # CLIP Vision エンコード実行
             image_encoder_output = hf_clip_vision_encode(input_image_np, feature_extractor, image_encoder)
             image_encoder_last_hidden_state = image_encoder_output.last_hidden_state
-            
+            del image_encoder_output  # OOM-2修正: 全ModelOutputを即解放（last_hidden_stateのみ保持）
+
             # ローVRAMモードでは使用後すぐにCPUに戻す
             if not high_vram:
                 image_encoder.to('cpu')
@@ -3747,7 +3746,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
             
             total_generated_latent_frames += int(generated_latents.shape[2])
             history_latents = torch.cat([generated_latents.to(history_latents), history_latents], dim=2)
-
+            del generated_latents  # OOM-1修正: cat後に即解放
 
             # 緑の進捗バー 1
             push_progress(None, translate("Transformer Checking..."), 0, "[THEME=green]Transformer Checking...")
@@ -3933,22 +3932,39 @@ def worker(ctx: JobContext, *args, **kwargs):
     global generation_active, cur_job
     try:
         return _worker_impl(ctx, *args, **kwargs)
+    except BaseException:
+        # F-3修正: MemoryError/SystemExit等のBaseExceptionもキャッチして
+        # bus.close()とgeneration_active=Falseを保証する
+        raise
     finally:
+        # bus.close と generation_active リセットは何があっても実行する
+        # 各ステップを個別try/exceptで保護し、途中で死んでも次のステップを実行
         try:
             ctx.bus.publish(('end', None))
-        except Exception:
+        except BaseException:
             pass
-        ctx.done.set()
+        try:
+            ctx.done.set()
+        except BaseException:
+            pass
         try:
             ctx.bus.close()
-        except Exception:
+        except BaseException:
             pass
-        _cleanup_models(force=True)
-        # BUG-13修正: generation_active と cur_job を同一ロック内でアトミックに更新
-        with ctx_lock:
+        try:
+            _cleanup_models(force=True)
+        except BaseException:
+            pass
+        # F-3修正: generation_active リセットは最優先 — _cleanup_models()が
+        # MemoryError等で失敗しても必ず到達する
+        try:
+            with ctx_lock:
+                generation_active = False
+                if cur_job is ctx:
+                    cur_job = None
+        except BaseException:
+            # ロック取得すら失敗した場合のフォールバック
             generation_active = False
-            if cur_job is ctx:
-                cur_job = None
 
 def handle_open_folder_btn(folder_name):
     """フォルダ名を保存し、そのフォルダを開く - endframe_ichiと同じ実装"""
@@ -4038,7 +4054,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
             target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None,
             reference_batch_count=1, use_reference_queue=False,
             save_settings_on_start=False, alarm_on_completion=True,
-            log_enabled=None, log_folder=None, reuse_optimized_dict=False):
+            log_enabled=None, log_folder=None, reuse_optimized_dict=False,
+            _owner_sid=None):
     """画像生成のプロセス"""
 
     global stream
@@ -4624,7 +4641,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 batch_index, use_queue, prompt_queue_file,
                 # Kisekaeichi関連パラメータを追加
                 use_reference_image, reference_image_current,
-                target_index, history_index, reference_long_edge, input_mask, reference_mask
+                target_index, history_index, reference_long_edge, input_mask, reference_mask,
+                owner_sid=_owner_sid,  # F-2修正: パラメータ経由でオーナーSIDを渡す
             )
         except Exception:
             traceback.print_exc()
@@ -4647,7 +4665,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 gr.update(interactive=False, value=translate("このステップで打ち切り")),
                 gr.update(),
             )
-            generation_active = False
+            with ctx_lock:  # F-4修正: アトミック更新
+                generation_active = False
             return
 
         try:
@@ -4716,7 +4735,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 gr.update(interactive=False, value=translate("このステップで打ち切り")),
                 gr.update(),
             )
-            generation_active = False
+            with ctx_lock:  # F-4修正
+                generation_active = False
             return
 
         except Exception as e:
@@ -4735,7 +4755,8 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 gr.update(interactive=False, value=translate("このステップで打ち切り")),
                 gr.update(),
             )
-            generation_active = False
+            with ctx_lock:  # F-4修正
+                generation_active = False
             return
 
         finally:
@@ -4822,7 +4843,8 @@ def end_process():
             # バックグラウンドジョブに停止を通知
             ctx.done.set()
 
-    generation_active = False  # ★ global へ確実に反映
+    with ctx_lock:  # F-4修正: アトミック更新
+        generation_active = False
 
     # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
     return (
@@ -4994,45 +5016,46 @@ def start_or_follow(ui_session_id, *args):
     import gradio as gr
     global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed
 
-    # （重要）この Start を押したタブが "owner" であることを **これから始めるジョブ** に伝える。
-    # 生成中かどうかに関係なく、ここでセットしておくと未生成パスで確実に拾われる。
-    globals()["_PENDING_OWNER_SID"] = ui_session_id
+    # F-2修正: owner SIDはグローバル変数ではなくprocess()経由でパラメータ渡し
+    # (旧: globals()["_PENDING_OWNER_SID"] = ui_session_id)
 
     if is_generation_running():
-        # --- すでに生成実行中：新規開始は行わない ---
-        # UX のための軽い通知は “失敗しても処理は継続” させる（通知層は環境依存）。
+        # --- F-1修正: すでに生成実行中 → Resync同等の追随ストリームを開始 ---
+        # ブラウザを閉じて再度開いた場合でも、Startボタンだけで状況追随できる
         try:
-            gr.Info(translate("現在、生成を実施中です。進行中のジョブに追随するには『状況を再同期』を押してください。"), duration=4)
+            gr.Info(translate(“生成実行中のため、現在のジョブに自動追随します。”), duration=4)
         except Exception:
             pass
 
-        # “現状維持”の 1 フレームだけ返す（Start 無効 / End 有効 / 進捗はそのまま）
-        # ★ 値が無い項目は skip で既存表示を温存（UI初期化の誤上書きを回避）
+        # 最新1フレームを即返し
         yield _gui_frame_status_all(
             (_result_update(last_output_filename) if last_output_filename is not None else gr.skip()),
             (_preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.skip()),
             (last_progress_desc if last_progress_desc else gr.skip()),
             (last_progress_bar  if last_progress_bar  else gr.skip()),
-            gr.update(interactive=False, value=translate("Start Generation")),   # 実行中：Start は無効
-            gr.update(interactive=True,  value=translate("End Generation")),     # 実行中：End   は有効
-            gr.update(interactive=True),                                         # stop_after
-            gr.update(interactive=True),                                         # stop_step
+            gr.update(interactive=False, value=translate(“Start Generation”)),
+            gr.update(interactive=True,  value=translate(“End Generation”)),
+            gr.update(interactive=True),
+            gr.update(interactive=True),
             (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
         )
+
+        # 実行中のctxに追随（Resyncと同じメカニズム）
+        ctx = get_running_job_context()
+        if ctx is not None:
+            try:
+                for _frame in _stream_job_to_ui(ctx, owner=False):
+                    yield _frame
+            except Exception:
+                pass
         return
 
 
     # ---- 未生成：本処理（process）に委譲してストリームを流す ----
-    # "このタブが owner" であることを再度明示（上でセット済みだが、将来の呼び出し順変更に対する保険）
-    try:
-        globals()["_PENDING_OWNER_SID"] = ui_session_id
-    except Exception:
-        pass
 
-    # process は既存のストリーミング・ジェネレータ。
-    # ここでは **上流が組み立てた GUI フレームをそのまま中継** する（= 構造を変えない）。
-    for frame in process(*args):
-        yield frame # ※※上流フレーム中継（9 要素）※※ (pack し直さない)
+    # F-2修正: process にowner_sidを直接渡す（グローバル変数経由の競合を排除）
+    for frame in process(*args, _owner_sid=ui_session_id):
+        yield frame
 
 
 def on_resync_button_clicked(ui_session_id=None):
@@ -5347,6 +5370,11 @@ modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
 # JSを直接読み込み、グラディオにコードとして渡す
 with open(modal_js_path, encoding="utf8") as f:
     modal_js = f.read()
+# ブラウザ通知JS（生成完了時のデスクトップ通知）
+_notification_js_path = os.path.join(os.path.dirname(__file__), "notification.js")
+if os.path.exists(_notification_js_path):
+    with open(_notification_js_path, encoding="utf8") as f:
+        modal_js += "\n" + f.read()
 # アプリケーション起動時に保存された設定を読み込む
 saved_app_settings = load_app_settings_oichi()
 
@@ -7353,12 +7381,13 @@ with block:
     )
 
 
-    # 生成終了ボタン
+    # 生成終了ボタン（キャンセル確認ダイアログ付き）
     end_button.click(
         fn=end_process,
         outputs=[end_button, stop_after_button, stop_step_button],
         queue=False,
         api_name="end",
+        js="() => { if (!confirm('生成を中止しますか？ / Stop generation?')) { throw new Error('cancelled'); } }",
     )
 
 

@@ -36,8 +36,14 @@ def _inmem_get(cache_key):
 
 
 def _inmem_set(cache_key, state_dict):
-    """スレッド安全にオンメモリキャッシュへ保存"""
+    """スレッド安全にオンメモリキャッシュへ保存。
+    OOM-3修正: 最大1エントリのみ保持（古いエントリは全削除してからセット）。
+    LoRA state_dictは10-25GB/件なので、複数保持するとOOMの原因になる。
+    """
     with _INMEM_LOCK:
+        # 同一キーでなければ古いエントリを全て解放
+        if cache_key not in _INMEM_CACHE:
+            _INMEM_CACHE.clear()
         _INMEM_CACHE[cache_key] = state_dict
 
 

@@ -60,11 +60,27 @@ class FanoutQueue:
         return self._closed
 
     def publish(self, item) -> None:
-        """要素を全ての購読者に配信し履歴に保存する"""
+        """要素を全ての購読者に配信し履歴に保存する。
+
+        OOM-6修正: 履歴にはプレビュー画像(numpy array)を含めない。
+        progressイベントのpreview部分をNoneに置換して保存し、メモリ蓄積を防止。
+        ライブ購読者にはオリジナル（画像付き）を配信する。
+        """
         with self._lock:
             if self._closed:
                 return
-            self._history.append(item)
+            # 履歴にはプレビュー画像を除外した軽量コピーを保存
+            hist_item = item
+            try:
+                if (isinstance(item, tuple) and len(item) == 2
+                        and item[0] == 'progress'
+                        and isinstance(item[1], tuple) and len(item[1]) >= 3
+                        and item[1][0] is not None):
+                    # ('progress', (preview, desc, bar_html)) → preview=None
+                    hist_item = ('progress', (None, item[1][1], item[1][2]))
+            except Exception:
+                pass
+            self._history.append(hist_item)
 
             # スナップショット・タップ更新
             if self._on_publish_tap is not None:

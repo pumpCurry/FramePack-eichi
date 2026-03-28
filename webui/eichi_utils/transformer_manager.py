@@ -350,10 +350,8 @@ class TransformerManager:
             else:
                 self.transformer.to(self.device)
             
-            # 中間変数のクリーンアップ (state_dictは上で既にdel済み)
-            for _var_name in ('temp_dict', 'state_dict'):
-                if _var_name in locals():
-                    del locals()[_var_name]
+            # OOM-9修正: del locals()[...]はCPythonではno-opなので削除。
+            # state_dictは上のブロックで既にdel済み。
 
             # 状態を更新
             self.next_state['is_loaded'] = True
