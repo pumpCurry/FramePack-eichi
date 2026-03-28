@@ -326,10 +326,12 @@ class _UserStop(Exception):
 
 
 # --- ブラウザ再接続コア: 共通モジュールから読み込み ---
+import queue as _queue_mod                      # noqa: E402  BUG-5: timeout用
 from eichi_utils.resync_core import (          # noqa: E402
     FanoutQueue, JobContext, BUS_END_SENTINEL,
     alloc_ui_session_id as _alloc_ui_session_id_core,
     RESYNC_MIN_INTERVAL_MS, RESYNC_CTX_LINGER_SEC,
+    _DEFAULT_GET_TIMEOUT,
 )
 
 
@@ -441,8 +443,17 @@ RESYNC_CTX_LINGER_SEC: float = 1.0  # ジョブ切替の「谷間」を完了と
 
 # 追加設定: 再同期の最小間隔とアクティブ追随の管理
 RESYNC_MIN_INTERVAL_MS: int = 500
-_ACTIVE_RESYNCS: dict[str, float] = {}    # ui_session_id -> last_started_monotonic
-_LIVE_STREAMING: set[str] = set()         # 今まさにストリーム中の ui_session_id
+
+# BUG-2修正: OrderedDict で有界化 (最大128エントリー)
+# 古いセッションのエントリーが自動的に押し出される
+from collections import OrderedDict as _OrderedDict
+_ACTIVE_RESYNCS_MAX = 128
+_ACTIVE_RESYNCS: _OrderedDict = _OrderedDict()  # ui_session_id -> last_started_monotonic
+
+_LIVE_STREAMING: set = set()         # 今まさにストリーム中の ui_session_id
+
+# BUG-6修正: ロールオーバーループのデッドライン (秒)
+_ROLLOVER_DEADLINE_SEC = 120.0
 
 
 # ===== 先行GC/メモリ安全化ユーティリティ =====
@@ -692,13 +703,17 @@ def progress_resync():
         ctx = cur_job
     if not ctx:
         return
-    q = ctx.bus.subscribe()
+    bus_ref = ctx.bus  # BUG-8修正: bus参照をキャプチャ
+    q = bus_ref.subscribe()
     try:
         while True:
-            item = q.get()
-            # バス終了用センチネルとして名前付き定数を使用
-            if item is None:
+            # BUG-5修正: タイムアウト付き get() で永久ハングを防止
+            try:
+                item = q.get(timeout=_DEFAULT_GET_TIMEOUT)
+            except _queue_mod.Empty:
+                # worker が死亡して bus.close() が呼ばれなかった
                 break
+            # BUG-9修正: None チェック削除 (BUS_END_SENTINEL は (None,None))
             if item == BUS_END_SENTINEL:
                 # 生成が続いている間はセンチネルを無視して継続
                 # 中間（画像単位）の完了か、全体（バッチ）の完了かを判断
@@ -727,7 +742,7 @@ def progress_resync():
     finally:
         # 購読解除は例外安全に
         try:
-            ctx.bus.unsubscribe(q)
+            bus_ref.unsubscribe(q)
         except Exception:
             pass
 
@@ -822,9 +837,10 @@ def _start_job_for_single_task(*worker_args, **worker_kwargs) -> JobContext:
         ctx.stop_mode = stop_mode
     # 既存コードの互換性のため、グローバルにも参照を残す（参照先はこのctx）
     globals()['stream'] = ctx.stream
+    # BUG-13修正: generation_active と cur_job を同一ロック内でアトミックに更新
     with ctx_lock:
         cur_job = ctx
-    generation_active = True
+        generation_active = True
     async_run(worker, ctx, *worker_args, **worker_kwargs)
     return ctx
 
@@ -864,9 +880,16 @@ def _stream_job_to_ui(ctx: "JobContext", owner: bool = False):
     q = bus_ref.subscribe()
 
     try:
-        # イベントループ
+        # イベントループ (BUG-5修正: タイムアウト付き)
         while True:
-            item = q.get()
+            try:
+                item = q.get(timeout=_DEFAULT_GET_TIMEOUT)
+            except _queue_mod.Empty:
+                # worker が死亡して bus.close() が呼ばれなかった場合
+                break
+            # BUG-10修正: 不正な None アイテムの防御
+            if item is None or not isinstance(item, tuple):
+                continue
             if item == BUS_END_SENTINEL:
                 # 完了（まとめの最終フレーム）
                 last_stop_mode = ctx.stop_mode
@@ -3921,8 +3944,9 @@ def worker(ctx: JobContext, *args, **kwargs):
         except Exception:
             pass
         _cleanup_models(force=True)
-        generation_active = False
+        # BUG-13修正: generation_active と cur_job を同一ロック内でアトミックに更新
         with ctx_lock:
+            generation_active = False
             if cur_job is ctx:
                 cur_job = None
 
@@ -4764,8 +4788,9 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         print(translate("【全バッチ処理完了】プロセスが完了しました - ") + time.strftime("%Y-%m-%d %H:%M:%S"))
         print("*" * 50)
 
-    generation_active = False
+    # BUG-13修正: アトミック更新
     with ctx_lock:
+        generation_active = False
         cur_job = None
     return
 
@@ -5037,13 +5062,28 @@ def on_resync_button_clicked(ui_session_id=None):
     import gradio as gr
     global last_output_filename, last_preview_image, last_progress_desc, last_progress_bar, current_seed
 
-    # フォールバック：未設定なら匿名 ID を都度払い出し（多重抑止・連打ガードのキー用）
+    # BUG-1修正: block.load未完了の匿名セッションはストリーミングに入らない。
+    # スナップショット1フレームのみ返す。
     if not ui_session_id:
+        import gradio as gr
         try:
-            import uuid as _uuid
-            ui_session_id = f"anon-{_uuid.uuid4().hex}"
+            snap = get_state_snapshot()
         except Exception:
-            ui_session_id = "anon"
+            snap = {}
+        running = bool(is_generation_running()) if callable(is_generation_running) else False
+        print(f"[RESYNC] block.load未完了（匿名セッション）: スナップショットのみ返却 running={running}")
+        yield _gui_frame_status_all(
+            (_result_update(snap.get("result_image") or last_output_filename) if (snap.get("result_image") or last_output_filename) else gr.skip()),
+            (_preview_update(snap.get("last_preview_image"), force_visible=True) if snap.get("last_preview_image") else gr.update(visible=True)),
+            (gr.update(value=snap.get("last_progress_desc", ""), visible=True)),
+            (gr.update(value=snap.get("last_progress_bar", ""), visible=True)),
+            gr.update(interactive=not running, value=translate("Start Generation")),
+            gr.update(interactive=running, value=translate("End Generation")),
+            gr.update(interactive=running),
+            gr.update(interactive=running),
+            (gr.update(value=snap.get("seed")) if snap.get("seed") is not None else gr.skip()),
+        )
+        return
 
     # --- 実行中判定 & 現 ctx 取得 ---
     try:
@@ -5135,6 +5175,9 @@ def on_resync_button_clicked(ui_session_id=None):
                 _LIVE_STREAMING.add(ui_session_id)
                 live_registered = True
                 _ACTIVE_RESYNCS[ui_session_id] = _tmod.monotonic()
+                # BUG-2修正: サイズ制限 (古いエントリーを自動削除)
+                while len(_ACTIVE_RESYNCS) > _ACTIVE_RESYNCS_MAX:
+                    _ACTIVE_RESYNCS.popitem(last=False)
                 print(translate(f"[RESYNC] 追随開始（履歴→ライブへアタッチ） sid={ui_session_id} running={running}"))
 
             # --- 現在 ctx の履歴→ライブ追随（画像 1 枚ぶん） ---
@@ -5145,8 +5188,14 @@ def on_resync_button_clicked(ui_session_id=None):
             _linger_sec = float(globals().get("RESYNC_CTX_LINGER_SEC", 1.0))
             _linger_until = None
             _last_ctx = ctx
+            # BUG-6修正: ループ全体のデッドライン (generation_active=True スタック防止)
+            _rollover_deadline = _tmod.monotonic() + _ROLLOVER_DEADLINE_SEC
 
             while True:
+                # BUG-6修正: デッドラインチェック
+                if _tmod.monotonic() > _rollover_deadline:
+                    print(f"[RESYNC] ロールオーバーデッドライン超過 ({_ROLLOVER_DEADLINE_SEC}秒) sid={ui_session_id}")
+                    break
                 try:
                     _cur_ctx = get_running_job_context()
                 except Exception:
@@ -5207,11 +5256,26 @@ def on_resync_button_clicked(ui_session_id=None):
             print(translate("[RESYNC] ストリーム終了: 追随完了"))
             return
 
-        except Exception:
-            # 追随中の一時例外は上層のロールオーバーで吸収を試みるため握りつぶす
-            # （致命的エラーであれば上位がストリームを終了させる）
-            print(translate("[RESYNC] 追随中に例外を検出（ロールオーバーで継続を試みる）"))
-            pass
+        except Exception as _resync_exc:
+            # BUG-7修正: 追随中の例外時にリカバリーフレームを返し、UIを整合状態に戻す
+            print(f"[RESYNC] 追随中に例外を検出: {_resync_exc}")
+            try:
+                import traceback as _tb_mod
+                _tb_mod.print_exc()
+                # リカバリーフレーム: ボタン状態を待機に戻す
+                yield _gui_frame_status_all(
+                    (_result_update(last_output_filename) if last_output_filename is not None else gr.skip()),
+                    (_preview_update(last_preview_image) if last_preview_image is not None else gr.skip()),
+                    gr.update(value=translate("再同期中にエラーが発生しました。再度お試しください。"), visible=True),
+                    gr.update(value="", visible=True),
+                    gr.update(interactive=True, value=translate("Start Generation")),
+                    gr.update(interactive=False, value=translate("End Generation")),
+                    gr.update(interactive=False),
+                    gr.update(interactive=False),
+                    (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
+                )
+            except Exception:
+                pass
         finally:
             # 同 UUID の多重ストリーム抑止の解除（呼び出し全体の終端で必ず解放）
             if live_registered and ui_session_id:
@@ -5272,62 +5336,6 @@ def _gui_frame_status_all(result_upd, preview_upd, desc_upd, bar_upd,
 def _gui_frame_progress_tiny(preview, desc, bar_html):
     """GUI 進捗フレーム（従来の 3 要素）を返す。"""
     return (preview, desc, bar_html)
-
-
-    ctx = get_running_job_context()
-    if ctx is not None and is_generation_running():
-        # 実行中：1) 直近フレームを即返し
-        yield _gui_frame_status_all(
-            _result_update(last_output_filename) if last_output_filename is not None else gr.update(),
-            _preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.update(visible=True),
-            (last_progress_desc or gr.update()),
-            (last_progress_bar or gr.update()),
-            gr.update(interactive=False, value=translate("Start Generation")),
-            gr.update(interactive=True,  value=translate("End Generation")),
-            gr.update(interactive=True),
-            gr.update(interactive=True),
-            current_seed,
-        )
-        # 2) バス追随（履歴→ライブ）
-        for preview, desc, bar_html in progress_resync():
-            yield _gui_frame_status_all(
-                gr.skip(),  # result_image は保存完了の別経路でのみ更新
-                (_preview_update(preview, force_visible=True) if preview is not None else gr.skip()),
-                (gr.update(value=desc) if isinstance(desc, str) else gr.skip()),
-                (gr.update(value=bar_html) if isinstance(bar_html, str) else gr.skip()),
-                gr.update(interactive=False, value=translate("Start Generation")),
-                gr.update(interactive=True,  value=translate("End Generation")),
-                gr.update(interactive=True),
-                gr.update(interactive=True),
-                gr.skip(),  # seed は通常固定
-            )
-        # 3) 完了時に UI を待機状態に整える
-        yield _gui_frame_status_all(
-            gr.skip(),
-            gr.skip(),
-            gr.update(value=translate("全てのバッチ処理が完了しました")),
-            gr.skip(),
-            gr.update(interactive=True,  value=translate("Start Generation")),
-            gr.update(interactive=False, value=translate("End Generation")),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.skip(),
-        )
-        return
-    
-    # 非実行：最後のスナップショットを単発返却
-    snap = get_state_snapshot()
-    yield _gui_frame_status_all(
-        _result_update(snap.get("result_image") or last_output_filename) if (snap.get("result_image") or last_output_filename) else gr.update(),
-        _preview_update(snap.get("last_preview_image"), force_visible=True) if snap.get("last_preview_image") else gr.update(visible=True),
-        gr.update(value=snap.get("last_progress_desc", "")),
-        gr.update(value=snap.get("last_progress_bar", "")),
-        gr.update(interactive=True,  value=translate("Start Generation")),
-        gr.update(interactive=False, value=translate("End Generation")),
-        gr.update(interactive=False),
-        gr.update(interactive=False),
-        snap.get("seed"),
-        )
 
 
 #----------

@@ -11,7 +11,6 @@ FanoutQueue (pub-sub with history replay) と JobContext (per-job state)
 import queue
 import threading
 import uuid
-import weakref
 from collections import deque
 
 
@@ -19,6 +18,10 @@ from collections import deque
 # センチネル
 # ====================================================================
 BUS_END_SENTINEL = (None, None)
+
+# q.get() のデフォルトタイムアウト (秒)
+# worker が死亡して bus.close() が呼ばれなかった場合にハングを防ぐ
+_DEFAULT_GET_TIMEOUT = 60.0
 
 
 # ====================================================================
@@ -32,21 +35,29 @@ class FanoutQueue:
     ブラウザの再接続時に履歴を再生することで、状態を復元する。
     """
 
-    def __init__(self, maxlen: int = 200, maxsize: int = 64,
+    def __init__(self, maxlen: int = 200, maxsize: int = 200,
                  on_publish_tap=None):
         """
         Args:
             maxlen: 履歴バッファの最大長
-            maxsize: 各購読キューの最大サイズ
+            maxsize: 各購読キューの最大サイズ (maxlen と同じにして
+                     履歴ドロップを防止)
             on_publish_tap: publish時に呼ばれるコールバック。
                             fn(item) → None。last_* グローバル更新等に使用。
         """
         self._history = deque(maxlen=maxlen)
-        self._subs = weakref.WeakSet()
+        # BUG-15修正: WeakSet → 通常の set
+        # CPython 以外(PyPy等)で GC により購読キューが消失するのを防止。
+        # unsubscribe() で明示的に除去する。
+        self._subs: set = set()
         self._lock = threading.Lock()
         self._maxsize = maxsize
         self._closed = False
         self._on_publish_tap = on_publish_tap
+
+    @property
+    def is_closed(self) -> bool:
+        return self._closed
 
     def publish(self, item) -> None:
         """要素を全ての購読者に配信し履歴に保存する"""
@@ -74,7 +85,11 @@ class FanoutQueue:
                         pass
 
     def subscribe(self) -> queue.Queue:
-        """キューに購読し既存の履歴を即座に受け取る"""
+        """キューに購読し既存の履歴を即座に受け取る。
+
+        BUG-16修正: maxsize を maxlen と揃えることで、
+        遅れて接続したブラウザが seed/file イベントを取りこぼさない。
+        """
         q: queue.Queue = queue.Queue(maxsize=self._maxsize)
         with self._lock:
             for item in list(self._history):
@@ -84,19 +99,12 @@ class FanoutQueue:
                     break
             self._subs.add(q)
             if self._closed:
-                try:
-                    q.put_nowait(BUS_END_SENTINEL)
-                except queue.Full:
-                    _ = q.get_nowait()
-                    q.put_nowait(BUS_END_SENTINEL)
+                self._force_sentinel(q)
         return q
 
     def unsubscribe(self, q: queue.Queue) -> None:
         with self._lock:
-            try:
-                self._subs.discard(q)
-            except Exception:
-                pass
+            self._subs.discard(q)
 
     def clear(self) -> None:
         """履歴と全ての購読キューをクリアする"""
@@ -116,15 +124,32 @@ class FanoutQueue:
                 return
             self._closed = True
             for q in list(self._subs):
-                try:
-                    q.put_nowait(BUS_END_SENTINEL)
-                except queue.Full:
-                    try:
-                        _ = q.get_nowait()
-                        q.put_nowait(BUS_END_SENTINEL)
-                    except Exception:
-                        pass
+                self._force_sentinel(q)
             self._subs.clear()
+
+    # BUG-17修正: sentinel配信を最大3回リトライし、
+    # それでも失敗したらキューをフラッシュして強制配信
+    def _force_sentinel(self, q: queue.Queue) -> None:
+        """購読キューにsentinelを確実に配信する (ロック内で呼ぶこと)"""
+        for _ in range(3):
+            try:
+                q.put_nowait(BUS_END_SENTINEL)
+                return  # 成功
+            except queue.Full:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    pass
+        # 最終手段: キューを完全にフラッシュしてからsentinelを入れる
+        while not q.empty():
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            q.put_nowait(BUS_END_SENTINEL)
+        except Exception:
+            pass  # ここまで来たら諦める (理論上到達不可能)
 
 
 # ====================================================================

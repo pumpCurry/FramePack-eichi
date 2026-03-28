@@ -144,3 +144,75 @@ class TestSentinel:
 
     def test_sentinel_is_tuple(self):
         assert isinstance(BUS_END_SENTINEL, tuple)
+
+
+class TestBugFixes:
+    """監査で発見されたバグの修正を検証するテスト"""
+
+    def test_bug15_uses_regular_set(self):
+        """BUG-15: WeakSet → 通常の set でGC耐性"""
+        fq = FanoutQueue()
+        assert isinstance(fq._subs, set)
+
+    def test_bug16_maxsize_matches_maxlen(self):
+        """BUG-16: maxsize デフォルトが maxlen と一致（履歴ドロップ防止）"""
+        fq = FanoutQueue(maxlen=200)
+        assert fq._maxsize == 200
+
+    def test_bug17_sentinel_on_full_queue(self):
+        """BUG-17: キューが満杯でもsentinelが配信される"""
+        fq = FanoutQueue(maxlen=5, maxsize=5)
+        q = fq.subscribe()
+        for i in range(5):
+            fq.publish(("fill", i))
+        fq.close()
+        items = []
+        while not q.empty():
+            items.append(q.get_nowait())
+        assert items[-1] == BUS_END_SENTINEL
+
+    def test_bug5_get_timeout(self):
+        """BUG-5: q.get(timeout=...) でタイムアウト可能"""
+        import queue
+        fq = FanoutQueue(maxlen=10, maxsize=10)
+        q = fq.subscribe()
+        # publish/closeなしでタイムアウトすること
+        try:
+            q.get(timeout=0.1)
+            assert False, "Should have raised Empty"
+        except queue.Empty:
+            pass
+
+    def test_bug5_sentinel_delivered_on_close(self):
+        """BUG-5: close()後のget(timeout)でsentinelが取れる"""
+        fq = FanoutQueue(maxlen=10, maxsize=10)
+        q = fq.subscribe()
+        fq.close()
+        item = q.get(timeout=1)
+        assert item == BUS_END_SENTINEL
+
+    def test_subscribe_after_close_gets_sentinel(self):
+        """close後のsubscribeでもsentinelが即時配信"""
+        fq = FanoutQueue(maxlen=10, maxsize=10)
+        fq.close()
+        q = fq.subscribe()
+        item = q.get(timeout=1)
+        assert item == BUS_END_SENTINEL
+
+    def test_close_idempotent(self):
+        """close()の二重呼び出しでエラーにならない"""
+        fq = FanoutQueue()
+        fq.close()
+        fq.close()
+        assert fq.is_closed
+
+    def test_is_closed_property(self):
+        fq = FanoutQueue()
+        assert not fq.is_closed
+        fq.close()
+        assert fq.is_closed
+
+    def test_default_get_timeout_exported(self):
+        """_DEFAULT_GET_TIMEOUT が定義されている"""
+        assert hasattr(rc, '_DEFAULT_GET_TIMEOUT')
+        assert rc._DEFAULT_GET_TIMEOUT > 0
