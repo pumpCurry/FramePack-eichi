@@ -336,11 +336,11 @@ from eichi_utils.resync_core import (          # noqa: E402
 
 
 def _snapshot_tap_update(item):
-    “””
-    イベントバスに流れた内容を last_* 系へ”写し取る”だけの軽量更新。
+    """
+    イベントバスに流れた内容を last_* 系へ"写し取る"だけの軽量更新。
     oneframe固有のグローバル変数に依存するため、ここにローカル定義として残す。
     FanoutQueue の on_publish_tap コールバックとして渡される。
-    “””
+    """
     try:
         kind, payload = item
     except Exception:
@@ -720,7 +720,7 @@ def progress_resync():
                 # 画像完了/バッチ完了の切替点。ここでは「_gui_frame_progress_tiny(常に3要素のみ)」を返す契約を厳守する。
                 # 注意) _gui_frame_status_all(9要素)を返すと購読契約違反で即切断される
                 if is_generation_running():
-                    # 次ジョブへ移る“谷間”：軽いサマリだけ返して継続
+                    # 次ジョブへ移る"谷間"：軽いサマリだけ返して継続
                     _summary = (
                         f"参考画像 {progress_ref_idx}/{progress_ref_total} , "
                         f"実施予定数 {progress_img_idx}/{progress_img_total}"
@@ -1349,7 +1349,7 @@ def encode_prompt_conds(
     prompt_list = [prompt]  # 下流の API 都合でリスト化
 
     # ------------------------------------------------------------
-    # 0) LLaMA / CLIP の“想定順序”を自動判定し、逆なら tokenizer ごと入れ替える
+    # 0) LLaMA / CLIP の"想定順序"を自動判定し、逆なら tokenizer ごと入れ替える
     #    - upstream 実装は「第1引数=LLaMA / 第2引数=CLIP」という前提で hidden_states[-3] を使用
     # ------------------------------------------------------------
     def _model_type(m):
@@ -1372,7 +1372,7 @@ def encode_prompt_conds(
         tokenizer, tokenizer_2 = tokenizer_2, tokenizer
 
     # ------------------------------------------------------------
-    # 1) どの呼び出し経路でも hidden_states / ModelOutput を返すよう“要求”を徹底
+    # 1) どの呼び出し経路でも hidden_states / ModelOutput を返すよう"要求"を徹底
     #    - 一部モデルは kwargs を受け取らない実装があるため、その場合は config 側を可能な範囲で補助
     # ------------------------------------------------------------
     def _force_cfg(obj):
@@ -2973,7 +2973,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                     except Exception as e:
                         print(translate("テキストエンコーダのforward差し替えに失敗しました: {0}").format(e))
                         
-                    # できる範囲だけ config を“穏当に”立てる -----------------------------------
+                    # できる範囲だけ config を"穏当に"立てる -----------------------------------
                     def _try_enable_config_flags(model_obj):
                         for inner_attr in (None, "text_model", "model"):
                             target = getattr(model_obj, inner_attr, model_obj) if inner_attr else model_obj
@@ -4918,13 +4918,13 @@ def end_process():
     )
 
 
-# --- トグル式：この生成で打ち切り（押下で即“処理中”、未確定なら再クリックでキャンセル） ---
+# --- トグル式：この生成で打ち切り（押下で即"処理中"、未確定なら再クリックでキャンセル） ---
 def toggle_stop_after_current():
     global stop_after_current, batch_stopped, stop_mode
     with ctx_lock:
         ctx = cur_job
 
-    # まだリクエストされていない → リクエスト開始（UIは即“処理中”）
+    # まだリクエストされていない → リクエスト開始（UIは即"処理中"）
     if not stop_after_current:
         stop_after_current = True
         stop_mode = "image"
@@ -4939,7 +4939,7 @@ def toggle_stop_after_current():
         )
 
     # すでにリクエスト中 → キャンセル判定
-    # “この生成で打ち切り”は通常 'end' を即送らないので、送られていなければキャンセル可
+    # "この生成で打ち切り"は通常 'end' を即送らないので、送られていなければキャンセル可
     sent_end = False
     if ctx is not None:
         try:
@@ -4968,13 +4968,13 @@ def toggle_stop_after_current():
         gr.update(interactive=True),  # Endボタンを復帰
     )
 
-# --- トグル式：このステップで打ち切り（押下で即“処理中”、未送信なら再クリックでキャンセル） ---
+# --- トグル式：このステップで打ち切り（押下で即"処理中"、未送信なら再クリックでキャンセル） ---
 def toggle_stop_after_step():
     global stop_after_step, stop_after_current, batch_stopped, stop_mode
     with ctx_lock:
         ctx = cur_job
 
-    # まだリクエストされていない → リクエスト開始（UIは即“処理中”）
+    # まだリクエストされていない → リクエスト開始（UIは即"処理中"）
     if not stop_after_step:
         stop_after_step = True
         stop_after_current = True  # 後続バッチも止める
@@ -5021,7 +5021,7 @@ def toggle_stop_after_step():
 
 def _preflight_start_guard():
     """
-    生成開始の“事前検査（preflight）”。
+    生成開始の"事前検査（preflight）"。
     - queue=False で即時実行される。
     - 生成中であれば gr.Error を raise して中断する（UIは不変で赤モーダルのみ）。
     - 生成中でなければ None を返す（後段 .success へ進む）。
@@ -5063,7 +5063,7 @@ def start_or_follow(ui_session_id, *args):
     目的（＝"Start"に対する操作契約）:
       - 実行中（= 既に生成ジョブが存在）:
           * 新規ジョブは一切開始しない（＝多重開始を防ぐ）
-          * 代わりに **GUI を“現状維持フレーム”で 1 回だけ** 更新して即終了
+          * 代わりに **GUI を"現状維持フレーム"で 1 回だけ** 更新して即終了
           * 利用者の理解を助けるトースト通知（gr.Info）は、通知層の失敗で本流が止まらないよう局所 try/except で囲む
       - 未実行（= 生成ジョブなし）:
           * 既存の process(*args) へ委譲し、逐次フレーム（yield）でストリーム
@@ -5087,7 +5087,7 @@ def start_or_follow(ui_session_id, *args):
         # --- F-1修正: すでに生成実行中 → Resync同等の追随ストリームを開始 ---
         # ブラウザを閉じて再度開いた場合でも、Startボタンだけで状況追随できる
         try:
-            gr.Info(translate(“生成実行中のため、現在のジョブに自動追随します。”), duration=4)
+            gr.Info(translate("生成実行中のため、現在のジョブに自動追随します。"), duration=4)
         except Exception:
             pass
 
@@ -5097,8 +5097,8 @@ def start_or_follow(ui_session_id, *args):
             (_preview_update(last_preview_image, force_visible=True) if last_preview_image is not None else gr.skip()),
             (last_progress_desc if last_progress_desc else gr.skip()),
             (last_progress_bar  if last_progress_bar  else gr.skip()),
-            gr.update(interactive=False, value=translate(“Start Generation”)),
-            gr.update(interactive=True,  value=translate(“End Generation”)),
+            gr.update(interactive=False, value=translate("Start Generation")),
+            gr.update(interactive=True,  value=translate("End Generation")),
             gr.update(interactive=True),
             gr.update(interactive=True),
             (gr.update(value=current_seed) if current_seed is not None else gr.skip()),
@@ -5130,7 +5130,7 @@ def on_resync_button_clicked(ui_session_id=None):
       1) 押下直後に **必ず「最新 1 フレーム」** を返して GUI の整合（ボタン状態／進捗表示）を即時回復する。
       2) 実行中のとき:
          - owner 本人（= Start を押したタブ）は **二重追跡しない**（1 フレーム返して即終了）
-         - 非 owner は **履歴→ライブ** で追随を開始し、ジョブ間の切替“谷間”にも **ロールオーバー**で追随継続
+         - 非 owner は **履歴→ライブ** で追随を開始し、ジョブ間の切替"谷間"にも **ロールオーバー**で追随継続
          - **3-2（本関数の重要要件）**:
              a. 連打ガード（同一 UI セッションに対し、最小間隔内の再同期要求は 1 フレームだけ返して終了）
              b. 同 UUID の **同時多重ストリーム抑止**（既にストリーミング中なら 1 フレームだけ返して終了）
@@ -5139,7 +5139,7 @@ def on_resync_button_clicked(ui_session_id=None):
 
     実装メモ:
       - 連打ガードの最小間隔は RESYNC_MIN_INTERVAL_MS（既定 500ms）
-      - “谷間”判定の猶予は RESYNC_CTX_LINGER_SEC（既定 1.0s）
+      - "谷間"判定の猶予は RESYNC_CTX_LINGER_SEC（既定 1.0s）
       - 同 UUID 多重ストリーム抑止は `_LIVE_STREAMING` セットで実現。
         この関数呼出しの **追随開始～ロールオーバー追随全体** を覆う try/finally で
         add/discard することで「実処理中は常に"占有中"」を保証する。
@@ -5183,7 +5183,7 @@ def on_resync_button_clicked(ui_session_id=None):
         running = False
     ctx_active = (ctx is not None)  # ★ ctx があれば「ジョブは起動中（前処理含む）」と見なす
 
-    # --- 実行フロー（ctx の存在で優先分岐。running==False でも“実行中UI”の1フレームを必ず返す） ---
+    # --- 実行フロー（ctx の存在で優先分岐。running==False でも"実行中UI"の1フレームを必ず返す） ---
     if ctx_active:
 
         # 0) 連打ガード：同一 UI セッションの最小間隔内の再同期は "最新 1 フレーム" だけ返して即終了。
@@ -5205,7 +5205,7 @@ def on_resync_button_clicked(ui_session_id=None):
                 )
                 return
         except Exception:
-            # ガード自体の失敗は“緩め”に扱う：以降のフローでカバーされる
+            # ガード自体の失敗は"緩め"に扱う：以降のフローでカバーされる
             pass
 
         # 1) 押下直後の "最新 1 フレーム" を必ず返す（GUI 整合の即時回復）
@@ -5234,7 +5234,7 @@ def on_resync_button_clicked(ui_session_id=None):
                 print(translate(f"[RESYNC] オーナー自身の再同期: 二重追跡せず 1 フレームのみで終了 sid={ui_session_id}"))
                 return
         except Exception:
-            # owner 判定に失敗しても、以降は“非 owner 扱い”で追随継続可
+            # owner 判定に失敗しても、以降は"非 owner 扱い"で追随継続可
             pass
 
         # 3) 非 owner：現在のctxに対して履歴→ライブで追随
@@ -5369,7 +5369,7 @@ def on_resync_button_clicked(ui_session_id=None):
                 _LIVE_STREAMING.discard(ui_session_id)
                 print(translate(f"[RESYNC] 多重抑止解除 sid={ui_session_id}"))
 
-        # ここまで到達するのは通常 “return” 済みだが、念のため
+        # ここまで到達するのは通常 "return" 済みだが、念のため
         return
 
     # --- 非実行：スナップショット 1 フレームで UI 復旧（単発。ストリーム開始はしない） ---
@@ -7476,7 +7476,7 @@ with block:
     )
 
 
-    # 実行中 JobContext を返す関数も“1つだけ”定義
+    # 実行中 JobContext を返す関数も"1つだけ"定義
     def get_running_job_context() -> Optional["JobContext"]:
         global cur_job
         with ctx_lock:
@@ -7504,7 +7504,7 @@ with block:
         api_name="/resync_progress",
     )
 
-    # Gradio 3/4 互換で “イベント側の並列枠” を 2 にする
+    # Gradio 3/4 互換で "イベント側の並列枠" を 2 にする
     try:
         import gradio as _gr
         _ver = tuple(int(p) for p in getattr(_gr, "__version__", "4.0").split(".")[:2])
