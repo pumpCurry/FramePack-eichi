@@ -1,104 +1,113 @@
-// === モーダルプレビュー ===
-// Gradio js= パラメータ向け: このファイルは AsyncFunction の本体として実行される。
-// アロー関数リテラルで囲まないこと。
-
-function _eichiEnsureDialog() {
-  var dialog = document.getElementById("modal_dlg");
-  if (!dialog) {
-    dialog = document.createElement("dialog");
-    dialog.id = "modal_dlg";
-    var img = document.createElement("img");
-    img.alt = "preview";
-    dialog.appendChild(img);
-    document.body.appendChild(dialog);
-  }
-  var dialogImg = dialog.querySelector("img");
-  if (!dialog._modalBound) {
-    dialog.addEventListener("click", function() { dialog.close(); });
-    dialog.addEventListener("close", function() { dialogImg.src = ""; });
-    dialog._modalBound = true;
-  }
-  return { dialog: dialog, dialogImg: dialogImg };
-}
-
-function _eichiPickImageEl(host) {
-  return host.querySelector(".image-frame img") || host.querySelector("img");
-}
-
-function _eichiBuildButtonLike(fullBtn) {
-  var btn = document.createElement("button");
-  var baseClass = fullBtn ? fullBtn.className : "svelte-vzs2gq padded";
-  var inner = fullBtn ? fullBtn.querySelector("div") : null;
-  var innerClass = inner ? inner.className : "svelte-vzs2gq small";
-  btn.className = baseClass + " view-modal-btn";
-  btn.setAttribute("aria-label", "View modal screen");
-  btn.title = "View modal screen";
-  btn.innerHTML =
-    '<div class="' + innerClass +
-    '"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M4 4h16v16H4z"/></svg></div>';
-  return btn;
-}
-
-function _eichiAddBtnIntoBar(bar, host, dialogRefs) {
-  if (!bar || bar.querySelector(".view-modal-btn")) return;
-  var fullBtn = bar.querySelector(
-    'button[aria-label="View in full screen"],button[title="View in full screen"],button[aria-label="View fullscreen"],button[title="View fullscreen"],button[aria-label="View full screen"],button[title="View full screen"]'
-  );
-  var btn = _eichiBuildButtonLike(fullBtn);
-  var dialog = dialogRefs.dialog;
-  var dialogImg = dialogRefs.dialogImg;
-
-  function updateBtn() {
-    var img = _eichiPickImageEl(host);
-    var hasImage = !!(img && (img.currentSrc || img.src));
-    btn.style.display = hasImage ? "" : "none";
-    btn.disabled = !hasImage;
+() => {
+  // --- helpers -------------------------------------------------------------
+  function ensureDialog() {
+    let dialog = document.getElementById("modal_dlg");
+    if (!dialog) {
+      dialog = document.createElement("dialog");
+      dialog.id = "modal_dlg";
+      const img = document.createElement("img");
+      img.alt = "preview";
+      dialog.appendChild(img);
+      document.body.appendChild(dialog);
+    }
+    const dialogImg = dialog.querySelector("img");
+    // safety: rebind once
+    if (!dialog._modalBound) {
+      dialog.addEventListener("click", () => dialog.close());
+      dialog.addEventListener("close", () => {
+        dialogImg.src = "";
+      });
+      dialog._modalBound = true;
+    }
+    return { dialog, dialogImg };
   }
 
-  btn.onclick = function() {
-    var img = _eichiPickImageEl(host);
-    var src = img && (img.currentSrc || img.src);
-    if (!src) return;
-    dialogImg.src = src;
-    dialog.showModal();
-  };
+  function pickImageEl(host) {
+    // 実画像を優先して取得（ラベルのSVG等を拾わない）
+    return (
+      host.querySelector(".image-frame img") ||
+      host.querySelector("img")
+    );
+  }
 
-  if (fullBtn && fullBtn.parentNode === bar) {
-    bar.insertBefore(btn, fullBtn);
+  function buildButtonLike(fullBtn) {
+    const btn = document.createElement("button");
+    // 既存の全画面ボタンがあれば見た目を継承、なければフォールバック
+    const baseClass = fullBtn ? fullBtn.className : "svelte-vzs2gq padded";
+    const inner = fullBtn ? fullBtn.querySelector("div") : null;
+    const innerClass = inner ? inner.className : "svelte-vzs2gq small";
+    btn.className = baseClass + " view-modal-btn";
+    btn.setAttribute("aria-label", "View modal screen");
+    btn.title = "View modal screen";
+    btn.innerHTML =
+      '<div class="' +
+      innerClass +
+      '"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M4 4h16v16H4z"/></svg></div>';
+    return btn;
+  }
+
+  function addBtnIntoBar(bar, host, dialogRefs) {
+    if (!bar || bar.querySelector(".view-modal-btn")) return;
+    // 既存のフルスクリーンボタン（スタイルのひな型）
+    const fullBtn = bar.querySelector(
+      'button[aria-label="View in full screen"],button[title="View in full screen"],button[aria-label="View fullscreen"],button[title="View fullscreen"],button[aria-label="View full screen"],button[title="View full screen"]'
+    );
+    const btn = buildButtonLike(fullBtn);
+    const { dialog, dialogImg } = dialogRefs;
+
+    function updateBtn() {
+      const img = pickImageEl(host);
+      const hasImage = !!(img && (img.currentSrc || img.src));
+      btn.style.display = hasImage ? "" : "none";
+      btn.disabled = !hasImage;
+    }
+
+    btn.onclick = () => {
+      const img = pickImageEl(host);
+      const src = img && (img.currentSrc || img.src);
+      if (!src) return;
+      dialogImg.src = src;
+      dialog.showModal();
+    };
+
+    // 既存ボタンの手前に入れる／無ければ先頭に
+    if (fullBtn && fullBtn.parentNode === bar) {
+      bar.insertBefore(btn, fullBtn);
+    } else {
+      bar.insertBefore(btn, bar.firstChild);
+    }
+
+    updateBtn();
+  }
+
+  function scanHost(host, dialogRefs) {
+    // 差し替え対策：ホスト配下の bar を毎回スキャン
+    host
+      .querySelectorAll(".icon-button-wrapper, .gr-image__tool")
+      .forEach((bar) => addBtnIntoBar(bar, host, dialogRefs));
+    // ついでに既存ボタンの活性/非活性を更新
+    host.querySelectorAll(".view-modal-btn").forEach((btn) => {
+      const img = pickImageEl(host);
+      const hasImage = !!(img && (img.currentSrc || img.src));
+      btn.style.display = hasImage ? "" : "none";
+      btn.disabled = !hasImage;
+    });
+  }
+
+  function initModal() {
+    const dialogRefs = ensureDialog();
+    document.querySelectorAll(".modal-image").forEach((host) => {
+      // 初回スキャン
+      scanHost(host, dialogRefs);
+      // 以後はホスト全体を監視（barの生成/差し替え/画像の出入りを検知）
+      const obs = new MutationObserver(() => scanHost(host, dialogRefs));
+      obs.observe(host, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initModal);
   } else {
-    bar.insertBefore(btn, bar.firstChild);
+    initModal();
   }
-  updateBtn();
-}
-
-function _eichiScanHost(host, dialogRefs) {
-  var bars = host.querySelectorAll(".icon-button-wrapper, .gr-image__tool");
-  for (var i = 0; i < bars.length; i++) {
-    _eichiAddBtnIntoBar(bars[i], host, dialogRefs);
-  }
-  var btns = host.querySelectorAll(".view-modal-btn");
-  for (var j = 0; j < btns.length; j++) {
-    var img = _eichiPickImageEl(host);
-    var hasImage = !!(img && (img.currentSrc || img.src));
-    btns[j].style.display = hasImage ? "" : "none";
-    btns[j].disabled = !hasImage;
-  }
-}
-
-function _eichiInitModal() {
-  var dialogRefs = _eichiEnsureDialog();
-  var hosts = document.querySelectorAll(".modal-image");
-  for (var i = 0; i < hosts.length; i++) {
-    _eichiScanHost(hosts[i], dialogRefs);
-    var obs = new MutationObserver((function(host, refs) {
-      return function() { _eichiScanHost(host, refs); };
-    })(hosts[i], dialogRefs));
-    obs.observe(hosts[i], { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
-  }
-}
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", _eichiInitModal);
-} else {
-  _eichiInitModal();
 }

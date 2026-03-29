@@ -5445,8 +5445,18 @@ _notification_js_path = os.path.join(os.path.dirname(__file__), "notification.js
 if os.path.exists(_notification_js_path):
     with open(_notification_js_path, encoding="utf8") as f:
         _notification_js = f.read()
-    # 両ファイルとも AsyncFunction 本体として記述済みなので単純連結
-    modal_js = modal_js + "\n" + _notification_js
+    # Gradio js= は () => { ... } 形式のアロー関数1つを受け付ける。
+    # 2つのアロー関数を統合: modal_js の閉じ括弧 } の直前に
+    # notification_js の本体を挿入する。
+    # modal_js = "() => { ...modal body... }"
+    # notification_js = "() => { ...notif body... }"
+    # → "() => { ...modal body...\n;(...notif...)(); }"
+    _close_idx = modal_js.rstrip().rfind("}")
+    if _close_idx > 0:
+        modal_js = modal_js[:_close_idx] + "\n;(" + _notification_js + ")();\n" + modal_js[_close_idx:]
+    else:
+        # フォールバック: 連結できない場合はmodal_jsのみ使用
+        pass
 # アプリケーション起動時に保存された設定を読み込む
 saved_app_settings = load_app_settings_oichi()
 

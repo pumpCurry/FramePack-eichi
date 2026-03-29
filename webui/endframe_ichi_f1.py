@@ -4771,8 +4771,10 @@ _notification_js_path = os.path.join(os.path.dirname(__file__), "notification.js
 if os.path.exists(_notification_js_path):
     with open(_notification_js_path, encoding="utf8") as f:
         _notification_js = f.read()
-    # 両ファイルとも AsyncFunction 本体として記述済みなので単純連結
-    modal_js = modal_js + "\n" + _notification_js
+    # modal_js のアロー関数本体の末尾に notification_js を IIFE として埋め込む
+    _close_idx = modal_js.rstrip().rfind("}")
+    if _close_idx > 0:
+        modal_js = modal_js[:_close_idx] + "\n;(" + _notification_js + ")();\n" + modal_js[_close_idx:]
 block = gr.Blocks(css=css, js=modal_js).queue()
 
 with block:
