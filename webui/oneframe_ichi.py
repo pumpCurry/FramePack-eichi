@@ -438,7 +438,8 @@ temp_cache_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "temp_
 os.makedirs(temp_cache_dir, exist_ok=True)
 
 # --- Resync/追随の調整値（秒） ---
-RESYNC_CTX_LINGER_SEC: float = 1.0  # ジョブ切替の「谷間」を完了と誤認しないための猶予
+# RESYNC_CTX_LINGER_SEC は resync_core からインポート済み（line 333）
+# ローカル再定義するとシャドウが起きるため削除。値は resync_core.RESYNC_CTX_LINGER_SEC を使用。
 
 # 追加設定: 再同期の最小間隔とアクティブ追随の管理
 RESYNC_MIN_INTERVAL_MS: int = 500
@@ -2665,10 +2666,11 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
                         print(translate("参照画像の保存に失敗しました: {0}").format(e))
                 
                 # VAEエンコード（参照画像）
-                if vae is None or not high_vram:
+                # vae が既にロード済みなら再ロードしない（low-VRAM時のRAM二重使用を回避）
+                if vae is None:
                     vae = AutoencoderKLHunyuanVideo.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='vae', torch_dtype=torch.float16).cpu()
                     setup_vae_if_loaded()
-                    load_model_as_complete(vae, target_device=gpu)
+                load_model_as_complete(vae, target_device=gpu)
                 
                 with torch.no_grad():  # 明示的にno_gradコンテキストを使用
                     ref_image_gpu = ref_image_pt.to(gpu)
@@ -3962,12 +3964,16 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
         print(translate("処理中にエラーが発生しました: {0}").format(e))
         traceback.print_exc()
         _cleanup_models(force=True)
-    
-    # 処理完了を通知（個別バッチの完了）
-    print(translate("処理が完了しました"))
-
-    # 緑の進捗バー 6
-    push_progress(None, translate("Saved the generated image successfully"), 100, "[THEME=green]Saved the generated image successfully")
+        # エラー時は赤テーマで失敗を明示
+        try:
+            push_progress(None, translate("処理中にエラーが発生しました: {0}").format(e), 100, f'[THEME=red]{translate("エラー")}')
+        except Exception:
+            pass
+    else:
+        # 例外なく正常完了した場合のみ緑の成功表示
+        # 処理完了を通知（個別バッチの完了）
+        print(translate("処理が完了しました"))
+        push_progress(None, translate("Saved the generated image successfully"), 100, "[THEME=green]Saved the generated image successfully")
 
 
     

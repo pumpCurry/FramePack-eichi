@@ -274,6 +274,26 @@ def load_from_cache(cache_key):
         return None
 
 
+def _evict_old_lora_cache_entries(cache_dir: str, max_entries: int = 5):
+    """古いLoRAキャッシュファイルを削除。1件10-25GBのため少数に制限。"""
+    try:
+        files = []
+        for f in os.listdir(cache_dir):
+            if f.endswith(_SUPPORTED_EXTS):
+                full = os.path.join(cache_dir, f)
+                files.append((os.path.getmtime(full), full))
+        files.sort()  # 古い順
+        while len(files) > max_entries:
+            _, old_path = files.pop(0)
+            try:
+                os.remove(old_path)
+                print(f"Evicted old LoRA cache: {os.path.basename(old_path)}")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def save_to_cache(cache_key, state_dict):
     """現在の LoRA 状態をキャッシュに保存する（オンメモリ＋ディスク）"""
     try:
@@ -295,6 +315,8 @@ def save_to_cache(cache_key, state_dict):
         saved_path = _save_state_dict(path_no_ext, state_dict)
         print(translate("メモリ上のLoRA キャッシュの書き出しに成功: {0}").format(
             os.path.basename(saved_path)))
+        # 古いキャッシュを削除（ディスク使用量制限: LoRAは1件10-25GBのため少なめ）
+        _evict_old_lora_cache_entries(cache_dir, max_entries=5)
     except Exception as e:
         print(translate("メモリ上のLoRA キャッシュの書き出しに失敗: {0}").format(
             cache_key[:16]))

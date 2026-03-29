@@ -114,6 +114,30 @@ def load_from_cache(prompt: str, n_prompt: str):
     return None
 
 
+# ディスクキャッシュの最大エントリ数（超過分は古い順に削除）
+_MAX_DISK_ENTRIES = 20
+
+
+def _evict_old_cache_entries(cache_dir: str, max_entries: int = _MAX_DISK_ENTRIES):
+    """古いキャッシュファイルを削除してエントリ数を制限する。"""
+    try:
+        files = []
+        for f in os.listdir(cache_dir):
+            if f.endswith(_SUPPORTED_EXTS):
+                full = os.path.join(cache_dir, f)
+                files.append((os.path.getmtime(full), full))
+        files.sort()  # 古い順
+        while len(files) > max_entries:
+            _, old_path = files.pop(0)
+            try:
+                os.remove(old_path)
+                print(f"Evicted old prompt cache: {os.path.basename(old_path)}")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def save_to_cache(prompt: str, n_prompt: str, data: dict):
     """Save tensors to disk cache (dual format)."""
     cache_hash = prompt_hash(prompt, n_prompt)
@@ -123,5 +147,7 @@ def save_to_cache(prompt: str, n_prompt: str, data: dict):
     try:
         saved_path = _save_data(path_no_ext, data)
         print(f"Prompt cache saved: {os.path.basename(saved_path)}")
+        # 古いエントリを削除（ディスク使用量制限）
+        _evict_old_cache_entries(get_cache_dir())
     except Exception as e:
         print(f"Failed to save prompt cache: {e}")
