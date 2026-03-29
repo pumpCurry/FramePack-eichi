@@ -3654,7 +3654,10 @@ with open(modal_js_path, encoding="utf8") as f:
 _notification_js_path = os.path.join(os.path.dirname(__file__), "notification.js")
 if os.path.exists(_notification_js_path):
     with open(_notification_js_path, encoding="utf8") as f:
-        modal_js += "\n" + f.read()
+        _notification_js = f.read()
+    # Gradio 5.xは js= を AsyncFunction() で実行するため、
+    # 複数のアロー関数を連結すると構文エラーになる。
+    modal_js = f"({modal_js})();\n({_notification_js})();"
 block = gr.Blocks(css=css, js=modal_js).queue()
 
 with block:
