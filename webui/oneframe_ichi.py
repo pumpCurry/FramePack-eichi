@@ -6146,23 +6146,28 @@ with block:
                     gr.Markdown(f"### " + translate("LoRA設定"))
                     
                     # LoRA使用有無のチェックボックス
+                    # 保存設定から初期値を復元し、依存UIの visible も連動させる
+                    _use_lora_init = saved_app_settings.get("use_lora", False) if saved_app_settings else False
+                    _lora_mode_init = saved_app_settings.get("lora_mode", translate("ディレクトリから選択")) if saved_app_settings else translate("ディレクトリから選択")
+                    _is_dir_mode = (_lora_mode_init != translate("ファイルアップロード"))
+
                     use_lora = gr.Checkbox(
                         label=translate("LoRAを使用する"),
-                        value=saved_app_settings.get("use_lora", False) if saved_app_settings else False,
+                        value=_use_lora_init,
                         info=translate("チェックをオンにするとLoRAを使用します（要16GB VRAM以上）"),
                         elem_classes="saveable-setting"
                     )
 
-                    # LoRAモード選択（初期状態では非表示）
+                    # LoRAモード選択（use_lora=True なら表示）
                     lora_mode = gr.Radio(
                         choices=[translate("ディレクトリから選択"), translate("ファイルアップロード")],
-                        value=saved_app_settings.get("lora_mode", translate("ディレクトリから選択")) if saved_app_settings else translate("ディレクトリから選択"),
+                        value=_lora_mode_init,
                         label=translate("LoRA読み込み方式"),
-                        visible=False  # 初期状態では非表示（toggle_lora_settingsで制御）
+                        visible=_use_lora_init
                     )
 
-                    # ファイルアップロードグループ（初期状態では非表示）
-                    with gr.Group(visible=False) as lora_upload_group:
+                    # ファイルアップロードグループ（use_lora=True かつ アップロードモード時のみ表示）
+                    with gr.Group(visible=_use_lora_init and not _is_dir_mode) as lora_upload_group:
                         # メインのLoRAファイル
                         lora_files = gr.File(
                             label=translate("LoRAファイル1 (.safetensors, .pt, .bin)"),
@@ -6179,8 +6184,8 @@ with block:
                             file_types=[".safetensors", ".pt", ".bin"]
                         )
 
-                    # ディレクトリ選択グループ（初期状態では非表示）
-                    with gr.Group(visible=False) as lora_dropdown_group:
+                    # ディレクトリ選択グループ（use_lora=True かつ ディレクトリモード時に表示）
+                    with gr.Group(visible=_use_lora_init and _is_dir_mode) as lora_dropdown_group:
                         # LoRAドロップダウン
                         none_choice = translate("なし")
 
@@ -6223,19 +6228,19 @@ with block:
                         # ドロップダウン更新ボタン（下に配置）
                         lora_scan_button = gr.Button(value=translate("LoRAフォルダを再スキャン"), variant="secondary")
 
-                    # スケール値の入力フィールド
+                    # スケール値の入力フィールド（use_lora=True なら表示）
                     lora_scales_text = gr.Textbox(
                         label=translate("LoRA適用強度 (カンマ区切り)"),
                         value=saved_app_settings.get("lora_scales", "0.8,0.8,0.8") if saved_app_settings else "0.8,0.8,0.8",
                         info=translate("各LoRAのスケール値をカンマ区切りで入力 (例: 0.8,0.5,0.3)"),
-                        visible=False
+                        visible=_use_lora_init
                     )
                     
                     # LoRAプリセット機能のインポート
                     from eichi_utils.lora_preset_manager import save_lora_preset, load_lora_preset
                     
-                    # LoRAプリセットグループ（初期状態では非表示）
-                    with gr.Group(visible=False) as lora_preset_group:
+                    # LoRAプリセットグループ（use_lora=True かつ ディレクトリモード時に表示）
+                    with gr.Group(visible=_use_lora_init and _is_dir_mode) as lora_preset_group:
                         # シンプルな1行レイアウト
                         with gr.Row():
                             # プリセット選択ボタン（1-5）
