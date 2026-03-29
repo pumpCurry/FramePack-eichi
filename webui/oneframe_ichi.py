@@ -5436,27 +5436,11 @@ def _gui_frame_progress_tiny(preview, desc, bar_html):
 css = get_app_css()  # eichi_utilsのスタイルを使用
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
     css += f.read()
-modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
-# JSを直接読み込み、グラディオにコードとして渡す
-with open(modal_js_path, encoding="utf8") as f:
-    modal_js = f.read()
-# ブラウザ通知JS（生成完了時のデスクトップ通知）
-_notification_js_path = os.path.join(os.path.dirname(__file__), "notification.js")
-if os.path.exists(_notification_js_path):
-    with open(_notification_js_path, encoding="utf8") as f:
-        _notification_js = f.read()
-    # Gradio js= は () => { ... } 形式のアロー関数1つを受け付ける。
-    # 2つのアロー関数を統合: modal_js の閉じ括弧 } の直前に
-    # notification_js の本体を挿入する。
-    # modal_js = "() => { ...modal body... }"
-    # notification_js = "() => { ...notif body... }"
-    # → "() => { ...modal body...\n;(...notif...)(); }"
-    _close_idx = modal_js.rstrip().rfind("}")
-    if _close_idx > 0:
-        modal_js = modal_js[:_close_idx] + "\n;(" + _notification_js + ")();\n" + modal_js[_close_idx:]
-    else:
-        # フォールバック: 連結できない場合はmodal_jsのみ使用
-        pass
+# --- JS スクリプト読み込み ---
+# scripts/ フォルダ内の .js ファイルを自動検出し、<script src="/file=..."> タグで配信。
+# ブラウザF5だけでJS変更が反映される（Python再起動不要）。
+from eichi_utils.script_loader import build_head_scripts, get_scripts_dir
+_head_scripts = build_head_scripts()
 # アプリケーション起動時に保存された設定を読み込む
 saved_app_settings = load_app_settings_oichi()
 
@@ -5506,7 +5490,7 @@ except Exception:
     pass
 
 
-block = gr.Blocks(css=css, js=modal_js).queue(**_qargs)
+block = gr.Blocks(css=css, head=_head_scripts).queue(**_qargs)
 
 
 # --- 各タブの UI セッションID を払い出す関数を Blocks 構築前に定義しておく ---
@@ -7574,7 +7558,9 @@ block.launch(
     server_name=args.server,
     server_port=args.port,
     share=args.share,
-    inbrowser=args.inbrowser,)
+    inbrowser=args.inbrowser,
+    allowed_paths=[get_scripts_dir()],
+)
 
 def _ensure_fresh_context():
     """Start直後に停止系フラグや終了済みctxを掃除（UI出力なし, queue=False）"""

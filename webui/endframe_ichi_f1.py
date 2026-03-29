@@ -4764,18 +4764,10 @@ quick_prompts = [[x] for x in quick_prompts]
 css = get_app_css()
 with open(os.path.join(os.path.dirname(__file__), "modal.css")) as f:
     css += f.read()
-modal_js_path = os.path.join(os.path.dirname(__file__), "modal.js")
-with open(modal_js_path, encoding="utf8") as f:
-    modal_js = f.read()
-_notification_js_path = os.path.join(os.path.dirname(__file__), "notification.js")
-if os.path.exists(_notification_js_path):
-    with open(_notification_js_path, encoding="utf8") as f:
-        _notification_js = f.read()
-    # modal_js のアロー関数本体の末尾に notification_js を IIFE として埋め込む
-    _close_idx = modal_js.rstrip().rfind("}")
-    if _close_idx > 0:
-        modal_js = modal_js[:_close_idx] + "\n;(" + _notification_js + ")();\n" + modal_js[_close_idx:]
-block = gr.Blocks(css=css, js=modal_js).queue()
+# --- JS スクリプト読み込み ---
+from eichi_utils.script_loader import build_head_scripts, get_scripts_dir
+_head_scripts = build_head_scripts()
+block = gr.Blocks(css=css, head=_head_scripts).queue()
 
 with block:
     gr.HTML('<h1>FramePack<span class="title-suffix">-<s>eichi</s> F1</span></h1>')
@@ -6760,7 +6752,10 @@ with block:
 
 # F1モードではキーフレームコピー機能を削除済み
 
-allowed_paths = [os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './outputs')))]
+allowed_paths = [
+    os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './outputs'))),
+    get_scripts_dir(),
+]
 
 # 起動コード
 try:
