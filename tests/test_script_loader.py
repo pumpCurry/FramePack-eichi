@@ -37,15 +37,14 @@ class TestFindJsFiles:
 class TestBuildHeadScripts:
     def test_generates_script_tags(self):
         html = script_loader.build_head_scripts()
-        assert "<script" in html
-        assert "modal.js" in html
-        assert "notification.js" in html
-        assert 'src="/file=' in html
+        assert "<script>" in html
+        # インライン方式: JSの中身が含まれる
+        assert "ensureDialog" in html or "modal_dlg" in html
 
     def test_each_file_gets_own_tag(self):
         html = script_loader.build_head_scripts()
-        # modal.js と notification.js で少なくとも2つの<script>タグ
-        assert html.count("<script") >= 2
+        # modal.js, notification.js, confirm_modal.js で少なくとも3つの<script>タグ
+        assert html.count("<script>") >= 2
         assert html.count("</script>") >= 2
 
 

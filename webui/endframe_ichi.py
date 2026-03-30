@@ -7097,7 +7097,6 @@ enable_keyframe_copy = True
 
 allowed_paths = [
     os.path.abspath(os.path.realpath(os.path.join(os.path.dirname(__file__), './outputs'))),
-    get_scripts_dir(),
 ]
 
 # 起動コード

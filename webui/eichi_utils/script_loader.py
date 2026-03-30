@@ -40,25 +40,15 @@ def find_js_files() -> list:
 
 def build_head_scripts() -> str:
     """
-    scripts/ フォルダ内の .js ファイルから <script src="/file=..."> タグを生成。
+    scripts/ フォルダ内の .js ファイルをインラインの <script> タグとして生成。
 
-    Gradio の /file= エンドポイントで配信されるため、
-    ブラウザリロードだけでJS変更が反映される。
+    WSL環境ではGradioの /file= 配信がパス変換の問題で404になるため、
+    インライン埋め込みをデフォルトとする。
 
     Returns:
         str: <script> タグのHTML文字列。ファイルがなければ空文字列。
     """
-    js_files = find_js_files()
-    if not js_files:
-        return ""
-
-    tags = []
-    for js_path in js_files:
-        # Gradioは allowed_paths に含まれるパスを /file=<absolute_path> で配信
-        abs_path = os.path.abspath(js_path)
-        tags.append(f'<script src="/file={abs_path}"></script>')
-
-    return "\n".join(tags)
+    return build_head_scripts_inline_fallback()
 
 
 def build_head_scripts_inline_fallback() -> str:

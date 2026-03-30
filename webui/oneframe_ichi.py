@@ -7573,7 +7573,7 @@ block.launch(
     server_port=args.port,
     share=args.share,
     inbrowser=args.inbrowser,
-    allowed_paths=[get_scripts_dir()],
+    # allowed_paths=[get_scripts_dir()],  # インライン方式では不要
 )
 
 def _ensure_fresh_context():
