@@ -6078,7 +6078,7 @@ with block:
             use_reference_image.change(
                 toggle_kisekae_settings,
                 inputs=[use_reference_image],
-                outputs=[reference_image, advanced_kisekae_group, reference_image_info, reference_long_edge, target_index, history_index, reference_queue_group, reference_queue_only]
+                outputs=[reference_image, advanced_kisekae_group, reference_image_info, reference_long_edge, target_index, history_index, reference_queue_group, reference_queue_only, reference_batch_count]
             )
             
             # 詳細設定アコーディオン - 埋め込みプロンプト機能の直後に配置
