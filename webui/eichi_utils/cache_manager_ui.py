@@ -304,10 +304,12 @@ def _build_confirm_js(translate_fn, target, message_key, exec_elem_id, detail_el
     confirm_label = _esc_js(f"⚠ {translate_fn('承認して削除')}")
     cancel_label = _esc_js(translate_fn("削除せず戻る"))
 
-    # detail_elem_id が複数ある場合（all）はカンマ区切り
+    # detail_elem_id が複数ある場合（all）はリストで受け取る
     detail_ids = detail_elem_id if isinstance(detail_elem_id, list) else [detail_elem_id]
+    # .prose はGradioバージョンで存在しない場合がある。複数セレクタでフォールバック。
+    # アコーディオンが閉じている場合は要素が未レンダリングなので "-" を返す。
     detail_js_parts = " + ' / ' + ".join(
-        f'(function(){{ var e=document.querySelector("#{eid} .prose"); return e ? e.textContent.trim() : ""; }})()'
+        f'(function(){{ var e=document.querySelector("#{eid} .prose") || document.querySelector("#{eid} .markdown-text") || document.getElementById("{eid}"); return e ? e.textContent.trim() || "-" : "-"; }})()'
         for eid in detail_ids
     )
 

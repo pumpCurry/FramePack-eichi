@@ -5152,16 +5152,16 @@ with block:
                 inputs=[], outputs=_cache_outputs,
             )
             _cache_panel["clear_lora_btn"].click(
-                fn=_cmu.make_confirm_lora_handler(translate),
-                inputs=[], outputs=[_cache_panel["modal_trigger_html"]],
+                fn=None,
+                js=_cmu.make_confirm_lora_js(translate),
             )
             _cache_panel["clear_prompt_btn"].click(
-                fn=_cmu.make_confirm_prompt_handler(translate),
-                inputs=[], outputs=[_cache_panel["modal_trigger_html"]],
+                fn=None,
+                js=_cmu.make_confirm_prompt_js(translate),
             )
             _cache_panel["clear_all_btn"].click(
-                fn=_cmu.make_confirm_all_handler(translate),
-                inputs=[], outputs=[_cache_panel["modal_trigger_html"]],
+                fn=None,
+                js=_cmu.make_confirm_all_js(translate),
             )
             _cache_panel["exec_lora_btn"].click(
                 fn=_cmu.make_exec_clear_lora_handler(translate),

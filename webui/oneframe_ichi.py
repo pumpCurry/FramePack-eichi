@@ -438,11 +438,8 @@ temp_cache_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "temp_
 os.makedirs(temp_cache_dir, exist_ok=True)
 
 # --- Resync/追随の調整値（秒） ---
-# RESYNC_CTX_LINGER_SEC は resync_core からインポート済み（line 333）
-# ローカル再定義するとシャドウが起きるため削除。値は resync_core.RESYNC_CTX_LINGER_SEC を使用。
-
-# 追加設定: 再同期の最小間隔とアクティブ追随の管理
-RESYNC_MIN_INTERVAL_MS: int = 500
+# RESYNC_CTX_LINGER_SEC, RESYNC_MIN_INTERVAL_MS は resync_core からインポート済み（line 333）
+# ローカル再定義するとシャドウが起きるため、ここでは再定義しない。
 
 # BUG-2修正: OrderedDict で有界化 (最大128エントリー)
 # 古いセッションのエントリーが自動的に押し出される

@@ -1,4 +1,4 @@
-() => {
+(function() {
   // === ブラウザ通知 (生成完了時) ===
   // 起動時に通知許可をリクエスト
   if ("Notification" in window && Notification.permission === "default") {
@@ -41,6 +41,9 @@
     }
   });
 
+  var _observeRetries = 0;
+  var _MAX_OBSERVE_RETRIES = 15; // 最大30秒（2秒×15回）で打ち切り
+
   function startObserving() {
     const targets = document.querySelectorAll(
       ".progress-desc, [class*='progress'] .prose, [class*='progress'] .markdown-text"
@@ -52,7 +55,8 @@
         subtree: true,
       });
     });
-    if (targets.length === 0) {
+    if (targets.length === 0 && _observeRetries < _MAX_OBSERVE_RETRIES) {
+      _observeRetries++;
       setTimeout(startObserving, 2000);
     }
   }
@@ -64,4 +68,4 @@
   } else {
     setTimeout(startObserving, 1000);
   }
-}
+})();

@@ -9,11 +9,10 @@ Gradio の head= パラメータ用の <script> タグを生成する。
 
     head_html = build_head_scripts()
     block = gr.Blocks(css=css, head=head_html)
-    block.launch(allowed_paths=[get_scripts_dir()])
 
 特徴:
     - scripts/ フォルダ内の .js ファイルをファイル名順で読み込み
-    - /file= 配信を使うので、ブラウザF5でJS変更が即反映（再起動不要）
+    - インライン <script> として head に埋め込む
     - ユーザーが scripts/ に .js を追加するだけで自動読み込み
     - 読み込み順はファイル名のアルファベット順（00_xxx.js, 01_xxx.js で制御可能）
 """
@@ -42,21 +41,8 @@ def build_head_scripts() -> str:
     """
     scripts/ フォルダ内の .js ファイルをインラインの <script> タグとして生成。
 
-    WSL環境ではGradioの /file= 配信がパス変換の問題で404になるため、
-    インライン埋め込みをデフォルトとする。
-
     Returns:
         str: <script> タグのHTML文字列。ファイルがなければ空文字列。
-    """
-    return build_head_scripts_inline_fallback()
-
-
-def build_head_scripts_inline_fallback() -> str:
-    """
-    フォールバック: /file= 配信が使えない場合にインラインで埋め込む。
-
-    Returns:
-        str: <script> タグ (インライン) のHTML文字列。
     """
     js_files = find_js_files()
     if not js_files:

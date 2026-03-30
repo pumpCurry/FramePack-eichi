@@ -1,4 +1,4 @@
-() => {
+(function() {
   // --- helpers -------------------------------------------------------------
   function ensureDialog() {
     let dialog = document.getElementById("modal_dlg");
@@ -110,4 +110,4 @@
   } else {
     initModal();
   }
-}
+})();

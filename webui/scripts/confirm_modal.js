@@ -99,12 +99,4 @@
     newBtnSafe.focus();
   };
 
-  // Gradio連携: hidden buttonのクリックをトリガーするヘルパー
-  // data-confirm-target="lora|prompt|all" 属性を持つボタンに対応
-  window._eichiTriggerCacheDelete = function(target) {
-    var btn = document.querySelector(
-      'button[data-confirm-target="' + target + '"]'
-    );
-    if (btn) btn.click();
-  };
 })();
