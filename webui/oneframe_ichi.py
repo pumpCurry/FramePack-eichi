@@ -5819,18 +5819,18 @@ with block:
                 fn=_cmu.make_refresh_handler(translate),
                 inputs=[], outputs=_cache_outputs,
             )
-            # 削除ボタン → 確認モーダル表示（実削除はしない）
+            # 削除ボタン → 確認モーダル表示（JS直接実行、実削除はしない）
             _cache_panel["clear_lora_btn"].click(
-                fn=_cmu.make_confirm_lora_handler(translate),
-                inputs=[], outputs=[_cache_panel["modal_trigger_html"]],
+                fn=None,
+                js=_cmu.make_confirm_lora_js(translate),
             )
             _cache_panel["clear_prompt_btn"].click(
-                fn=_cmu.make_confirm_prompt_handler(translate),
-                inputs=[], outputs=[_cache_panel["modal_trigger_html"]],
+                fn=None,
+                js=_cmu.make_confirm_prompt_js(translate),
             )
             _cache_panel["clear_all_btn"].click(
-                fn=_cmu.make_confirm_all_handler(translate),
-                inputs=[], outputs=[_cache_panel["modal_trigger_html"]],
+                fn=None,
+                js=_cmu.make_confirm_all_js(translate),
             )
             # 隠しボタン → 実際の削除（モーダルの「承認して削除」からJSで呼ばれる）
             _cache_panel["exec_lora_btn"].click(

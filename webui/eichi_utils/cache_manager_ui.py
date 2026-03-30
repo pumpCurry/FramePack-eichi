@@ -74,10 +74,10 @@ def build_cache_panel(translate_fn):
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown(f"### LoRA {translate_fn('キャッシュ')}")
-                lora_size_md = gr.Markdown(value=init_lora)
+                lora_size_md = gr.Markdown(value=init_lora, elem_id="eichi_lora_size_md")
             with gr.Column(scale=1):
                 gr.Markdown(f"### {translate_fn('プロンプトキャッシュ')}")
-                prompt_size_md = gr.Markdown(value=init_prompt)
+                prompt_size_md = gr.Markdown(value=init_prompt, elem_id="eichi_prompt_size_md")
 
         with gr.Row():
             cache_format_radio = gr.Radio(
@@ -283,3 +283,83 @@ def make_format_change_handler(translate_fn):
         prompt_cache.set_preferred_format(fmt)
         return f"✅ {translate_fn('保存形式を変更')}: {fmt}"
     return handler
+
+
+# ---------------------------------------------------------------------------
+# JS-driven modal helpers (Gradio js= parameter)
+# innerHTML で <script> を注入しても実行されないため、
+# Gradio の js= パラメータでブラウザ側から直接モーダルを呼ぶ。
+# ---------------------------------------------------------------------------
+
+def _esc_js(s):
+    """JS文字列リテラル用エスケープ"""
+    return str(s).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def _build_confirm_js(translate_fn, target, message_key, exec_elem_id, detail_elem_id):
+    """確認モーダルを表示する JS 関数文字列を生成する"""
+    title = _esc_js(translate_fn("キャッシュ削除の確認"))
+    message = _esc_js(translate_fn(message_key))
+    warning = _esc_js(translate_fn("この操作は取り消せません"))
+    confirm_label = _esc_js(f"⚠ {translate_fn('承認して削除')}")
+    cancel_label = _esc_js(translate_fn("削除せず戻る"))
+
+    # detail_elem_id が複数ある場合（all）はカンマ区切り
+    detail_ids = detail_elem_id if isinstance(detail_elem_id, list) else [detail_elem_id]
+    detail_js_parts = " + ' / ' + ".join(
+        f'(function(){{ var e=document.querySelector("#{eid} .prose"); return e ? e.textContent.trim() : ""; }})()'
+        for eid in detail_ids
+    )
+
+    return f"""() => {{
+  var detail = {detail_js_parts};
+  if (window._eichiConfirmModal) {{
+    window._eichiConfirmModal({{
+      title: "{title}",
+      message: "{message}",
+      detail: detail,
+      warning: "{warning}",
+      confirmLabel: "{confirm_label}",
+      cancelLabel: "{cancel_label}",
+      onConfirm: function() {{
+        var btn = document.getElementById("{_esc_js(exec_elem_id)}");
+        if (btn) btn.click();
+      }}
+    }});
+  }} else {{
+    if (confirm("{title}\\n{message}\\n" + detail)) {{
+      var btn = document.getElementById("{_esc_js(exec_elem_id)}");
+      if (btn) btn.click();
+    }}
+  }}
+}}"""
+
+
+def make_confirm_lora_js(translate_fn):
+    """LoRAキャッシュ削除確認モーダルのJS文字列"""
+    return _build_confirm_js(
+        translate_fn, "lora",
+        "LoRAキャッシュを削除します",
+        "eichi_exec_clear_lora",
+        "eichi_lora_size_md",
+    )
+
+
+def make_confirm_prompt_js(translate_fn):
+    """プロンプトキャッシュ削除確認モーダルのJS文字列"""
+    return _build_confirm_js(
+        translate_fn, "prompt",
+        "プロンプトキャッシュを削除します",
+        "eichi_exec_clear_prompt",
+        "eichi_prompt_size_md",
+    )
+
+
+def make_confirm_all_js(translate_fn):
+    """全キャッシュ削除確認モーダルのJS文字列"""
+    return _build_confirm_js(
+        translate_fn, "all",
+        "全キャッシュを削除します",
+        "eichi_exec_clear_all",
+        ["eichi_lora_size_md", "eichi_prompt_size_md"],
+    )
