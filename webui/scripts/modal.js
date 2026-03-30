@@ -45,12 +45,18 @@
     const inner = fullBtn ? fullBtn.querySelector("div") : null;
     const innerClass = inner ? inner.className : "svelte-vzs2gq small";
     btn.className = baseClass + " view-modal-btn";
-    btn.setAttribute("aria-label", "View modal screen");
-    btn.title = "View modal screen";
+    btn.setAttribute("aria-label", "Preview image (popup)");
+    btn.title = "Preview image (popup)";
+    // 虫眼鏡+アイコン: フルスクリーンではなくポップアップ拡大を示す
     btn.innerHTML =
       '<div class="' +
       innerClass +
-      '"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M4 4h16v16H4z"/></svg></div>';
+      '"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">' +
+      '<circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/>' +
+      '<line x1="15" y1="15" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
+      '<line x1="8" y1="10.5" x2="13" y2="10.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
+      '<line x1="10.5" y1="8" x2="10.5" y2="13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
+      '</svg></div>';
     return btn;
   }
 

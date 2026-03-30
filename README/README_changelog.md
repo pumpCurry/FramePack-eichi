@@ -4,6 +4,27 @@
 
 ## 日本語
 
+### 2026-03-31: バージョン1.9.5.7
+- **v1.9.5.5以降のリグレッション7件を修正**:
+  - CRITICAL: modal.js / notification.js のIIFE未実行を修正（画像プレビューとブラウザ通知が完全に動作していなかった）
+  - CRITICAL: RESYNC_MIN_INTERVAL_MS のシャドウ再宣言を削除
+  - endframe 2プログラムのキャッシュ削除モーダルをjs=方式に移行（旧HTML/script注入方式は動作しない）
+  - notification.js の無限リトライループに最大15回の制限を追加
+- **コード品質の改善（v1.9.5.0以前からの問題5件）**:
+  - デッドコード関数の削除（_gate_start, _compute_stop_controls）
+  - save_btn変数名衝突を修正（lora_save_btnにリネーム）
+  - process()の冗長な二重ロックチェックを削除
+  - copy_metadataの不可視/可視二重同期を1コンポーネントに統合
+  - 匿名gr.Textbox(visible=False)をoutputs=[]に修正
+- **LoRAスキャンの改善**:
+  - scan_lora_directoryをモジュールスコープに移動（NameErrorリスク解消）
+  - 起動時にPython側で直接スキャンし、JSによるボタン自動クリックを廃止
+- **画像プレビューモーダルの改善**:
+  - ボタンアイコンを塗りつぶし四角から虫眼鏡+に変更（フルスクリーンとの区別が明確に）
+  - Gradio非同期レンダリング対応（MutationObserverでコンポーネント出現を検知）
+  - クリックで閉じる機能を修正（画像クリック/backdrop両対応）
+- **デッドコード掃除**: cache_manager_ui.pyの旧モーダル関連コード・後方互換エイリアスを削除
+
 ### 2026-03-29: バージョン1.9.5.6
 - **安全性監査による25件の問題修正**:
   - CRITICAL: カスタムプロンプトがベースプロンプトのキーでキャッシュされ、後続の生成が汚染される問題を修正
@@ -331,6 +352,27 @@
 - キーフレームガイド機能の追加
 
 ## English
+
+### 2026-03-31: Version 1.9.5.7
+- **Fixed 7 regressions introduced in v1.9.5.5**:
+  - CRITICAL: modal.js / notification.js IIFE not executing (image preview and browser notifications were completely broken)
+  - CRITICAL: Removed RESYNC_MIN_INTERVAL_MS shadow re-declaration
+  - Migrated endframe cache delete modals to js= approach (old HTML/script injection was non-functional)
+  - Added max 15 retry limit to notification.js infinite retry loop
+- **Code quality improvements (5 issues from v1.9.5.0 era)**:
+  - Removed dead code functions (_gate_start, _compute_stop_controls)
+  - Fixed save_btn variable name collision (renamed to lora_save_btn)
+  - Removed redundant double lock check in process()
+  - Unified copy_metadata duplicate hidden/visible component sync into single component
+  - Replaced anonymous gr.Textbox(visible=False) with outputs=[]
+- **LoRA scan improvements**:
+  - Moved scan_lora_directory to module scope (eliminates NameError risk)
+  - Scan runs at startup via Python; removed fragile JS button auto-click
+- **Image preview modal improvements**:
+  - Changed button icon from filled square to magnifying glass+ (clearer distinction from fullscreen)
+  - Added MutationObserver for Gradio async rendering compatibility
+  - Fixed click-to-close (now works on image click and backdrop click)
+- **Dead code cleanup**: Removed legacy modal code and backward-compat aliases from cache_manager_ui.py
 
 ### 2026-03-29: Version 1.9.5.6
 - **Comprehensive safety audit: 25 issues fixed**:
@@ -660,6 +702,17 @@
 
 ## 简体中文
 
+### 2026-03-31: 版本1.9.5.7
+- **修复v1.9.5.5引入的7个回归问题**：
+  - 严重：修复modal.js/notification.js的IIFE未执行问题（图像预览和浏览器通知完全失效）
+  - 严重：删除RESYNC_MIN_INTERVAL_MS的影子重声明
+  - 将endframe缓存删除模态框迁移至js=方式
+  - 为notification.js无限重试循环添加最大15次限制
+- **代码质量改进（v1.9.5.0时期的5个问题）**：
+  - 删除死代码函数、修复变量名冲突、消除冗余锁检查、统一重复组件
+- **LoRA扫描改进**：启动时Python端直接扫描，移除脆弱的JS自动点击
+- **图像预览模态框改进**：更新图标为放大镜+、支持点击关闭、兼容Gradio异步渲染
+
 ### 2026-03-28: 版本1.9.5.5
 - **完整缓存系统，3个程序统一支持**：
   - 双格式存储：LoRA 和提示缓存均支持 `.pt` 和 `.safetensors`
@@ -963,6 +1016,17 @@
 - 添加关键帧指南功能
 
 ## Русский
+
+### 2026-03-31: Версия 1.9.5.7
+- **Исправлено 7 регрессий, введённых в v1.9.5.5**:
+  - Критично: Исправлено неисполнение IIFE в modal.js/notification.js (предпросмотр изображений и уведомления браузера были полностью сломаны)
+  - Критично: Удалено теневое переопределение RESYNC_MIN_INTERVAL_MS
+  - Модальные окна удаления кэша endframe переведены на метод js=
+  - Добавлен лимит 15 попыток для бесконечного цикла повторов notification.js
+- **Улучшение качества кода (5 проблем из эпохи v1.9.5.0)**:
+  - Удалены мёртвые функции, исправлены коллизии имён, удалены избыточные проверки блокировки, объединены дублирующиеся компоненты
+- **Улучшение сканирования LoRA**: Сканирование при запуске через Python, удалён хрупкий JS автоклик
+- **Улучшение модального предпросмотра**: Обновлённая иконка «лупа+», поддержка закрытия кликом, совместимость с асинхронным рендерингом Gradio
 
 ### 2026-03-28: Версия 1.9.5.5
 - **Полная система кэширования с поддержкой всех 3 программ**:
