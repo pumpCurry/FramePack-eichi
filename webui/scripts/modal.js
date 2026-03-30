@@ -94,9 +94,14 @@
     });
   }
 
+  // 既にセットアップ済みのホストを追跡
+  var _setupHosts = new WeakSet();
+
   function initModal() {
     const dialogRefs = ensureDialog();
     document.querySelectorAll(".modal-image").forEach((host) => {
+      if (_setupHosts.has(host)) return; // 二重登録防止
+      _setupHosts.add(host);
       // 初回スキャン
       scanHost(host, dialogRefs);
       // 以後はホスト全体を監視（barの生成/差し替え/画像の出入りを検知）
@@ -105,9 +110,21 @@
     });
   }
 
+  // Gradioは非同期レンダリングのため、DOMContentLoaded時点では
+  // .modal-image 要素がまだ存在しない。body全体を監視して出現を検知する。
+  function waitForGradio() {
+    initModal(); // 既にある分を処理
+    var bodyObs = new MutationObserver(function() {
+      if (document.querySelectorAll(".modal-image").length > 0) {
+        initModal();
+      }
+    });
+    bodyObs.observe(document.body, { childList: true, subtree: true });
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initModal);
+    document.addEventListener("DOMContentLoaded", waitForGradio);
   } else {
-    initModal();
+    waitForGradio();
   }
 })();
