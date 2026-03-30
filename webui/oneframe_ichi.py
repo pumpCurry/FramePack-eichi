@@ -672,29 +672,6 @@ def is_generation_running():
     return generation_active
 
 
-def _compute_stop_controls(running: bool) -> tuple[bool, bool, str, str]:
-    """
-    ジェネレーターの停止条件を計算して返す。
-
-    Args:
-        running (bool): ジョブが現在実行中かどうかを表すフラグ。
-
-    Returns:
-        tuple:
-            stop_after_current (bool): 現在のステップ終了後に停止するか。
-            stop_after_step (bool): 次のステップ終了後に停止するか。
-            status_message (str): 状態を示すメッセージ（例: "Running" または "Stopped"）。
-            progress_message (str): 進捗を示すメッセージや空文字列。
-    """
-    # 実際の停止条件ロジックをここに記述する。
-    # 例えば、running が False の場合は即座に停止すべきとしてフラグを立てる。
-    stop_after_current = not running
-    stop_after_step = False
-    status_message = "Stopped" if not running else "Running"
-    progress_message = ""
-    return stop_after_current, stop_after_step, status_message, progress_message
-
-
 def progress_resync():
     """再接続時に進捗を再送する購読専用ジェネレータ。"""
     with ctx_lock:
@@ -4149,12 +4126,6 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
         opts["reference_image_path"] = reference_image
     last_start_options = opts
 
-    with ctx_lock:
-        running_ctx = cur_job
-    if running_ctx and not running_ctx.done.is_set():
-        yield from _stream_job_to_ui(running_ctx)
-        return
-
     # 新たな処理開始時にグローバルフラグをリセット
     user_abort = False
     user_abort_notified = False
@@ -5034,31 +5005,6 @@ def _preflight_start_guard():
         raise gr.Error(translate("現在、生成を実施中です。進行中のジョブを見届けるか、別タブでは『状況を再同期』を押してください。"))
     return None
 
-def _gate_start(ok: bool, *args):
-    """
-    preflightの結果に応じてstart_or_followを実行/スキップするゲート（ジェネレータ）。
-    - ok=False のときは 9出力の1タプルを yield（UIを一切変更しない）。
-    - ok=True のときだけ start_or_follow のストリームをそのまま yield する。
-    """
-    import gradio as gr
-    if not ok:
-        # 9出力: [image, image, markdown, html, button, button, button, button, number]
-        yield _gui_frame_status_all(
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-            gr.skip(),
-        )
-        return
-    for chunk in start_or_follow(*args):
-        yield chunk # ※※バイナリ出力※※
-
-
 def start_or_follow(ui_session_id, *args):
     """
     Start 押下時の単体ハンドラ（queue=True でバインドする前提）。
@@ -5730,7 +5676,7 @@ with block:
                         open_input_folder_btn.click(
                             fn=open_input_folder,
                             inputs=[input_folder_name],
-                            outputs=[gr.Textbox(visible=False)]  # 一時的なフィードバック表示用（非表示）
+                            outputs=[],
                         )
 
             # 直接出力フォルダを開くボタンは削除（後で「保存および出力フォルダを開く」ボタンに置き換え）
@@ -5774,15 +5720,9 @@ with block:
                 fn=update_lora_cache, inputs=[lora_cache_checkbox], outputs=[]
             )
 
-            # 埋め込みプロンプト機能 - 参照用に定義（表示はLoRA設定の下で行う）
-            # グローバル変数として定義し、後で他の場所から参照できるようにする
+            # copy_metadata はLoRA設定の下で定義（6526行付近）
+            # ここでは前方参照のため global 宣言のみ
             global copy_metadata
-            copy_metadata = gr.Checkbox(
-                label=translate("埋め込みプロンプトおよびシードを複写する"),
-                value=False,
-                info=translate("チェックをオンにすると、画像のメタデータからプロンプトとシードを自動的に取得します"),
-                visible=False  # 元の位置では非表示
-            )
 
             # 生成都度破棄せずに連続して最適化済み辞書利用する機能
             with gr.Row():
@@ -5975,7 +5915,7 @@ with block:
                 open_reference_folder_btn.click(
                     fn=open_reference_folder,
                     inputs=[reference_input_folder_name],
-                    outputs=[gr.Textbox(visible=False)],
+                    outputs=[],
                 )
 
             # 参照画像の説明
@@ -6264,7 +6204,7 @@ with block:
                             # Load/Save選択（ラベルなし、横並び）
                             with gr.Row(scale=1):
                                 load_btn = gr.Button(translate("読み込み"), variant="primary", scale=1)
-                                save_btn = gr.Button(translate("保存"), variant="secondary", scale=1)
+                                lora_save_btn = gr.Button(translate("保存"), variant="secondary", scale=1)
                             # 内部的に使うRadio（非表示）
                             lora_preset_mode = gr.Radio(
                                 choices=[translate("読み込み"), translate("保存")],
@@ -6506,12 +6446,12 @@ with block:
                     # Load/Saveボタンのイベント
                     load_btn.click(
                         set_load_mode,
-                        outputs=[lora_preset_mode, load_btn, save_btn]
+                        outputs=[lora_preset_mode, load_btn, lora_save_btn]
                     )
-                    
-                    save_btn.click(
+
+                    lora_save_btn.click(
                         set_save_mode,
-                        outputs=[lora_preset_mode, load_btn, save_btn]
+                        outputs=[lora_preset_mode, load_btn, lora_save_btn]
                     )
                     
                     # LoRA使用状態とモードの変更でプリセット表示を更新
@@ -6575,27 +6515,11 @@ with block:
                 lora_scales_text = gr.Textbox(visible=False, value="0.8,0.8,0.8")
                 lora_preset_group = gr.Group(visible=False)  # ダミー
 
-            # LoRA設定の下に埋め込みプロンプトおよびシードを複写するチェックボックスを表示
             # 埋め込みプロンプトおよびシードを複写するチェックボックス（LoRA設定の下に表示）
-            copy_metadata_visible = gr.Checkbox(
+            copy_metadata = gr.Checkbox(
                 label=translate("埋め込みプロンプトおよびシードを複写する"),
                 value=False,
                 info=translate("チェックをオンにすると、画像のメタデータからプロンプトとシードを自動的に取得します")
-            )
-
-            # 表示用チェックボックスと実際の処理用チェックボックスを同期
-            copy_metadata_visible.change(
-                fn=lambda x: x,
-                inputs=[copy_metadata_visible],
-                outputs=[copy_metadata]
-            )
-
-            # 元のチェックボックスが変更されたときも表示用を同期
-            copy_metadata.change(
-                fn=lambda x: x,
-                inputs=[copy_metadata],
-                outputs=[copy_metadata_visible],
-                queue=False  # 高速化のためキューをスキップ
             )
 
             # プロンプト入力
