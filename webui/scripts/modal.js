@@ -13,7 +13,15 @@
     const dialogImg = dialog.querySelector("img");
     // safety: rebind once
     if (!dialog._modalBound) {
-      dialog.addEventListener("click", () => dialog.close());
+      // 画像クリック or backdrop クリックで閉じる
+      dialog.addEventListener("click", (e) => {
+        // backdrop クリック: target が dialog 自体（内側の要素ではない）
+        // 画像クリック: target が img
+        // どちらでも閉じる
+        if (e.target === dialog || e.target === dialogImg) {
+          dialog.close();
+        }
+      });
       dialog.addEventListener("close", () => {
         dialogImg.src = "";
       });
