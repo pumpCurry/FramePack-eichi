@@ -21,3 +21,107 @@
   align-items: center;
   justify-content: center;
 }
+
+/* === 確認モーダルダイアログ === */
+.eichi-confirm-dialog {
+  border: none;
+  border-radius: 12px;
+  padding: 0;
+  min-width: 360px;
+  max-width: 480px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  z-index: 100001;
+}
+.eichi-confirm-dialog::backdrop {
+  background: rgba(0,0,0,0.5);
+}
+.eichi-confirm-header {
+  background: #d32f2f;
+  color: white;
+  padding: 16px 20px;
+  border-radius: 12px 12px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: bold;
+  font-size: 16px;
+}
+.eichi-confirm-icon {
+  font-size: 22px;
+}
+.eichi-confirm-body {
+  padding: 20px;
+  line-height: 1.6;
+}
+.eichi-confirm-message {
+  font-size: 15px;
+  margin: 0 0 8px 0;
+}
+.eichi-confirm-detail {
+  font-size: 14px;
+  color: #555;
+  margin: 0 0 12px 0;
+  font-weight: bold;
+}
+.eichi-confirm-warning {
+  font-size: 13px;
+  color: #d32f2f;
+  margin: 0;
+  padding: 8px 12px;
+  background: #ffebee;
+  border-radius: 6px;
+  border-left: 3px solid #d32f2f;
+}
+.eichi-confirm-actions {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 20px;
+  gap: 12px;
+  border-top: 1px solid #eee;
+}
+.eichi-confirm-btn-danger {
+  background: #d32f2f;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.eichi-confirm-btn-danger:hover {
+  background: #b71c1c;
+}
+.eichi-confirm-btn-safe {
+  background: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  flex: 1 0 auto;
+  max-width: 260px;
+}
+.eichi-confirm-btn-safe:hover {
+  background: #388e3c;
+}
+
+/* ダークモード対応 */
+@media (prefers-color-scheme: dark) {
+  .eichi-confirm-dialog {
+    background: #2d2d2d;
+    color: #e0e0e0;
+  }
+  .eichi-confirm-detail {
+    color: #aaa;
+  }
+  .eichi-confirm-warning {
+    background: #3e1a1a;
+    color: #ef9a9a;
+  }
+  .eichi-confirm-actions {
+    border-top-color: #444;
+  }
+}

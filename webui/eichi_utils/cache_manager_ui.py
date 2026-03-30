@@ -4,16 +4,15 @@
 Gradio の gr.Accordion にまとめたキャッシュ管理パネルを構築する。
 build_cache_panel() は gr.Blocks() コンテキスト内で呼び出すこと。
 
-使い方 (oneframe_ichi.py):
-    from eichi_utils import cache_manager_ui as _cmu
-    panel = _cmu.build_cache_panel(translate)
-    # イベント接続は panel["refresh_btn"].click(...) 等で
+削除時は confirm_modal.js のカスタムモーダルで確認後、
+隠しボタン経由で実際の削除を実行する。
 """
 
 import gradio as gr
 from eichi_utils import cache_manager
 from eichi_utils import lora_state_cache
 from eichi_utils import prompt_cache
+import html as _html_mod
 
 
 def _size_text(entries, total_bytes, translate_fn):
@@ -36,14 +35,27 @@ def _get_sizes(translate_fn):
     return lora_text, prompt_text
 
 
+def _get_detail_text(target, translate_fn):
+    """モーダルに表示するサイズ詳細テキストを生成"""
+    try:
+        if target == "lora":
+            entries = cache_manager.lora_cache_entries()
+        elif target == "prompt":
+            entries = cache_manager.prompt_cache_entries()
+        else:  # all
+            lora = cache_manager.lora_cache_entries()
+            prompt = cache_manager.prompt_cache_entries()
+            entries = lora + prompt
+        count = len(entries)
+        total = sum(e["size_bytes"] for e in entries)
+        size_str = cache_manager.format_bytes(total)
+        return f"{count} {translate_fn('ファイル')} / {size_str}"
+    except Exception:
+        return ""
+
+
 def build_cache_panel(translate_fn):
-    """キャッシュ管理UIパネルを構築する。
-
-    gr.Blocks() コンテキスト内で呼び出すこと。
-
-    Returns:
-        dict with Gradio component references
-    """
+    """キャッシュ管理UIパネルを構築する。"""
     # 初期サイズ取得
     try:
         init_lora, init_prompt = _get_sizes(translate_fn)
@@ -53,8 +65,7 @@ def build_cache_panel(translate_fn):
 
     # 現在のフォーマット設定
     current_lora_fmt = lora_state_cache.get_preferred_format()
-    current_prompt_fmt = prompt_cache.get_preferred_format()
-    current_fmt = current_lora_fmt  # 両方同じにする前提
+    current_fmt = current_lora_fmt
 
     with gr.Accordion(
         label=translate_fn("キャッシュ管理"),
@@ -99,6 +110,14 @@ def build_cache_panel(translate_fn):
 
         status_md = gr.Markdown(value="")
 
+        # モーダル表示用の非表示HTML（JSトリガー用）
+        modal_trigger_html = gr.HTML(value="", visible=False)
+
+        # 隠し実行ボタン（モーダルの「承認して削除」からJSで呼ばれる）
+        exec_lora_btn = gr.Button(visible=False, elem_id="eichi_exec_clear_lora")
+        exec_prompt_btn = gr.Button(visible=False, elem_id="eichi_exec_clear_prompt")
+        exec_all_btn = gr.Button(visible=False, elem_id="eichi_exec_clear_all")
+
     return {
         "accordion": accordion,
         "lora_size_md": lora_size_md,
@@ -109,7 +128,44 @@ def build_cache_panel(translate_fn):
         "clear_all_btn": clear_all_btn,
         "cache_format_radio": cache_format_radio,
         "status_md": status_md,
+        "modal_trigger_html": modal_trigger_html,
+        "exec_lora_btn": exec_lora_btn,
+        "exec_prompt_btn": exec_prompt_btn,
+        "exec_all_btn": exec_all_btn,
     }
+
+
+def _build_modal_js(target, title, message, detail, warning,
+                    confirm_label, cancel_label, exec_elem_id):
+    """モーダル表示用のJS呼び出しHTMLを生成"""
+    # HTML属性内のエスケープ
+    def esc(s):
+        return _html_mod.escape(str(s), quote=True)
+
+    return f"""<script>
+(function() {{
+  if (window._eichiConfirmModal) {{
+    window._eichiConfirmModal({{
+      title: "{esc(title)}",
+      message: "{esc(message)}",
+      detail: "{esc(detail)}",
+      warning: "{esc(warning)}",
+      confirmLabel: "{esc(confirm_label)}",
+      cancelLabel: "{esc(cancel_label)}",
+      onConfirm: function() {{
+        var btn = document.getElementById("{esc(exec_elem_id)}");
+        if (btn) btn.click();
+      }}
+    }});
+  }} else {{
+    // フォールバック: confirm_modal.js が読めない場合
+    if (confirm("{esc(title)}\\n{esc(message)}\\n{esc(detail)}")) {{
+      var btn = document.getElementById("{esc(exec_elem_id)}");
+      if (btn) btn.click();
+    }}
+  }}
+}})();
+</script>"""
 
 
 def make_refresh_handler(translate_fn):
@@ -120,8 +176,62 @@ def make_refresh_handler(translate_fn):
     return handler
 
 
-def make_clear_lora_handler(translate_fn):
-    """LoRAキャッシュ削除ボタンのハンドラを返す"""
+def make_confirm_lora_handler(translate_fn):
+    """LoRAキャッシュ削除の確認モーダルを表示するハンドラ"""
+    def handler():
+        detail = _get_detail_text("lora", translate_fn)
+        js_html = _build_modal_js(
+            target="lora",
+            title=translate_fn("キャッシュ削除の確認"),
+            message=translate_fn("LoRAキャッシュを削除します"),
+            detail=detail,
+            warning=translate_fn("この操作は取り消せません"),
+            confirm_label=f"⚠ {translate_fn('承認して削除')}",
+            cancel_label=translate_fn("削除せず戻る"),
+            exec_elem_id="eichi_exec_clear_lora",
+        )
+        return js_html
+    return handler
+
+
+def make_confirm_prompt_handler(translate_fn):
+    """プロンプトキャッシュ削除の確認モーダルを表示するハンドラ"""
+    def handler():
+        detail = _get_detail_text("prompt", translate_fn)
+        js_html = _build_modal_js(
+            target="prompt",
+            title=translate_fn("キャッシュ削除の確認"),
+            message=translate_fn("プロンプトキャッシュを削除します"),
+            detail=detail,
+            warning=translate_fn("この操作は取り消せません"),
+            confirm_label=f"⚠ {translate_fn('承認して削除')}",
+            cancel_label=translate_fn("削除せず戻る"),
+            exec_elem_id="eichi_exec_clear_prompt",
+        )
+        return js_html
+    return handler
+
+
+def make_confirm_all_handler(translate_fn):
+    """全キャッシュ削除の確認モーダルを表示するハンドラ"""
+    def handler():
+        detail = _get_detail_text("all", translate_fn)
+        js_html = _build_modal_js(
+            target="all",
+            title=translate_fn("キャッシュ削除の確認"),
+            message=translate_fn("全キャッシュを削除します"),
+            detail=detail,
+            warning=translate_fn("この操作は取り消せません"),
+            confirm_label=f"⚠ {translate_fn('承認して削除')}",
+            cancel_label=translate_fn("削除せず戻る"),
+            exec_elem_id="eichi_exec_clear_all",
+        )
+        return js_html
+    return handler
+
+
+def make_exec_clear_lora_handler(translate_fn):
+    """LoRAキャッシュの実際の削除ハンドラ（隠しボタンから呼ばれる）"""
     def handler():
         deleted, freed = cache_manager.clear_lora_cache(also_clear_inmem=True)
         freed_str = cache_manager.format_bytes(freed)
@@ -131,8 +241,8 @@ def make_clear_lora_handler(translate_fn):
     return handler
 
 
-def make_clear_prompt_handler(translate_fn):
-    """プロンプトキャッシュ削除ボタンのハンドラを返す"""
+def make_exec_clear_prompt_handler(translate_fn):
+    """プロンプトキャッシュの実際の削除ハンドラ（隠しボタンから呼ばれる）"""
     def handler():
         deleted, freed = cache_manager.clear_prompt_cache()
         freed_str = cache_manager.format_bytes(freed)
@@ -142,8 +252,8 @@ def make_clear_prompt_handler(translate_fn):
     return handler
 
 
-def make_clear_all_handler(translate_fn):
-    """全キャッシュ削除ボタンのハンドラを返す"""
+def make_exec_clear_all_handler(translate_fn):
+    """全キャッシュの実際の削除ハンドラ（隠しボタンから呼ばれる）"""
     def handler():
         result = cache_manager.clear_all_caches()
         lora_del, lora_freed = result["lora"]
@@ -155,6 +265,12 @@ def make_clear_all_handler(translate_fn):
         status = f"✅ {translate_fn('削除完了')}: {total_del} {translate_fn('ファイル')} / {freed_str} {translate_fn('解放')}"
         return lora_text, prompt_text, status
     return handler
+
+
+# 後方互換: 旧APIも残す
+make_clear_lora_handler = make_exec_clear_lora_handler
+make_clear_prompt_handler = make_exec_clear_prompt_handler
+make_clear_all_handler = make_exec_clear_all_handler
 
 
 def make_format_change_handler(translate_fn):
