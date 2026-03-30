@@ -5819,17 +5819,21 @@ with block:
                 fn=_cmu.make_refresh_handler(translate),
                 inputs=[], outputs=_cache_outputs,
             )
+            _confirm_cache_js = "() => { if (!confirm('キャッシュを削除しますか？ / Delete cache?')) { throw new Error('cancelled'); } }"
             _cache_panel["clear_lora_btn"].click(
                 fn=_cmu.make_clear_lora_handler(translate),
                 inputs=[], outputs=_cache_outputs,
+                js=_confirm_cache_js,
             )
             _cache_panel["clear_prompt_btn"].click(
                 fn=_cmu.make_clear_prompt_handler(translate),
                 inputs=[], outputs=_cache_outputs,
+                js=_confirm_cache_js,
             )
             _cache_panel["clear_all_btn"].click(
                 fn=_cmu.make_clear_all_handler(translate),
                 inputs=[], outputs=_cache_outputs,
+                js=_confirm_cache_js,
             )
             _cache_panel["cache_format_radio"].change(
                 fn=_cmu.make_format_change_handler(translate),
