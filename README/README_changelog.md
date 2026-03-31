@@ -4,6 +4,13 @@
 
 ## 日本語
 
+### 2026-03-31: バージョン1.9.5.8_b1（ベータ）
+- **3プログラム統一: LoRAスキャンのPython起動時実行**:
+  - endframe_ichi.py / endframe_ichi_f1.py でも scan_lora_directory をモジュールスコープに移動
+  - JS自動クリック（initLoraDropdowns）を全プログラムから廃止
+  - Dropdown初期choicesが起動時に設定されるようになり、ロケール非依存・競合なしに
+- 開発メモ（development.md）を更新: oichi/eichi/F1の機能展開マトリクスを追加
+
 ### 2026-03-31: バージョン1.9.5.7
 - **v1.9.5.5以降のリグレッション7件を修正**:
   - CRITICAL: modal.js / notification.js のIIFE未実行を修正（画像プレビューとブラウザ通知が完全に動作していなかった）
@@ -352,6 +359,13 @@
 - キーフレームガイド機能の追加
 
 ## English
+
+### 2026-03-31: Version 1.9.5.8_b1 (Beta)
+- **3-program unification: LoRA scan at Python startup**:
+  - Moved scan_lora_directory to module scope in endframe_ichi.py / endframe_ichi_f1.py
+  - Removed JS auto-click (initLoraDropdowns) from all programs
+  - Dropdown choices now set at startup — locale-independent, no race conditions
+- Updated development memo with oichi/eichi/F1 feature parity matrix
 
 ### 2026-03-31: Version 1.9.5.7
 - **Fixed 7 regressions introduced in v1.9.5.5**:
@@ -702,6 +716,10 @@
 
 ## 简体中文
 
+### 2026-03-31: 版本1.9.5.8_b1（测试版）
+- **3程序统一：启动时Python端执行LoRA扫描**：移除JS自动点击，Dropdown在启动时直接初始化
+- 更新开发备忘录：添加oichi/eichi/F1功能对照矩阵
+
 ### 2026-03-31: 版本1.9.5.7
 - **修复v1.9.5.5引入的7个回归问题**：
   - 严重：修复modal.js/notification.js的IIFE未执行问题（图像预览和浏览器通知完全失效）
@@ -1016,6 +1034,10 @@
 - 添加关键帧指南功能
 
 ## Русский
+
+### 2026-03-31: Версия 1.9.5.8_b1 (Бета)
+- **Унификация 3 программ: сканирование LoRA при запуске Python**: удалён JS автоклик, Dropdown инициализируется при запуске
+- Обновлена записка разработки: добавлена матрица функций oichi/eichi/F1
 
 ### 2026-03-31: Версия 1.9.5.7
 - **Исправлено 7 регрессий, введённых в v1.9.5.5**:
