@@ -4251,7 +4251,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         section_settings = [[None, None, ""] for _ in range(50)]
     # メイン生成処理
     global stream
-    global batch_stopped
+    global batch_stopped, stop_after_current, stop_after_step
     global queue_enabled, queue_type, prompt_queue_file_path, image_queue_files
 
     # バッチ処理開始時に停止フラグをリセット
@@ -4480,12 +4480,12 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
         # ユーザーにわかりやすいメッセージを表示
         print(translate("ランダムシード機能が有効なため、指定されたSEED値 {0} の代わりに新しいSEED値 {1} を使用します。").format(previous_seed, seed))
         # UIのseed欄もランダム値で更新
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update(value=seed)
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update(value=seed)
         # ランダムシードの場合は最初の値を更新
         original_seed = seed
     else:
         print(translate("指定されたSEED値 {0} を使用します。").format(seed))
-        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
+        yield gr.skip(), None, '', '', gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
     stream = AsyncStream()
 
@@ -4565,7 +4565,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
             batch_info = translate("バッチ処理: {0}/{1}").format(batch_index + 1, batch_count)
             print(f"{batch_info}")
             # UIにもバッチ情報を表示
-            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
+            yield gr.skip(), gr.update(visible=False), batch_info, "", gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
 
         # 今回処理用のプロンプトとイメージを取得（キュー機能対応）
@@ -4745,7 +4745,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                     batch_info = translate("バッチ処理: {0}/{1} - ").format(batch_index + 1, batch_count)
                     desc = batch_info + desc
                 # preview_imageを明示的に設定
-                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=False), gr.update()
+                yield gr.skip(), gr.update(visible=True, value=preview), desc, html, gr.update(interactive=False), gr.update(interactive=True), gr.update(interactive=True), gr.update()
 
             if flag == 'end':
 

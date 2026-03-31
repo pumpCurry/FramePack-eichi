@@ -1997,6 +1997,7 @@ def _worker_impl(ctx: JobContext, input_image, prompt, n_prompt, seed, steps, cf
            latent_window_size=9, latent_index=0, use_clean_latents_2x=True, use_clean_latents_4x=True, use_clean_latents_post=True,
            lora_mode=None, lora_dropdown1=None, lora_dropdown2=None, lora_dropdown3=None, lora_files3=None,
            batch_index=None, use_queue=False, prompt_queue_file=None,
+           use_rope_batch=False,
            # Kisekaeichi関連のパラメータ
            use_reference_image=False, reference_image=None,
            target_index=1, history_index=13, reference_long_edge=False, input_mask=None, reference_mask=None):
@@ -4139,7 +4140,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
 
     # --- ここから新規ジョブ開始 ---
     # 開始時点のUI値をスナップショットしておく（再同期で復元用）
-    global last_start_options, last_job_id
+    global last_start_options
     # HANG-2修正: UI値のスナップショットを構築
     # 再接続時にget_state_snapshot()から返されるオプション情報
     opts = {}
@@ -4699,6 +4700,7 @@ def process(input_image, prompt, n_prompt, seed, steps, cfg, gs, rs, gpu_memory_
                 current_latent_window_size, latent_index, use_clean_latents_2x, use_clean_latents_4x, use_clean_latents_post,
                 lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_files3,
                 batch_index, use_queue, prompt_queue_file,
+                use_rope_batch,
                 # Kisekaeichi関連パラメータを追加
                 use_reference_image, reference_image_current,
                 target_index, history_index, reference_long_edge, input_mask, reference_mask,

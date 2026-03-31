@@ -3546,8 +3546,12 @@ def end_process():
     stream.input_queue.push('end')
     generation_active = False
 
-    # ボタンの名前を一時的に変更することでユーザーに停止処理が進行中であることを表示
-    return gr.update(value=translate("停止処理中..."))
+    # 3つのボタン（end, stop_after, stop_step）を全て無効化
+    return (
+        gr.update(value=translate("停止処理中..."), interactive=False),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+    )
 
 def end_after_current_process():
     """現在の生成完了後に停止する処理"""
@@ -3656,18 +3660,6 @@ def resync_status_handler():
         stream.output_queue.clear()
     except Exception:
         pass
-
-def end_after_step_process():
-    """現在のステップ完了後に停止する処理"""
-    global batch_stopped, stop_after_current, stop_after_step, stream
-
-    if not stop_after_step:
-        batch_stopped = True
-        stop_after_current = True
-        stop_after_step = True
-        print("\n" + translate("停止ボタンが押されました。現在のステップ完了後に停止します..."))
-
-    return gr.update(value=translate("停止処理中..."), interactive=False)
 
 # 既存のQuick Prompts（初期化時にプリセットに変換されるので、互換性のために残す）
 quick_prompts = [
