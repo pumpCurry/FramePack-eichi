@@ -337,6 +337,7 @@ current_batch_progress = {"current": 0, "total": 0}  # Batch progress tracking
 queue_ui_settings = None  # Captured UI settings for queue processing
 pending_lora_config_data = None  # For delayed LoRA configuration loading
 stop_after_current = False  # Flag to stop after current generation
+stop_after_step = False     # Flag to stop after current step (denoising step)
 
 # Configuration constants for queue display
 CONST_queued_shown_count = 5  # Number of queued items shown in status
@@ -1264,15 +1265,17 @@ def end_process_enhanced():
     print(translate("停止ボタンが押されました。バッチ処理を停止します..."))
     stream.input_queue.push('end')
 
-    # Return updated button states
+    # Return updated button states: end_button, stop_after_button, stop_step_button, queue_start_button
     return (
-        gr.update(value=translate("停止処理中...")),  # End button (temporary message)
+        gr.update(value=translate("停止処理中...")),  # End button
+        gr.update(interactive=False),                # stop_after_button (disable)
+        gr.update(interactive=False),                # stop_step_button (disable)
         gr.update(interactive=True, value=translate("▶️ Start Queue"))  # Re-enable queue start
     )
 
 def end_after_current_process_enhanced():
     """Stop after the current generation completes"""
-    global batch_stopped, stop_after_current, stream
+    global batch_stopped, stop_after_current, stop_after_step, stream
 
     if not stop_after_current:
         batch_stopped = True
@@ -1285,7 +1288,19 @@ def end_after_current_process_enhanced():
         gr.update(value=translate("打ち切り処理中...")),
         gr.update(interactive=True, value=translate("▶️ Start Queue"))
     )
-  
+
+
+def end_after_step_process():
+    """現在のデノイジングステップ完了後に停止する"""
+    global batch_stopped, stop_after_current, stop_after_step
+    if not stop_after_step:
+        batch_stopped = True
+        stop_after_current = True
+        stop_after_step = True
+        print("\n" + translate("ステップ打ち切りが要求されました。現在のステップ完了後に停止します..."))
+    return gr.update(value=translate("停止処理中..."), interactive=False)
+
+
 # ==============================================================================
 # UI CREATION AND EVENT SETUP
 # ==============================================================================
@@ -2864,6 +2879,43 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
     # 処理時間計測の開始
     process_start_time = time.time()
+    process_start_dt = datetime.now()
+
+    # --- ETA付与プロキシ: 全progressイベントに経過/残り時間を自動付与 ---
+    _original_push = stream.output_queue.push
+
+    def _push_with_eta(item):
+        """stream.output_queue.push のプロキシ。progressイベントにETA情報を付与する。"""
+        global last_progress_desc, last_progress_bar, last_preview_image
+        if isinstance(item, tuple) and len(item) == 2 and item[0] == 'progress':
+            preview, desc, bar_html = item[1]
+            try:
+                now = datetime.now()
+                elapsed = now - process_start_dt
+                elapsed_str = str(elapsed).split('.')[0]
+                time_line = f"{process_start_dt.strftime('%H:%M')}▶{now.strftime('%H:%M')} ({elapsed_str})"
+                # bar_htmlからパーセンテージを推定（make_progress_bar_html2の出力から）
+                import re
+                pct_match = re.search(r'width:\s*([\d.]+)%', bar_html or '')
+                pct = float(pct_match.group(1)) if pct_match else 0
+                if pct > 0:
+                    total_secs = elapsed.total_seconds() / (pct / 100.0)
+                    est_dt = process_start_dt + timedelta(seconds=total_secs)
+                    time_line += f" ▶{est_dt.strftime('%H:%M')}"
+                if desc:
+                    desc = desc + "\n" + time_line
+                else:
+                    desc = time_line
+            except Exception:
+                pass
+            last_progress_desc = desc or ''
+            last_progress_bar = bar_html or ''
+            if preview is not None:
+                last_preview_image = preview
+            return _original_push(('progress', (preview, desc, bar_html)))
+        return _original_push(item)
+
+    stream.output_queue.push = _push_with_eta
 
     # グローバル変数で状態管理しているモデル変数を宣言する
     global transformer, text_encoder, text_encoder_2
@@ -3408,6 +3460,10 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
                 if stream.input_queue.top() == 'end':
                     stream.output_queue.push(('end', None))
                     raise KeyboardInterrupt('User ends the task.')
+
+                # stop_after_step: 現在のステップ完了後に停止
+                if stop_after_step and stream.input_queue.top() != 'end':
+                    stream.input_queue.push('end')
 
                 current_step = d['i'] + 1
                 percentage = int(100.0 * current_step / steps)
@@ -4201,7 +4257,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     # バッチ処理開始時に停止フラグをリセット
     batch_stopped = False
     stop_after_current = False
-
+    stop_after_step = False
 
     # フレームサイズ設定に応じてlatent_window_sizeを先に調整
     if frame_size_setting == "0.5秒 (17フレーム)":
@@ -4404,6 +4460,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
     # バッチ処理の全体停止用フラグ
     batch_stopped = False
     stop_after_current = False
+    stop_after_step = False
 
     # 元のシード値を保存（バッチ処理用）
     original_seed = seed
@@ -5106,6 +5163,7 @@ with block:
                 start_button = gr.Button(value=translate("Start Generation"))
                 end_button = gr.Button(value=translate("End Generation"), interactive=False)
                 stop_after_button = gr.Button(value=translate("この生成で打ち切り"), interactive=False)
+                stop_step_button = gr.Button(value=translate("このステップで打ち切り"), interactive=False)
 
             # FP8最適化設定
             with gr.Row():
@@ -6580,9 +6638,10 @@ with block:
     ips = [input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache, use_random_seed, mp4_crf, all_padding_value, image_strength, frame_size_radio, keep_section_videos, lora_files, lora_files2, lora_files3, lora_scales_text, output_dir, save_section_frames, use_all_padding, use_lora, lora_mode, lora_dropdown1, lora_dropdown2, lora_dropdown3, save_tensor_data, section_settings, tensor_data_input, fp8_optimization, resolution, batch_count, frame_save_mode, use_queue, prompt_queue_file, save_settings_on_start, alarm_on_completion, use_prompt_cache]
 
     start_button.click(fn=validate_and_process_with_queue_check, inputs=ips, outputs=[result_video, preview_image, progress_desc, progress_bar, start_button, end_button, stop_after_button, queue_start_button, seed])
-    end_button.click(fn=end_process_enhanced, outputs=[end_button, stop_after_button, queue_start_button], queue=False,
+    end_button.click(fn=end_process_enhanced, outputs=[end_button, stop_after_button, stop_step_button, queue_start_button], queue=False,
                      js="() => { if (!confirm('生成を中止しますか？ / Stop generation?')) { throw new Error('cancelled'); } }")
     stop_after_button.click(fn=end_after_current_process_enhanced, outputs=[stop_after_button, queue_start_button], queue=False)
+    stop_step_button.click(fn=end_after_step_process, outputs=[stop_step_button], queue=False)
 
     # F1モードではセクション機能とキーフレームコピー機能を削除済み
 
