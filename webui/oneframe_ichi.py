@@ -6712,159 +6712,111 @@ with block:
                         fav_reload_btn = gr.Button(value=translate("再読み込み"))
                     fav_message = gr.Markdown("")
             
-            # アプリケーション設定の保存機能
-            def save_app_settings_handler(
-                # 保存対象の設定項目
-                resolution_val,
-                steps_val,
-                cfg_val,
-                use_teacache_val,
-                fp8_optimization_val,
-                lora_cache_val,
-                reuse_optimized_dict_val,
-                use_prompt_cache_val,
-                gpu_memory_preservation_val,
-                gs_val,
-                latent_window_size_val,
-                latent_index_val,
-                use_clean_latents_2x_val,
-                use_clean_latents_4x_val,
-                use_clean_latents_post_val,
-                target_index_val,
-                history_index_val,
-                reference_long_edge_val,
-                save_input_images_val,
-                save_before_input_images_val,
-                save_settings_on_start_val,
-                alarm_on_completion_val,
-                # ログ設定項目
-                log_enabled_val,
-                log_folder_val
-            ):
-                """現在の設定を保存"""
-                current_settings = {
-                    'resolution': resolution_val,
-                    'steps': steps_val,
-                    'cfg': cfg_val,
-                    'use_teacache': use_teacache_val,
-                    'fp8_optimization': fp8_optimization_val,
-                    'lora_cache': lora_cache_val,
-                    'reuse_optimized_dict': reuse_optimized_dict_val,
-                    'use_prompt_cache': use_prompt_cache_val,
-                    'gpu_memory_preservation': gpu_memory_preservation_val,
-                    'gs': gs_val,
-                    'latent_window_size': latent_window_size_val,
-                    'latent_index': latent_index_val,
-                    'use_clean_latents_2x': use_clean_latents_2x_val,
-                    'use_clean_latents_4x': use_clean_latents_4x_val,
-                    'use_clean_latents_post': use_clean_latents_post_val,
-                    'target_index': target_index_val,
-                    'history_index': history_index_val,
-                    'reference_long_edge': reference_long_edge_val,
-                    'save_input_images': save_input_images_val,
-                    'save_before_input_images': save_before_input_images_val,
-                    'save_settings_on_start': save_settings_on_start_val,
-                    'alarm_on_completion': alarm_on_completion_val
-                }
-                
+            # ================================================================
+            # アプリケーション設定の保存/リセット — テーブル駆動
+            # ================================================================
+            # 設定項目を1箇所で管理。追加時はここに1行追加するだけ。
+            # save/reset/inputs/outputs すべてこのテーブルから自動生成される。
+            #
+            # フォーマット: (settings_key, ui_component, default_value, is_log)
+            #   settings_key: app_settings_oichi のJSON キー
+            #   ui_component: Gradio UI コンポーネント
+            #   default_value: リセット時のデフォルト値
+            #   is_log: True の場合、app_settings ではなく log_settings に保存
+            _SETTINGS_SPEC = [
+                # --- アプリ設定 ---
+                ("resolution",              resolution,                     640,    False),
+                ("steps",                   steps,                          25,     False),
+                ("cfg",                     cfg,                            1,      False),
+                ("use_teacache",            use_teacache,                   True,   False),
+                ("fp8_optimization",        fp8_optimization,               True,   False),
+                ("lora_cache",              lora_cache_checkbox,            False,  False),
+                ("reuse_optimized_dict",    reuse_optimized_dict_checkbox,  False,  False),
+                ("use_prompt_cache",        use_prompt_cache,               True,   False),
+                ("gpu_memory_preservation", gpu_memory_preservation,        6,      False),
+                ("gs",                      gs,                             10,     False),
+                ("latent_window_size",      latent_window_size,             9,      False),
+                ("latent_index",            latent_index,                   0,      False),
+                ("use_clean_latents_2x",    use_clean_latents_2x,          True,   False),
+                ("use_clean_latents_4x",    use_clean_latents_4x,          True,   False),
+                ("use_clean_latents_post",  use_clean_latents_post,        True,   False),
+                ("target_index",            target_index,                   1,      False),
+                ("history_index",           history_index,                  16,     False),
+                ("reference_long_edge",     reference_long_edge,           True,   False),
+                ("save_input_images",       save_input_images,             False,  False),
+                ("save_before_input_images", save_before_input_images,     False,  False),
+                ("save_settings_on_start",  save_settings_on_start,        False,  False),
+                ("alarm_on_completion",      alarm_on_completion,           True,   False),
+                # --- ログ設定（別系統で保存） ---
+                ("log_enabled",             log_enabled,                   False,  True),
+                ("log_folder",              log_folder,                    "logs", True),
+            ]
+
+            # inputs/outputs 用のコンポーネントリスト（テーブルから自動生成）
+            _settings_components = [spec[1] for spec in _SETTINGS_SPEC]
+
+            def save_app_settings_handler(*args):
+                """現在の設定を保存（テーブル駆動）"""
+                # args と SPEC を突き合わせて dict を組み立て
+                app_settings = {}
+                log_settings = {}
+                for (key, _comp, _default, is_log), val in zip(_SETTINGS_SPEC, args):
+                    if is_log:
+                        # ログ設定: 型を安全に変換
+                        if key == "log_enabled":
+                            log_settings[key] = bool(val) if isinstance(val, bool) else bool(getattr(val, 'value', False))
+                        elif key == "log_folder":
+                            log_settings[key] = str(val) if isinstance(val, str) and val else str(getattr(val, 'value', 'logs') or 'logs')
+                        else:
+                            log_settings[key] = val
+                    else:
+                        app_settings[key] = val
+
                 # アプリ設定を保存
                 try:
-                    app_success = save_app_settings_oichi(current_settings)
+                    app_success = save_app_settings_oichi(app_settings)
                 except Exception as e:
                     return translate("設定の保存に失敗しました: {0}").format(str(e))
-                
-                # ログ設定も保存 - 値の型を確認
-                # log_enabledはbooleanに確実に変換
-                is_log_enabled = False
-                if isinstance(log_enabled_val, bool):
-                    is_log_enabled = log_enabled_val
-                elif hasattr(log_enabled_val, 'value'):
-                    is_log_enabled = bool(log_enabled_val.value)
-                
-                # log_folderは文字列に確実に変換
-                log_folder_path = "logs"
-                if log_folder_val and isinstance(log_folder_val, str):
-                    log_folder_path = log_folder_val
-                elif hasattr(log_folder_val, 'value') and log_folder_val.value:
-                    log_folder_path = str(log_folder_val.value)
-                
-                log_settings = {
-                    "log_enabled": is_log_enabled,
-                    "log_folder": log_folder_path
-                }
-                
-                # 全体設定を取得し、ログ設定を更新
+
+                # ログ設定を保存（別系統）
                 all_settings = load_settings()
                 all_settings['log_settings'] = log_settings
                 log_success = save_settings(all_settings)
-                
-                # ログ設定を適用（設定保存後、すぐに新しいログ設定を反映）
+
+                # ログ設定を即時適用
                 if log_success:
-                    # 一旦ログを無効化
                     disable_logging()
-                    # 新しい設定でログを再開（有効な場合）
                     apply_log_settings(log_settings, source_name="oneframe_ichi")
                     print(translate("ログ設定を更新しました: 有効={0}, フォルダ={1}").format(
-                        log_enabled_val, log_folder_val))
-                
+                        log_settings.get("log_enabled"), log_settings.get("log_folder")))
+
                 if app_success and log_success:
                     return translate("設定を保存しました")
                 else:
                     return translate("設定の一部保存に失敗しました")
 
             def reset_app_settings_handler():
-                """設定をデフォルトに戻す"""
+                """設定をデフォルトに戻す（テーブル駆動）"""
                 from eichi_utils.settings_manager import get_default_app_settings_oichi
-                
                 default_settings = get_default_app_settings_oichi()
-                updates = []
-                
-                # 各UIコンポーネントのデフォルト値を設定
-                updates.append(gr.update(value=default_settings.get("resolution", 640)))  # 1
-                updates.append(gr.update(value=default_settings.get("steps", 25)))  # 2
-                updates.append(gr.update(value=default_settings.get("cfg", 1)))  # 3
-                updates.append(gr.update(value=default_settings.get("use_teacache", True)))  # 4
-                updates.append(gr.update(value=default_settings.get("fp8_optimization", True)))  # 5
-                updates.append(gr.update(value=default_settings.get("lora_cache", False)))  # 6
-                updates.append(gr.update(value=default_settings.get("reuse_optimized_dict", False)))  # 7
-                updates.append(gr.update(value=default_settings.get("use_prompt_cache", True)))  # 8
-                updates.append(gr.update(value=default_settings.get("gpu_memory_preservation", 6)))  # 9
-                updates.append(gr.update(value=default_settings.get("gs", 10)))  #10
-                updates.append(gr.update(value=default_settings.get("latent_window_size", 9)))  #11
-                updates.append(gr.update(value=default_settings.get("latent_index", 0)))  #12
-                updates.append(gr.update(value=default_settings.get("use_clean_latents_2x", True)))  #13
-                updates.append(gr.update(value=default_settings.get("use_clean_latents_4x", True)))  #14
-                updates.append(gr.update(value=default_settings.get("use_clean_latents_post", True)))  #15
-                updates.append(gr.update(value=default_settings.get("target_index", 1)))  #16
-                updates.append(gr.update(value=default_settings.get("history_index", 16)))  #17
-                updates.append(gr.update(value=default_settings.get("reference_long_edge", True)))  #18
-                updates.append(gr.update(value=default_settings.get("save_input_images", False)))  #19
-                updates.append(gr.update(value=default_settings.get("save_before_input_images", False)))  #20
-                updates.append(gr.update(value=default_settings.get("save_settings_on_start", False)))  #21
-                updates.append(gr.update(value=default_settings.get("alarm_on_completion", True)))  #22
 
-                # ログ設定 (23番目と24番目の要素)
-                # ログ設定は固定値を使用 - 絶対に文字列とbooleanを使用
-                updates.append(gr.update(value=False))  # log_enabled (23)
-                updates.append(gr.update(value="logs"))  # log_folder (24)
-                
-                # ログ設定をアプリケーションに適用
-                default_log_settings = {
-                    "log_enabled": False,
-                    "log_folder": "logs"
-                }
-                
-                # 設定ファイルを更新
+                # SPEC テーブルからデフォルト値のリストを自動生成
+                updates = []
+                for key, _comp, fallback, is_log in _SETTINGS_SPEC:
+                    if is_log:
+                        updates.append(gr.update(value=fallback))
+                    else:
+                        updates.append(gr.update(value=default_settings.get(key, fallback)))
+
+                # ログ設定をファイルに書き戻し＆適用
+                default_log = {key: fallback for key, _, fallback, is_log in _SETTINGS_SPEC if is_log}
                 all_settings = load_settings()
-                all_settings['log_settings'] = default_log_settings
+                all_settings['log_settings'] = default_log
                 save_settings(all_settings)
-                
-                # ログ設定を適用 (既存のログファイルを閉じて、設定に従って再設定)
-                disable_logging()  # 既存のログを閉じる
-                
-                # 設定状態メッセージ (20番目の要素)
+                disable_logging()
+
+                # 末尾にステータスメッセージ（settings_status 用）
                 updates.append(translate("設定をデフォルトに戻しました"))
-                
                 return updates
     
     # シードのランダム化機能
@@ -7265,68 +7217,17 @@ with block:
            log_enabled, log_folder, reuse_optimized_dict_checkbox]  # 設定保存パラメータを追加
     
     # 設定保存ボタンのクリックイベント
+    # 設定の保存/リセット — inputs/outputs は _SETTINGS_SPEC から自動生成
     save_current_settings_btn.click(
         fn=save_app_settings_handler,
-        inputs=[
-            resolution,
-            steps,
-            cfg,
-            use_teacache,
-            fp8_optimization,
-            lora_cache_checkbox,
-            reuse_optimized_dict_checkbox,
-            use_prompt_cache,
-            gpu_memory_preservation,
-            gs,
-            latent_window_size,
-            latent_index,
-            use_clean_latents_2x,
-            use_clean_latents_4x,
-            use_clean_latents_post,
-            target_index,
-            history_index,
-            reference_long_edge,
-            save_input_images,
-            save_before_input_images,
-            save_settings_on_start,
-            alarm_on_completion,
-            log_enabled,
-            log_folder
-        ],
+        inputs=_settings_components,
         outputs=[settings_status]
     )
-    
-    # 設定リセットボタンのクリックイベント
+
     reset_settings_btn.click(
         fn=reset_app_settings_handler,
         inputs=[],
-        outputs=[
-            resolution,           # 1
-            steps,                # 2
-            cfg,                  # 3
-            use_teacache,         # 4
-            fp8_optimization,     # 5
-            lora_cache_checkbox,  # 6
-            reuse_optimized_dict_checkbox, # 7
-            use_prompt_cache,     # 8
-            gpu_memory_preservation, # 9
-            gs,                   #10
-            latent_window_size,   #11
-            latent_index,         #12
-            use_clean_latents_2x, #13
-            use_clean_latents_4x, #14
-            use_clean_latents_post, #15
-            target_index,         #16
-            history_index,        #17
-            reference_long_edge,  #18
-            save_input_images,    #19
-            save_before_input_images, #20
-            save_settings_on_start, #21
-            alarm_on_completion,  #22
-            log_enabled,          #23
-            log_folder,           #24
-            settings_status       #25
-        ]
+        outputs=_settings_components + [settings_status]
     )
 
 
