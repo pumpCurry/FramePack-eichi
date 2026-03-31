@@ -110,6 +110,38 @@ def is_generation_running():
     """Return True if a generation job is currently active."""
     return generation_active
 
+
+def scan_lora_directory():
+    """./loraディレクトリからLoRAモデルファイルを検索する関数。
+
+    モジュールスコープに定義し、UI構築前・ワーカー内の両方から安全に呼べるようにする。
+    """
+    lora_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lora')
+    choices = []
+
+    print(translate("現在の作業ディレクトリ: {0}").format(os.getcwd()))
+    print(translate("LoRAディレクトリパス: {0}").format(lora_dir))
+
+    if not os.path.exists(lora_dir):
+        os.makedirs(lora_dir, exist_ok=True)
+        print(translate("LoRAディレクトリが存在しなかったため作成しました: {0}").format(lora_dir))
+
+    for filename in os.listdir(lora_dir):
+        if filename.endswith(('.safetensors', '.pt', '.bin')):
+            choices.append(filename)
+
+    choices = sorted(choices)
+    none_choice = translate("なし")
+    choices.insert(0, none_choice)
+
+    for i, choice in enumerate(choices):
+        if not isinstance(choice, str):
+            choices[i] = str(choice)
+
+    print(translate("LoRAディレクトリから{0}個のモデルを検出しました").format(len(choices) - 1))
+    return choices
+
+
 # 生成状態管理用グローバル変数
 generation_stopped = False      # 生成中断フラグ
 current_batch_data = None      # 現在のバッチデータ
@@ -4547,15 +4579,8 @@ with block:
 
                 # ディレクトリから選択方式のコンポーネント（グループ化）
                 with gr.Group(visible=False) as lora_dropdown_group:
-                    # 初期状態でLoRAディレクトリをスキャンして選択肢を設定
-                    initial_lora_choices = [translate("なし")]
-                    lora_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lora')
-                    if os.path.exists(lora_dir):
-                        for filename in os.listdir(lora_dir):
-                            if filename.endswith(('.safetensors', '.pt', '.bin')):
-                                initial_lora_choices.append(filename)
-                    initial_lora_choices = sorted(initial_lora_choices[1:])  # "なし"以外をソート
-                    initial_lora_choices.insert(0, translate("なし"))  # "なし"を最初に追加
+                    # 起動時にPython側でスキャン済みのchoicesを使用
+                    initial_lora_choices = scan_lora_directory()
                     
                     # ディレクトリからスキャンされたモデルのドロップダウン
                     lora_dropdown1 = gr.Dropdown(
@@ -4621,48 +4646,6 @@ with block:
                         lines=1
                     )
 
-                # LoRAディレクトリからモデルを検索する関数
-                def scan_lora_directory():
-                    """./loraディレクトリからLoRAモデルファイルを検索する関数"""
-                    lora_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lora')
-                    choices = []
-
-                    # 現在の作業ディレクトリとLoRAディレクトリのパスを表示
-                    print(translate("現在の作業ディレクトリ: {0}").format(os.getcwd()))
-                    print(translate("LoRAディレクトリパス: {0}").format(lora_dir))
-                    
-                    # ディレクトリが存在しない場合は作成
-                    if not os.path.exists(lora_dir):
-                        os.makedirs(lora_dir, exist_ok=True)
-                        print(translate("LoRAディレクトリが存在しなかったため作成しました: {0}").format(lora_dir))
-                    
-                    # ディレクトリ内のファイルをリストアップ
-                    for filename in os.listdir(lora_dir):
-                        if filename.endswith(('.safetensors', '.pt', '.bin')):
-                            choices.append(filename)
-                    
-                    # 空の選択肢がある場合は"なし"を追加
-                    choices = sorted(choices)
-                    
-                    # なしの選択肢を最初に追加
-                    none_choice = translate("なし")
-                    choices.insert(0, none_choice)
-                    
-                    # 重要: すべての選択肢が確実に文字列型であることを確認
-                    for i, choice in enumerate(choices):
-                        if not isinstance(choice, str):
-                            choices[i] = str(choice)
-                    
-                    # ファイル内容の出力を追加
-                    print(translate("LoRAディレクトリから{0}個のモデルを検出しました").format(len(choices) - 1))
-                    
-                    # 数値の0に変換されないようにする
-                    if choices[0] == 0 or choices[0] == 0.0:
-                        print(translate("重要警告: 'なし'の選択肢が数値0になっています。修正します。"))
-                        choices[0] = none_choice
-                    
-                    return choices
-                
                 # チェックボックスの状態によって他のLoRA設定の表示/非表示を切り替える関数
                 def toggle_lora_settings(use_lora):
                     if use_lora:
@@ -4955,28 +4938,8 @@ with block:
                     outputs=[lora_dropdown1, lora_dropdown2, lora_dropdown3]
                 )
                 
-                # UIロード後に自動的に初期化ボタンをクリックするJavaScriptを追加
-                js_init_code = """
-                function initLoraDropdowns() {
-                    // UIロード後、少し待ってからボタンをクリック
-                    setTimeout(function() {
-                        // 非表示ボタンを探して自動クリック
-                        var initBtn = document.getElementById('lora_init_btn');
-                        if (initBtn) {
-                            console.log('LoRAドロップダウン初期化ボタンを自動実行します');
-                            initBtn.click();
-                        } else {
-                            console.log('LoRAドロップダウン初期化ボタンが見つかりません');
-                        }
-                    }, 1000); // 1秒待ってから実行
-                }
-                
-                // ページロード時に初期化関数を呼び出し
-                window.addEventListener('load', initLoraDropdowns);
-                """
-                
-                # JavaScriptコードをUIに追加
-                gr.HTML(f"<script>{js_init_code}</script>")
+                # LoRA自動スキャンはPython側で起動時に実行済み
+                # （scan_lora_directory()の結果がDropdownのchoicesに直接設定される）
 
                 # LoRAサポートが無効の場合のメッセージ
                 if not has_lora_support:

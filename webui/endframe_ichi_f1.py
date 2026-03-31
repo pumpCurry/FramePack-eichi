@@ -5276,39 +5276,8 @@ with block:
 
                 use_lora = gr.Checkbox(label=translate("LoRAを使用する"), value=False, info=translate("チェックをオンにするとLoRAを使用します（要16GB VRAM以上）"))
 
-                def scan_lora_directory():
-                    """./loraディレクトリからLoRAモデルファイルを検索する関数 - ENHANCED VERSION"""
-                    lora_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lora')
-                    choices = []
-                    
-                    # ディレクトリが存在しない場合は作成
-                    if not os.path.exists(lora_dir):
-                        os.makedirs(lora_dir, exist_ok=True)
-                        print(translate("LoRAディレクトリが存在しなかったため作成しました: {0}").format(lora_dir))
-                    
-                    # ディレクトリ内のファイルをリストアップ
-                    try:
-                        for filename in os.listdir(lora_dir):
-                            if filename.endswith(('.safetensors', '.pt', '.bin')):
-                                choices.append(filename)
-                    except Exception as e:
-                        print(translate("Error scanning LoRA directory: {0}").format(e))
-                    
-                    # 空の選択肢がある場合は"なし"を追加
-                    choices = sorted(choices)
-                    
-                    # なしの選択肢を最初に追加
-                    none_choice = translate("なし")
-                    choices.insert(0, none_choice)
-                    
-                    # 重要: すべての選択肢が確実に文字列型であることを確認
-                    for i, choice in enumerate(choices):
-                        if not isinstance(choice, str):
-                            choices[i] = str(choice)
-                    
-                    print(translate("🔍 Scanned LoRA directory: found {0} files").format(len(choices)-1))
-                    return choices
-                
+                # scan_lora_directory はモジュールスコープで定義済み（1764行付近）
+
                 # LoRAの読み込み方式を選択するラジオボタン
                 lora_mode = gr.Radio(
                     choices=[translate("ディレクトリから選択"), translate("ファイルアップロード")],
@@ -5339,24 +5308,27 @@ with block:
                     )
                 
                 # ディレクトリ選択グループ - 初期状態は非表示
+                # 起動時にPython側でスキャン済みのchoicesを使用
+                _initial_lora_choices = scan_lora_directory()
+                _none_choice = translate("なし")
                 with gr.Group(visible=False) as lora_dropdown_group:
                     # ディレクトリからスキャンされたモデルのドロップダウン
                     lora_dropdown1 = gr.Dropdown(
                         label=translate("LoRAモデル選択 1"),
-                        choices=[],
-                        value=None,
+                        choices=_initial_lora_choices,
+                        value=_none_choice,
                         allow_custom_value=True
                     )
                     lora_dropdown2 = gr.Dropdown(
                         label=translate("LoRAモデル選択 2"),
-                        choices=[],
-                        value=None,
+                        choices=_initial_lora_choices,
+                        value=_none_choice,
                         allow_custom_value=True
                     )
                     lora_dropdown3 = gr.Dropdown(
                         label=translate("LoRAモデル選択 3"),
-                        choices=[],
-                        value=None,
+                        choices=_initial_lora_choices,
+                        value=_none_choice,
                         allow_custom_value=True
                     )
                     # スキャンボタン
@@ -5534,28 +5506,8 @@ with block:
                     outputs=[lora_dropdown1, lora_dropdown2, lora_dropdown3]
                 )
                 
-                # UIロード後に自動的に初期化するJavaScriptを追加
-                js_init_code = """
-                function initLoraDropdowns() {
-                    // UIロード後、少し待ってからボタンをクリック
-                    setTimeout(function() {
-                        // 非表示ボタンを探して自動クリック
-                        var initBtn = document.getElementById('lora_init_btn_f1');
-                        if (initBtn) {
-                            console.log('LoRAドロップダウン初期化ボタンを自動実行します');
-                            initBtn.click();
-                        } else {
-                            console.log('LoRAドロップダウン初期化ボタンが見つかりません');
-                        }
-                    }, 1000); // 1秒待ってから実行
-                }
-                
-                // ページロード時に初期化関数を呼び出し
-                window.addEventListener('load', initLoraDropdowns);
-                """
-                
-                # JavaScriptコードをUIに追加
-                gr.HTML(f"<script>{js_init_code}</script>")
+                # LoRA自動スキャンはPython側で起動時に実行済み
+                # （scan_lora_directory()の結果がDropdownのchoicesに直接設定される）
             
             # LoRAプリセット用変数を初期化
             lora_preset_group = None
