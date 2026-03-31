@@ -4,11 +4,17 @@
 
 ## 日本語
 
-### 2026-03-31: バージョン1.9.5.8_b1（ベータ）
-- **3プログラム統一: LoRAスキャンのPython起動時実行**:
+### 2026-03-31: バージョン1.9.5.8_b3（ベータ）
+- **b1: 3プログラム統一 — LoRAスキャンのPython起動時実行**:
   - endframe_ichi.py / endframe_ichi_f1.py でも scan_lora_directory をモジュールスコープに移動
   - JS自動クリック（initLoraDropdowns）を全プログラムから廃止
   - Dropdown初期choicesが起動時に設定されるようになり、ロケール非依存・競合なしに
+- **b2: F1にETA/経過時間表示を展開**:
+  - stream.output_queue.pushのプロキシ方式で全progressイベントに自動付与
+  - 既存30箇所以上のpush呼び出しを変更せずにETA情報が表示される
+- **b3: F1に「このステップで打ち切り」ボタンを展開**:
+  - stop_after_stepフラグ追加、samplingコールバック内でのチェック
+  - 3プログラムで操作性が統一された
 - 開発メモ（development.md）を更新: oichi/eichi/F1の機能展開マトリクスを追加
 
 ### 2026-03-31: バージョン1.9.5.7
@@ -360,11 +366,17 @@
 
 ## English
 
-### 2026-03-31: Version 1.9.5.8_b1 (Beta)
-- **3-program unification: LoRA scan at Python startup**:
+### 2026-03-31: Version 1.9.5.8_b3 (Beta)
+- **b1: 3-program unification — LoRA scan at Python startup**:
   - Moved scan_lora_directory to module scope in endframe_ichi.py / endframe_ichi_f1.py
   - Removed JS auto-click (initLoraDropdowns) from all programs
   - Dropdown choices now set at startup — locale-independent, no race conditions
+- **b2: ETA/elapsed time display ported to F1**:
+  - Proxy on stream.output_queue.push auto-appends ETA to all progress events
+  - Zero changes to existing 30+ push call sites
+- **b3: "Stop after step" button ported to F1**:
+  - stop_after_step flag + sampling callback check + UI button
+  - All 3 programs now have unified stop controls
 - Updated development memo with oichi/eichi/F1 feature parity matrix
 
 ### 2026-03-31: Version 1.9.5.7
@@ -716,8 +728,10 @@
 
 ## 简体中文
 
-### 2026-03-31: 版本1.9.5.8_b1（测试版）
-- **3程序统一：启动时Python端执行LoRA扫描**：移除JS自动点击，Dropdown在启动时直接初始化
+### 2026-03-31: 版本1.9.5.8_b3（测试版）
+- **b1: 3程序统一——启动时Python端执行LoRA扫描**：移除JS自动点击，Dropdown在启动时直接初始化
+- **b2: F1新增ETA/经过时间显示**：通过代理模式自动为所有进度事件添加时间信息
+- **b3: F1新增"此步骤后停止"按钮**：3个程序的停止控制现已统一
 - 更新开发备忘录：添加oichi/eichi/F1功能对照矩阵
 
 ### 2026-03-31: 版本1.9.5.7
@@ -1035,8 +1049,10 @@
 
 ## Русский
 
-### 2026-03-31: Версия 1.9.5.8_b1 (Бета)
-- **Унификация 3 программ: сканирование LoRA при запуске Python**: удалён JS автоклик, Dropdown инициализируется при запуске
+### 2026-03-31: Версия 1.9.5.8_b3 (Бета)
+- **b1: Унификация 3 программ — сканирование LoRA при запуске Python**: удалён JS автоклик, Dropdown инициализируется при запуске
+- **b2: Отображение ETA/времени в F1**: прокси-метод автоматически добавляет время ко всем событиям прогресса
+- **b3: Кнопка «Остановить после шага» в F1**: управление остановкой унифицировано во всех 3 программах
 - Обновлена записка разработки: добавлена матрица функций oichi/eichi/F1
 
 ### 2026-03-31: Версия 1.9.5.7
