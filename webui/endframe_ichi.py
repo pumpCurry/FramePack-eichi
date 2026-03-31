@@ -876,30 +876,44 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
     process_start_time = time.time()
     process_start_dt = datetime.now()
 
-    def push_progress(preview, desc, percent, hint):
-        now = datetime.now()
-        elapsed = now - process_start_dt
-        start_str = process_start_dt.strftime('%H:%M:%S')
-        now_str = now.strftime('%H:%M:%S')
-        elapsed_str = str(elapsed).split('.')[0]
-        if percent and percent > 0:
-            total_secs = elapsed.total_seconds() / (percent / 100)
-            est_dt = process_start_dt + timedelta(seconds=total_secs)
-            est_str = est_dt.strftime('%H:%M:%S')
-        else:
-            est_str = '--:--:--'
-        time_info = f"{start_str}▶{now_str} ({elapsed_str}) ▶{est_str}"
-        if desc:
-            desc = f"{desc}\n{time_info}"
-        else:
-            desc = time_info
+    # --- ETA付与プロキシ: 全progressイベントに経過/残り時間を自動付与 ---
+    _original_push = stream.output_queue.push
 
-        bar_html = make_progress_bar_html2(percent, hint)
+    def _push_with_eta(item):
+        """stream.output_queue.push のプロキシ。progressイベントにETA情報を付与する。"""
         global last_progress_desc, last_progress_bar, last_preview_image
-        last_progress_desc = desc
-        last_progress_bar = bar_html
-        last_preview_image = preview
+        if isinstance(item, tuple) and len(item) == 2 and item[0] == 'progress':
+            preview, desc, bar_html = item[1]
+            try:
+                now = datetime.now()
+                elapsed = now - process_start_dt
+                elapsed_str = str(elapsed).split('.')[0]
+                time_line = f"{process_start_dt.strftime('%H:%M')}▶{now.strftime('%H:%M')} ({elapsed_str})"
+                import re
+                pct_match = re.search(r'width:\s*([\d.]+)%', bar_html or '')
+                pct = float(pct_match.group(1)) if pct_match else 0
+                if pct > 0:
+                    total_secs = elapsed.total_seconds() / (pct / 100.0)
+                    est_dt = process_start_dt + timedelta(seconds=total_secs)
+                    time_line += f" ▶{est_dt.strftime('%H:%M')}"
+                if desc:
+                    desc = desc + "\n" + time_line
+                else:
+                    desc = time_line
+            except Exception:
+                pass
+            last_progress_desc = desc or ''
+            last_progress_bar = bar_html or ''
+            if preview is not None:
+                last_preview_image = preview
+            return _original_push(('progress', (preview, desc, bar_html)))
+        return _original_push(item)
 
+    stream.output_queue.push = _push_with_eta
+
+    def push_progress(preview, desc, percent, hint):
+        """進捗をUIに配信する。bar_html生成を行い、プロキシ経由でETA付与される。"""
+        bar_html = make_progress_bar_html2(percent, hint)
         stream.output_queue.push(('progress', (preview, desc, bar_html)))
 
     # グローバル変数で状態管理しているモデル変数を宣言する
