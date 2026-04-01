@@ -4,17 +4,24 @@
 
 ## 日本語
 
-### 2026-03-31: バージョン1.9.5.8_b3（ベータ）
+### 2026-03-31: バージョン1.9.5.8_b4（ベータ）
 - **b1: 3プログラム統一 — LoRAスキャンのPython起動時実行**:
   - endframe_ichi.py / endframe_ichi_f1.py でも scan_lora_directory をモジュールスコープに移動
   - JS自動クリック（initLoraDropdowns）を全プログラムから廃止
   - Dropdown初期choicesが起動時に設定されるようになり、ロケール非依存・競合なしに
-- **b2: F1にETA/経過時間表示を展開**:
-  - stream.output_queue.pushのプロキシ方式で全progressイベントに自動付与
-  - 既存30箇所以上のpush呼び出しを変更せずにETA情報が表示される
+- **b2: ETA/経過時間表示の展開とバックポート**:
+  - F1: stream.output_queue.pushのプロキシ方式で全progressイベントに自動付与
+  - eichi: 同方式をバックポート（10箇所のETA漏れを解消）
 - **b3: F1に「このステップで打ち切り」ボタンを展開**:
   - stop_after_stepフラグ追加、samplingコールバック内でのチェック
   - 3プログラムで操作性が統一された
+- **b4: save_app_settings_handler テーブル駆動化（MEDIUM-5）**:
+  - 24引数の位置管理を_SETTINGS_SPECテーブル1箇所管理に一本化
+  - 設定追加時は1行追加するだけで安全に拡張可能に
+- **リリースレビューで発見された7件の問題を修正**:
+  - oichi: use_rope_batchが_worker_implに未伝達（RoPEバッチ処理が無効化していた）
+  - eichi: end_processの戻り値数がoutputs数と不一致、end_after_step_processの重複定義
+  - F1: stop_after_stepのglobal宣言漏れ、stop_after_button/stop_step_buttonの生成中有効化
 - 開発メモ（development.md）を更新: oichi/eichi/F1の機能展開マトリクスを追加
 
 ### 2026-03-31: バージョン1.9.5.7
@@ -366,18 +373,12 @@
 
 ## English
 
-### 2026-03-31: Version 1.9.5.8_b3 (Beta)
-- **b1: 3-program unification — LoRA scan at Python startup**:
-  - Moved scan_lora_directory to module scope in endframe_ichi.py / endframe_ichi_f1.py
-  - Removed JS auto-click (initLoraDropdowns) from all programs
-  - Dropdown choices now set at startup — locale-independent, no race conditions
-- **b2: ETA/elapsed time display ported to F1**:
-  - Proxy on stream.output_queue.push auto-appends ETA to all progress events
-  - Zero changes to existing 30+ push call sites
-- **b3: "Stop after step" button ported to F1**:
-  - stop_after_step flag + sampling callback check + UI button
-  - All 3 programs now have unified stop controls
-- Updated development memo with oichi/eichi/F1 feature parity matrix
+### 2026-03-31: Version 1.9.5.8_b4 (Beta)
+- **b1: 3-program unification — LoRA scan at Python startup**
+- **b2: ETA/elapsed time — ported to F1, backported proxy to eichi (fixed 10 missing ETA sites)**
+- **b3: "Stop after step" button ported to F1 — all 3 programs unified**
+- **b4: Table-driven save/reset settings (MEDIUM-5)**: replaced 24-positional-arg handler with _SETTINGS_SPEC
+- **Release review fixes (7 issues)**: oichi use_rope_batch forwarding, eichi end_process return count, F1 stop_after_step global declaration, button enable during generation
 
 ### 2026-03-31: Version 1.9.5.7
 - **Fixed 7 regressions introduced in v1.9.5.5**:
@@ -728,11 +729,9 @@
 
 ## 简体中文
 
-### 2026-03-31: 版本1.9.5.8_b3（测试版）
-- **b1: 3程序统一——启动时Python端执行LoRA扫描**：移除JS自动点击，Dropdown在启动时直接初始化
-- **b2: F1新增ETA/经过时间显示**：通过代理模式自动为所有进度事件添加时间信息
-- **b3: F1新增"此步骤后停止"按钮**：3个程序的停止控制现已统一
-- 更新开发备忘录：添加oichi/eichi/F1功能对照矩阵
+### 2026-03-31: 版本1.9.5.8_b4（测试版）
+- **b1**: 3程序统一——LoRA扫描Python化 / **b2**: ETA代理回移至eichi / **b3**: F1步骤停止按钮 / **b4**: 设置保存24参数表驱动化（MEDIUM-5）
+- 发布审查修复7个问题：use_rope_batch传递、end_process返回值、stop_after_step全局声明等
 
 ### 2026-03-31: 版本1.9.5.7
 - **修复v1.9.5.5引入的7个回归问题**：
@@ -1049,11 +1048,9 @@
 
 ## Русский
 
-### 2026-03-31: Версия 1.9.5.8_b3 (Бета)
-- **b1: Унификация 3 программ — сканирование LoRA при запуске Python**: удалён JS автоклик, Dropdown инициализируется при запуске
-- **b2: Отображение ETA/времени в F1**: прокси-метод автоматически добавляет время ко всем событиям прогресса
-- **b3: Кнопка «Остановить после шага» в F1**: управление остановкой унифицировано во всех 3 программах
-- Обновлена записка разработки: добавлена матрица функций oichi/eichi/F1
+### 2026-03-31: Версия 1.9.5.8_b4 (Бета)
+- **b1**: Унификация LoRA-сканирования / **b2**: ETA-прокси бэкпортирован в eichi / **b3**: Кнопка остановки шага в F1 / **b4**: Табличное управление настройками (MEDIUM-5)
+- Исправлено 7 проблем из ревью: use_rope_batch, end_process, stop_after_step и др.
 
 ### 2026-03-31: Версия 1.9.5.7
 - **Исправлено 7 регрессий, введённых в v1.9.5.5**:
