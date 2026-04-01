@@ -4550,6 +4550,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                 '',
                 gr.update(interactive=True),
                 gr.update(interactive=False, value=translate("End Generation")),
+                gr.update(interactive=False),
                 gr.update()
             )
             break
@@ -4652,6 +4653,7 @@ def process(input_image, prompt, n_prompt, seed, total_second_length, latent_win
                    '',
                    gr.update(interactive=True),
                    gr.update(interactive=False, value=translate("End Generation")),
+                   gr.update(interactive=False),
                    gr.update())
             break
 
